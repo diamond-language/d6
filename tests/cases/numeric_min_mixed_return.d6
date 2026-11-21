@@ -1,0 +1,3 @@
+# One Float argument keeps min's result `Int | Float`, so `-> Int` rejects it.
+def smaller(a: Int, b: Float) -> Int = min(a, b)
+puts(smaller(1, 2.0))

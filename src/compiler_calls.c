@@ -1553,6 +1553,39 @@ static bool gaps_are_defaulted(const DiamondFunction *function,const bool *slot_
     return true;
 }
 
+/* min, max and abs are declared over `Int | Float`, but each returns one of
+ * its arguments (abs negates an Int to an Int), so their result follows the
+ * arguments, as `+`'s does: Int when every argument is known to be an Int,
+ * Float when every one is a Float, and unknown when any argument is, so a
+ * declared return checks it at run time. Only a known mix keeps the declared
+ * `Int | Float`. A program cannot define its own top-level function by these
+ * names. */
+static void narrow_numeric_result(Compiler *compiler,uint16_t destination,
+        const DiamondFunction *function,const uint16_t *arguments,size_t count) {
+    if(function->owner_class!=DIAMOND_OWNER_NONE||count==0)return;
+    const bool numeric=strcmp(function->name,"min")==0||
+        strcmp(function->name,"max")==0||strcmp(function->name,"abs")==0;
+    if(!numeric)return;
+    bool all_int=true;
+    bool all_float=true;
+    for(size_t index=0;index<count;index++) {
+        const uint16_t known=compiler->known_types[arguments[index]];
+        if(known==TYPE_UNKNOWN) {
+            compiler->known_types[destination]=TYPE_UNKNOWN;
+            compiler->known_type_sets[destination]=-1;
+            return;
+        }
+        if(known!=DIAMOND_TYPE_INT)all_int=false;
+        if(known!=DIAMOND_TYPE_FLOAT)all_float=false;
+    }
+    if(all_int)
+        publish_known_type_set(compiler,destination,
+            plain_type_set_index(compiler,DIAMOND_TYPE_INT));
+    if(all_float)
+        publish_known_type_set(compiler,destination,
+            plain_type_set_index(compiler,DIAMOND_TYPE_FLOAT));
+}
+
 uint16_t parse_call(Compiler *compiler, DiamondSpan name) {
     const int callable_local=find_local(compiler,name);
     if(callable_local>=0&&compiler->current.kind==DIAMOND_TOKEN_LEFT_PAREN)
@@ -1755,6 +1788,7 @@ uint16_t parse_call(Compiler *compiler, DiamondSpan name) {
     }
     publish_call_return_type(compiler,destination,function,
         resolved_arguments,resolved_count);
+    narrow_numeric_result(compiler,destination,function,slot_registers,argument_count);
     return destination;
 }
 

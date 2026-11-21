@@ -98,6 +98,17 @@ count=$((count + 1))
 [[ "$response" == *'"diagnostics":[]'* ]]
 count=$((count + 1))
 
+# --- a compile warning is published with severity 2 ---
+
+send '{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///broken.d6"},"contentChanges":[{"text":"list = [1]\nlist.concat([2])\nputs(list)"}]}}'
+response="$(read_message)"
+[[ "$response" == *'"severity":2'* ]]
+count=$((count + 1))
+[[ "$response" == *'"message":"concat() returns a new Array'* ]]
+count=$((count + 1))
+[[ "$response" == *'"start":{"line":1,"character":0}'* ]]
+count=$((count + 1))
+
 # --- didClose also publishes an empty diagnostics array ---
 
 send '{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///reopen.d6","text":"def f(\n"}}}'

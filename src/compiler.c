@@ -40,6 +40,24 @@ void fail(Compiler *compiler, DiamondSpan span, const char *message) {
     }
 }
 
+/* Records a warning on the program. The discovery pass's code is thrown away,
+ * so it records none, and an editor compile's repeated passes record each
+ * warning once. */
+void warn_at(Compiler *compiler, DiamondSpan span, const char *message) {
+    if (compiler->discovery_pass) return;
+    DiamondProgram *program = compiler->program;
+    const size_t kept = program->warning_count < DIAMOND_MAX_WARNINGS
+        ? program->warning_count : DIAMOND_MAX_WARNINGS;
+    for (size_t index = 0; index < kept; index++)
+        if (program->warnings[index].span.start == span.start) return;
+    if (program->warning_count < DIAMOND_MAX_WARNINGS) {
+        DiamondDiagnostic *warning = &program->warnings[program->warning_count];
+        warning->span = span;
+        snprintf(warning->message, sizeof warning->message, "%s", message);
+    }
+    program->warning_count++;
+}
+
 const char *closed_type_name(const Compiler *compiler,uint16_t id) {
     if(id==DIAMOND_TYPE_NIL)return "Nil";
     if(id>=DIAMOND_TYPE_CLASS_BASE&&id<DIAMOND_TYPE_INTERFACE_BASE) {
@@ -3367,22 +3385,32 @@ static bool expression_finishes_block(const Compiler *compiler) {
 /* One assignment or expression statement. has_postfix: an if/unless modifier follows it, which
  * stops the block's return-type expectation from applying to the statement. */
 uint16_t compile_expression_statement(Compiler *compiler,bool has_postfix) {
+    /* statement_is_assignment is set after each branch returns: a block inside the
+     * expression compiles statements of its own, which set it too. */
+    uint16_t result;
+    bool assignment=true;
     if(index_assignment_ahead(compiler))
-        return compile_index_assignment(compiler);
-    if(index_compound_assignment_ahead(compiler))
-        return compile_index_compound_assignment(compiler);
-    if(multi_assignment_ahead(compiler))
-        return compile_multi_assignment(compiler);
-    if(compound_assignment_ahead(compiler))
-        return compile_compound_assignment(compiler);
-    if(assignment_ahead(compiler))
-        return compile_assignment(compiler);
-    if(!has_postfix&&
-       compiler->function->return_type_set!=DIAMOND_NO_TYPE_SET&&
-       expression_finishes_block(compiler))
-        return parse_with_expected_set(compiler,
-            compiler->function->return_type_set);
-    return parse_expression(compiler);
+        result=compile_index_assignment(compiler);
+    else if(index_compound_assignment_ahead(compiler))
+        result=compile_index_compound_assignment(compiler);
+    else if(multi_assignment_ahead(compiler))
+        result=compile_multi_assignment(compiler);
+    else if(compound_assignment_ahead(compiler))
+        result=compile_compound_assignment(compiler);
+    else if(assignment_ahead(compiler))
+        result=compile_assignment(compiler);
+    else {
+        assignment=false;
+        if(!has_postfix&&
+           compiler->function->return_type_set!=DIAMOND_NO_TYPE_SET&&
+           expression_finishes_block(compiler))
+            result=parse_with_expected_set(compiler,
+                compiler->function->return_type_set);
+        else
+            result=parse_expression(compiler);
+    }
+    compiler->statement_is_assignment=assignment;
+    return result;
 }
 
 /* Can the statement starting at the current token take a `while`/`until` modifier? Only a plain
@@ -3401,6 +3429,27 @@ static bool statement_takes_loop_modifier(const Compiler *compiler) {
     default:
         return true;
     }
+}
+
+/* Warns about `list.concat(more)` or `list.sort()` on a line of its own, followed
+ * by more code: the new Array is thrown away and `list` is unchanged. A warning,
+ * not an error, so programs that compiled on earlier 1.x releases still do. */
+static void report_discarded_copy(Compiler *compiler,DiamondSpan statement) {
+    const DiamondStringConstant called=
+        compiler->function->strings[compiler->copying_call.method];
+    const char *start=called.chars;
+    const int length=(int)called.length;
+    char message[320];
+    if(length==6&&memcmp(start,"concat",6)==0)
+        snprintf(message,sizeof message,
+            "concat() returns a new Array and leaves the receiver unchanged, so this "
+            "line does nothing: write `list += more`, or push() each item");
+    else
+        snprintf(message,sizeof message,
+            "%.*s() returns a new Array and leaves the receiver unchanged, so this "
+            "line does nothing: assign the result, as in `list = list.%.*s()`",
+            length,start,length,start);
+    warn_at(compiler,statement,message);
 }
 
 uint16_t compile_sequence(Compiler *compiler) {
@@ -3451,6 +3500,9 @@ uint16_t compile_sequence(Compiler *compiler) {
            statement_may_capture(compiler,statement_capture_mask))
             mark_locals_captured_in(compiler,statement_capture_mask);
         bool statement_is_raise = false;
+        /* The statement is only a concat/sort/... call whose new Array goes unused. */
+        bool discarded_copy = false;
+        const DiamondSpan statement_start = compiler->current.span;
         /* A statement that never falls through to the next one. With a
          * postfix condition (`return x if y == nil`), everything after it
          * runs only when the condition didn't hold -- see the narrowing
@@ -3563,7 +3615,17 @@ uint16_t compile_sequence(Compiler *compiler) {
                    compiler->current.kind == DIAMOND_TOKEN_REDO) {
             result=compile_loop_control(compiler);
         } else {
+            compiler->copying_call.function=nullptr;
             result=compile_expression_statement(compiler,has_postfix);
+            /* Inside begin/rescue the call may be there for the error it raises
+             * (`[1, "a"].sort()` to test that mixed types raise). A def's own
+             * rescue is known only after the discovery pass, so that pass skips this. */
+            discarded_copy=!compiler->discovery_pass&&
+                compiler->begin_depth==0&&
+                !compiler->statement_is_assignment&&
+                compiler->copying_call.function==compiler->function&&
+                compiler->copying_call.code_end==compiler->function->code_count&&
+                compiler->copying_call.reg==result;
         }
         if (has_postfix) {
             if (compiler->current.kind != postfix) {
@@ -3613,6 +3675,8 @@ uint16_t compile_sequence(Compiler *compiler) {
                  "postfix modifiers cannot follow declarations");
         } else if (compiler->current.kind == DIAMOND_TOKEN_NEWLINE) {
             skip_newlines(compiler);
+            if(discarded_copy&&!at_block_end(compiler))
+                report_discarded_copy(compiler,statement_start);
         } else if (!at_block_end(compiler)) {
             fail(compiler, compiler->current.span, "expected newline after expression");
         }

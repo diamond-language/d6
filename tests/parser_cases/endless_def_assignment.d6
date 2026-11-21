@@ -1,0 +1,17 @@
+# An endless def's body can be an assignment: it stores the value and returns it.
+class Gauge
+  attr_reader level: Int
+  attr_reader marks: Array[Int]
+
+  def initialize() = @level = 0
+  def raise_by(amount: Int) -> Int = @level += amount
+  def mark(slot: Int, value: Int) = @marks[slot] = value
+  def reset_marks() = @marks = [0, 0]
+end
+
+gauge = Gauge.new()
+gauge.reset_marks()
+returned = gauge.raise_by(3)
+gauge.raise_by(4)
+gauge.mark(1, 9)
+puts([gauge.level(), returned, gauge.marks()])

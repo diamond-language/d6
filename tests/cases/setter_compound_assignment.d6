@@ -1,0 +1,32 @@
+# `recv.attr op= value` reads through the getter and writes through the setter.
+# The receiver is evaluated once, and the expression's value is the new value.
+class Counter
+  attr_accessor count: Int
+  attr_accessor label: String | Nil
+  attr_accessor ok: Bool
+
+  def initialize()
+    @count = 0
+    @label = nil
+    @ok = true
+  end
+end
+
+def fetch(counter: Counter, log: Array) -> Counter
+  log.push("fetched")
+  counter
+end
+
+counter = Counter.new()
+log = []
+counter.count += 5
+counter.count -= 1
+counter.count *= 3
+counter.count /= 2
+counter.count %= 4
+added = (fetch(counter, log).count += 10)
+counter.label ||= "first"
+counter.label ||= "second"
+counter.ok &&= false
+counter.ok &&= true
+[counter.count(), added, log.length(), counter.label(), counter.ok()]

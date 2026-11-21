@@ -1,0 +1,10 @@
+# min, max and abs of Ints are Ints, and of Floats, Floats, so they satisfy
+# an `-> Int` or `-> Float` return. Mixed arguments stay `Int | Float`.
+def smaller(a: Int, b: Int) -> Int = min(a, b)
+def larger(a: Float, b: Float) -> Float = max(a, b)
+def magnitude(a: Int) -> Int = abs(a)
+def mixed(a: Int, b: Float) -> Int | Float = min(a, b)
+# An untyped argument makes the result unknown, checked at the return as `+` is.
+def loose(a, b) -> Int = max(a, b)
+
+[smaller(3, 2), larger(1.5, 2.5), magnitude(-4), mixed(1, 0.5), loose(1, 7)]

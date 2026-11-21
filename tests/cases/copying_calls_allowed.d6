@@ -1,0 +1,24 @@
+# Calls to concat/sort/... that are not rejected: the result is used (the last
+# statement's value, an assignment), or the line may be there for the error it
+# raises (inside begin/rescue).
+def joined(list: Array) -> Array
+  list.concat([9])
+end
+
+def sorted_or_raised(list: Array) -> String
+  list.sort()
+  "sorted"
+rescue error: StandardError
+  "raised"
+end
+
+list = [3, 1]
+list = list.sort()
+kept = [1].concat([2])
+caught = "no"
+begin
+  [1, "a"].sort()
+rescue error: StandardError
+  caught = "yes"
+end
+[joined(list), kept, sorted_or_raised([1, "a"]), caught]

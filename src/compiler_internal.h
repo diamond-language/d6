@@ -440,6 +440,20 @@ typedef struct Compiler {
      * checked against. Not itself return-type-check logic, just a signal
      * of whether that check applies at all this time. */
     bool sequence_diverges;
+    /* The last call to an Array method that returns a new Array and leaves the
+     * receiver alone (concat, sort, ...): where its code ended, the register it
+     * wrote, its name (an index into the function's strings), and the function. compile_sequence rejects a
+     * statement that is only this call when another statement follows, since
+     * that statement does nothing. */
+    struct {
+        const DiamondFunction *function;
+        size_t code_end;
+        uint16_t reg;
+        uint16_t method;
+    } copying_call;
+    /* Set by compile_expression_statement: whether the statement it just compiled was an
+     * assignment of some kind rather than a plain expression. */
+    bool statement_is_assignment;
     /* True only during diamond_compile's first, throwaway pass over the
      * source (see diamond_compile's own comment) -- lets a
      * forward reference to a not-yet-declared class/module/interface
@@ -688,6 +702,7 @@ typedef struct DestructureNode {
 
 
 DIAMOND_INTERNAL void fail(Compiler *compiler, DiamondSpan span, const char *message);
+DIAMOND_INTERNAL void warn_at(Compiler *compiler, DiamondSpan span, const char *message);
 DIAMOND_INTERNAL const char *closed_type_name(const Compiler *compiler,uint16_t id);
 DIAMOND_INTERNAL void advance_token(Compiler *compiler);
 DIAMOND_INTERNAL void skip_newlines(Compiler *compiler);

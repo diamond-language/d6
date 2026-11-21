@@ -77,6 +77,14 @@ int posix_spawn_file_actions_addopen(posix_spawn_file_actions_t *actions, int fd
                                      int flags, mode_t mode) {
     (void)actions; (void)fd; (void)path; (void)flags; (void)mode; return 0;
 }
+int posix_spawnattr_init(posix_spawnattr_t *attributes) { (void)attributes; return 0; }
+int posix_spawnattr_destroy(posix_spawnattr_t *attributes) { (void)attributes; return 0; }
+int posix_spawnattr_setflags(posix_spawnattr_t *attributes, short flags) {
+    (void)attributes; (void)flags; return 0;
+}
+int posix_spawnattr_setpgroup(posix_spawnattr_t *attributes, pid_t group) {
+    (void)attributes; (void)group; return 0;
+}
 
 int sigemptyset(sigset_t *set) { (void)set; return 0; }
 int sigaction(int signal_number, const struct sigaction *action, struct sigaction *previous) {

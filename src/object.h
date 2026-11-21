@@ -662,6 +662,9 @@ typedef struct DiamondProcessHandle {
     DiamondValue stderr_stream;
     /* The writable end of the child's stdin; nil unless spawned with {"stdin": true}. */
     DiamondValue stdin_stream;
+    /* Spawned with {"process_group": true}: the child leads its own process group, and
+     * terminate/kill signal the whole group (pid -pid), grandchildren included. */
+    bool own_group;
     bool reaped;
     int64_t exit_code;
 } DiamondProcessHandle;

@@ -502,7 +502,8 @@ count` would treat it.
 The target can be a plain local, an `@ivar`, or a `@@cvar` — same three
 targets plain `=` and multiple assignment accept. Indexed targets
 (`arr[i] += 1`, `hash[k] ||= default`) are also supported — see "Indexed
-compound assignment" under Ranges below.
+compound assignment" under Ranges below. So is an attribute,
+`counter.count += 1`; see "Writer-call assignment sugar" below.
 
 ## Writer-call assignment sugar
 
@@ -531,6 +532,12 @@ be any expression, not just a local — `Author.new().name = "Ada"` and
 ordinary expression, parsed exactly like plain assignment's own
 right-hand side (so `attr = [1, 2, 3]` is the array literal, not an
 attempt at generic arguments).
+
+Compound assignment works through a reader and writer too: `counter.count += 1`
+calls `counter.count()`, applies `+`, and passes the result to `counter.count=`.
+The receiver is evaluated once, and the expression's value is the new value.
+`label ||= "x"` and `ok &&= y` call the writer only when they evaluate the
+right-hand side.
 
 ## Multiple assignment
 

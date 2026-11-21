@@ -5,6 +5,16 @@
 #include "loader.h"
 #include "vm.h"
 
+typedef struct DiamondDiagnostic {
+    DiamondSpan span;
+    /* Stored inline so formatted diagnostics outlive the stack-local Compiler
+     * that produced them and remain valid when this struct is copied. */
+    char message[1024];
+} DiamondDiagnostic;
+
+/* How many compile warnings a program keeps; later ones are counted, not kept. */
+#define DIAMOND_MAX_WARNINGS 4
+
 typedef struct DiamondProgram {
     /* REPL-only compatibility; ordinary source still rejects duplicates. */
     bool allow_top_level_redefinition;
@@ -60,14 +70,13 @@ typedef struct DiamondProgram {
      * turns compute_scalar_field_facts off for the whole program. */
     bool uses_dynamic_methods;
     bool writes_fields_by_name;
+    /* Code that compiles and runs but almost certainly does not do what its
+     * writer meant, such as `list.concat(more)` on a line of its own. Kept
+     * inline so they survive the copies incremental compiles make; run_source
+     * prints them after a successful compile, the LSP shows them as warnings. */
+    DiamondDiagnostic warnings[DIAMOND_MAX_WARNINGS];
+    size_t warning_count;
 } DiamondProgram;
-
-typedef struct DiamondDiagnostic {
-    DiamondSpan span;
-    /* Stored inline so formatted diagnostics outlive the stack-local Compiler
-     * that produced them and remain valid when this struct is copied. */
-    char message[1024];
-} DiamondDiagnostic;
 
 /* Grows `program`'s namespace constant tables to hold `count` entries;
  * new entries are zeroed. False when `count` is over the limit or memory

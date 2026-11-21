@@ -76,7 +76,7 @@ char *diagnostics_path_to_uri(const char *path) {
 }
 
 /* `text` is the source the line/column index into (nullptr leaves the byte columns as they are); LSP counts UTF-16 code units. */
-static JsonValue *build_diagnostic(const char *text,size_t text_length,size_t line,size_t column,
+static JsonValue *build_diagnostic(int severity,const char *text,size_t text_length,size_t line,size_t column,
                                    size_t highlight_length,const char *message) {
     JsonValue *entry=json_object();
     if(entry==nullptr)return nullptr;
@@ -109,7 +109,7 @@ static JsonValue *build_diagnostic(const char *text,size_t text_length,size_t li
     json_object_set(range,"start",start);
     json_object_set(range,"end",end);
     json_object_set(entry,"range",range);
-    json_object_set(entry,"severity",json_number(1));
+    json_object_set(entry,"severity",json_number(severity));
     json_object_set(entry,"source",json_string_z("d6"));
     json_object_set(entry,"message",json_string_z(message));
     return entry;
@@ -128,7 +128,7 @@ static JsonValue *build_dependency_publish(const DocumentTable *documents,
     /* The position is in the dependency file, so its columns are counted in that file's text. */
     char *dependency_text=read_file_preferring_open(documents,resolved->path);
     const size_t dependency_length=dependency_text!=nullptr?strlen(dependency_text):0;
-    JsonValue *entry=build_diagnostic(dependency_text,dependency_length,resolved->line,resolved->column,
+    JsonValue *entry=build_diagnostic(1,dependency_text,dependency_length,resolved->line,resolved->column,
         highlight_length,message);
     free(dependency_text);
     JsonValue *dependency_diagnostics=json_array();
@@ -206,12 +206,39 @@ static bool compile_scratch(DiamondProgram *scratch,const char *combined,
 
 /* Appends one diagnostic to `diagnostics`; false on allocation failure,
  * leaving the array as it was. */
-static bool push_diagnostic(JsonValue *diagnostics,const char *text,size_t length,
+static bool push_entry(int severity,JsonValue *diagnostics,const char *text,size_t length,
         size_t line,size_t column,size_t span_length,const char *message) {
-    JsonValue *entry=build_diagnostic(text,length,line,column,span_length,message);
+    JsonValue *entry=build_diagnostic(severity,text,length,line,column,span_length,message);
     if(entry==nullptr||!json_array_push(diagnostics,entry)) {
         json_free(entry);
         return false;
+    }
+    return true;
+}
+
+static bool push_diagnostic(JsonValue *diagnostics,const char *text,size_t length,
+        size_t line,size_t column,size_t span_length,const char *message) {
+    return push_entry(1,diagnostics,text,length,line,column,span_length,message);
+}
+
+/* The compile warnings that belong to `path` (or to the document itself when
+ * `bundle` is nullptr, an unsaved buffer), as severity 2. False on allocation failure. */
+static bool push_warnings(JsonValue *diagnostics,const DiamondProgram *program,
+        const char *path,const char *combined,const DiamondSourceBundle *bundle,
+        size_t user_offset,const char *text,size_t length) {
+    const size_t kept=program->warning_count<DIAMOND_MAX_WARNINGS?
+        program->warning_count:DIAMOND_MAX_WARNINGS;
+    for(size_t index=0;index<kept;index++) {
+        const DiamondDiagnostic warning=program->warnings[index];
+        size_t line=warning.span.line,column=warning.span.column;
+        if(bundle!=nullptr) {
+            const DiamondResolvedLocation resolved=diamond_resolve_diagnostic_location(
+                path,combined,warning,bundle,user_offset);
+            if(strcmp(resolved.path,path)!=0)continue;
+            line=resolved.line;column=resolved.column;
+        }
+        if(!push_entry(2,diagnostics,text,length,line,column,warning.span.length,warning.message))
+            return false;
     }
     return true;
 }
@@ -288,8 +315,12 @@ static bool unsaved_diagnostics(DiamondProgram *scratch,JsonValue *diagnostics,
     if(combined==nullptr)return false;
     DiamondDiagnostic diagnostic;
     const bool ok=compile_scratch(scratch,combined,&diagnostic);
+    if(ok) {
+        const bool pushed=push_warnings(diagnostics,scratch,"",combined,nullptr,0,text,length);
+        free(combined);
+        return pushed;
+    }
     free(combined);
-    if(ok)return true;
     return push_diagnostic(diagnostics,text,length,diagnostic.span.line,diagnostic.span.column,
         diagnostic.span.length,diagnostic.message);
 }
@@ -354,6 +385,10 @@ static bool file_diagnostics(DiamondProgram *scratch,JsonValue *diagnostics,
             *out_dependency_publish=build_dependency_publish(documents,&resolved,
                 diagnostic.span.length,diagnostic.message);
         }
+    } else if(!push_warnings(diagnostics,scratch,path,combined,&bundle,user_offset,text,length)) {
+        free(combined);
+        diamond_source_bundle_free(&bundle);
+        return false;
     }
     if(out_dependency_paths!=nullptr)
         build_dependency_paths(&bundle,path,out_dependency_paths);

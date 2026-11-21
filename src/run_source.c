@@ -72,20 +72,41 @@ static double diamond_monotonic_seconds(void) {
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
 
-static void print_diagnostic(const char *name, const char *source,
-                             DiamondDiagnostic diagnostic,
-                             const DiamondSourceBundle *bundle,
-                             size_t user_offset) {
+static void print_labeled_diagnostic(const char *name, const char *source,
+                                     DiamondDiagnostic diagnostic,
+                                     const DiamondSourceBundle *bundle,
+                                     size_t user_offset, const char *label) {
     const DiamondResolvedLocation resolved=diamond_resolve_diagnostic_location(
         name,source,diagnostic,bundle,user_offset);
-    fprintf(stderr, "%s:%zu:%zu: error: %s\n", resolved.path, resolved.line,
-            resolved.column, diagnostic.message);
+    fprintf(stderr, "%s:%zu:%zu: %s: %s\n", resolved.path, resolved.line,
+            resolved.column, label, diagnostic.message);
     fprintf(stderr, "%.*s\n",
             (int)(resolved.line_end - resolved.line_start), source + resolved.line_start);
     for (size_t column = 1; column < resolved.column; column++) {
         fputc(' ', stderr);
     }
     fputs("^\n", stderr);
+}
+
+static void print_diagnostic(const char *name, const char *source,
+                             DiamondDiagnostic diagnostic,
+                             const DiamondSourceBundle *bundle,
+                             size_t user_offset) {
+    print_labeled_diagnostic(name,source,diagnostic,bundle,user_offset,"error");
+}
+
+/* The warnings a successful compile recorded, in the error format, plus a count
+ * of any past the ones the program keeps. */
+static void print_warnings(const char *name, const char *source,
+                           const DiamondProgram *program,
+                           const DiamondSourceBundle *bundle, size_t user_offset) {
+    const size_t kept = program->warning_count < DIAMOND_MAX_WARNINGS
+        ? program->warning_count : DIAMOND_MAX_WARNINGS;
+    for (size_t index = 0; index < kept; index++)
+        print_labeled_diagnostic(name,source,program->warnings[index],bundle,user_offset,
+            "warning");
+    if (program->warning_count > kept)
+        fprintf(stderr, "%s: %zu more warning(s)\n", name, program->warning_count - kept);
 }
 
 /* Everything shared by diamond_run_source_with_program and
@@ -291,6 +312,7 @@ static int run_source_from_bundle_program(const char *name, DiamondSourceBundle 
         diamond_source_bundle_free(bundle);
         return 65;
     }
+    print_warnings(name,combined,program,bundle,prelude_length+reset_length);
     const double compiled_time=trace_startup ? diamond_monotonic_seconds() : 0;
     if (cache_path != nullptr) {
         /* Compiled live, but its prelude prefix is the embedded template's
@@ -344,6 +366,7 @@ static int run_source_from_bundle_template(const char *name, DiamondSourceBundle
         diamond_source_bundle_free(bundle);
         return 65;
     }
+    print_warnings(name,bundle->source,program,bundle,0);
     const double compiled_time=trace_startup ? diamond_monotonic_seconds() : 0;
     if (cache_path != nullptr) {
         diamond_program_write_cache_file(cache_path, source_hash, program, template);
@@ -566,8 +589,10 @@ static bool compile_bundle_for_run(const char *name, const DiamondSourceBundle *
     DiamondDiagnostic diagnostic;
     if(template!=nullptr) {
         diamond_program_free(program);
-        if(diamond_compile_incremental(bundle->source,program,template,&diagnostic))
+        if(diamond_compile_incremental(bundle->source,program,template,&diagnostic)) {
+            print_warnings(name,bundle->source,program,bundle,0);
             return true;
+        }
         if(!mentions_json) {
             print_diagnostic(name,bundle->source,diagnostic,bundle,0);
             return false;
@@ -586,7 +611,8 @@ static bool compile_bundle_for_run(const char *name, const DiamondSourceBundle *
     memcpy(combined+offset,bundle->source,source_length+1);
     diamond_program_free(program);
     const bool ok=diamond_compile(combined,program,&diagnostic);
-    if(!ok)print_diagnostic(name,combined,diagnostic,bundle,prelude_length+reset_length);
+    if(ok)print_warnings(name,combined,program,bundle,prelude_length+reset_length);
+    else print_diagnostic(name,combined,diagnostic,bundle,prelude_length+reset_length);
     free(combined);
     return ok;
 }

@@ -1453,9 +1453,17 @@ static bool compile_definition_body(Compiler *compiler,int return_type,uint16_t 
         /* `raise` is a statement, not an expression, but `def f() = raise E` is the natural
          * way to write a method that only raises. */
         const bool raises=compiler->current.kind==DIAMOND_TOKEN_RAISE;
+        /* An assignment is a statement too: `def reset() = @count = 0` sets the
+         * field and returns the value, as the same assignment in a body would. */
+        const bool assigns=assignment_ahead(compiler)||
+            compound_assignment_ahead(compiler)||
+            index_assignment_ahead(compiler)||
+            index_compound_assignment_ahead(compiler);
         if(raises) {
             *body_result=compile_raise(compiler);
             *body_diverges=!has_postfix;
+        } else if(assigns) {
+            *body_result=compile_expression_statement(compiler,has_postfix);
         } else {
             *body_result=return_type>=0?
                 parse_with_expected_set(compiler,(uint16_t)return_type):

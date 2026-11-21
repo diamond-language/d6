@@ -33,6 +33,27 @@
  * `delegate` always calls this with writer_name=false, type_arguments=
  * nullptr, type_argument_count=0, since neither writer-call syntax nor
  * generics apply to its scope. */
+/* Array methods that return a new Array and leave the receiver as it was, with
+ * no block that could do something else. Ruby's concat appends in place, and
+ * its sort! and uniq! change the receiver, so `list.concat(more)` on a line of
+ * its own is an easy slip that silently does nothing. Recorded for
+ * compile_sequence, which rejects such a call when its result goes unused. */
+static void record_copying_call(Compiler *compiler,uint16_t dest,uint16_t method,
+        uint16_t receiver_type) {
+    if(receiver_type!=DIAMOND_TYPE_ARRAY)return;
+    static const char *const names[]={"concat","sort","reverse","uniq","compact","take","drop"};
+    const DiamondStringConstant called=compiler->function->strings[method];
+    for(size_t index=0;index<sizeof names/sizeof names[0];index++) {
+        if(strlen(names[index])!=called.length)continue;
+        if(memcmp(names[index],called.chars,called.length)!=0)continue;
+        compiler->copying_call.function=compiler->function;
+        compiler->copying_call.code_end=compiler->function->code_count;
+        compiler->copying_call.reg=dest;
+        compiler->copying_call.method=method;
+        return;
+    }
+}
+
 static uint16_t emit_invoke_with_name(Compiler *compiler, uint16_t receiver,
         uint16_t method, const uint16_t *type_arguments, size_t type_argument_count,
         const uint16_t *args, size_t count);
@@ -1032,6 +1053,7 @@ static uint16_t emit_invoke_with_name(Compiler *compiler, uint16_t receiver,
     emit_register(compiler,receiver);emit_register(compiler,method);emit_register(compiler,base);
     emit_byte(compiler,(uint8_t)count);
     emit_type_argument_trailer(compiler,type_arguments,type_argument_count);
+    record_copying_call(compiler,dest,method,receiver_type);
     return dest;
 }
 
@@ -2784,6 +2806,46 @@ static uint16_t parse_invoke_spread_call(Compiler *compiler,const InvokeSite *si
     return result;
 }
 
+static bool compound_assignment_operator(DiamondTokenKind kind) {
+    return kind==DIAMOND_TOKEN_PLUS_EQUAL||kind==DIAMOND_TOKEN_MINUS_EQUAL||
+           kind==DIAMOND_TOKEN_STAR_EQUAL||kind==DIAMOND_TOKEN_SLASH_EQUAL||
+           kind==DIAMOND_TOKEN_PERCENT_EQUAL||kind==DIAMOND_TOKEN_OR_OR_EQUAL||
+           kind==DIAMOND_TOKEN_AND_AND_EQUAL;
+}
+
+/* `recv.attr += value`: reads through the getter `attr()`, applies the operator,
+ * and writes back through the setter `attr=`. The receiver is evaluated once.
+ * `||=` and `&&=` call the setter only when the right-hand side is evaluated,
+ * as they do for a local. The expression's value is the new value. */
+static uint16_t compile_setter_compound_assignment(Compiler *compiler,
+        uint16_t receiver,DiamondSpan name) {
+    const DiamondTokenKind op_kind=compiler->current.kind;
+    advance_token(compiler);
+    const uint16_t current=emit_invoke_call(compiler,receiver,name,false,
+        nullptr,0,nullptr,0);
+    if(op_kind==DIAMOND_TOKEN_OR_OR_EQUAL||op_kind==DIAMOND_TOKEN_AND_AND_EQUAL) {
+        const bool is_and=op_kind==DIAMOND_TOKEN_AND_AND_EQUAL;
+        const uint16_t destination=allocate_register(compiler);
+        emit_instruction(compiler,DIAMOND_OP_MOVE,destination,current,0,2);
+        const size_t end_jump=emit_jump(compiler,
+            is_and?DIAMOND_OP_JUMP_IF_FALSE:DIAMOND_OP_JUMP_IF_TRUE,current);
+        const uint16_t right=parse_expression(compiler);
+        emit_instruction(compiler,DIAMOND_OP_MOVE,destination,right,0,2);
+        (void)emit_invoke_call(compiler,receiver,name,true,nullptr,0,&destination,1);
+        patch_jump(compiler,end_jump,compiler->function->code_count);
+        return destination;
+    }
+    DiamondTokenKind plain_op=DIAMOND_TOKEN_PERCENT;
+    if(op_kind==DIAMOND_TOKEN_PLUS_EQUAL)plain_op=DIAMOND_TOKEN_PLUS;
+    if(op_kind==DIAMOND_TOKEN_MINUS_EQUAL)plain_op=DIAMOND_TOKEN_MINUS;
+    if(op_kind==DIAMOND_TOKEN_STAR_EQUAL)plain_op=DIAMOND_TOKEN_STAR;
+    if(op_kind==DIAMOND_TOKEN_SLASH_EQUAL)plain_op=DIAMOND_TOKEN_SLASH;
+    const uint16_t right=parse_expression(compiler);
+    const uint16_t destination=compile_binary_op(compiler,plain_op,current,right);
+    (void)emit_invoke_call(compiler,receiver,name,true,nullptr,0,&destination,1);
+    return destination;
+}
+
 /* parse_invoke after `.name` has been consumed -- also reached from
  * parse_call for a bare `name(...)` inside a method, with self as the
  * receiver. */
@@ -2829,6 +2891,8 @@ static uint16_t parse_invoke_named_impl(Compiler *compiler, uint16_t receiver,
        name_equals(compiler,"is_a?",name,false)) {
         return parse_is_a_call(compiler,receiver);
     }
+    if(compound_assignment_operator(compiler->current.kind))
+        return compile_setter_compound_assignment(compiler,receiver,name);
     bool writer_name=false;
     if(compiler->current.kind==DIAMOND_TOKEN_EQUAL) {
         writer_name=true;advance_token(compiler);
