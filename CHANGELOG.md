@@ -40,6 +40,9 @@ record. From 1.0.0, releases follow the [1.x compatibility policy](docs/compatib
 - `Array#map_with_index() do |x, i| ... end`, for what Ruby writes `each_with_index.map`.
 - An assignment in parentheses is an expression: `while (line = file.gets()) != nil`. Without the
   parentheses, `if x = value` is an error that says to add them or write `==`.
+- A warning when a method reference (`box.label` without parentheses) is compared with `nil`, used
+  as a condition or interpolated: a reference is never `nil`, always true and prints as
+  `#<Closure>`, so each is almost certainly a missing `()`.
 
 ### Fixed
 

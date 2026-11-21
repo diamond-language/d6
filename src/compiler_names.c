@@ -2367,6 +2367,23 @@ static bool bind_reference_self_arguments(Compiler *compiler,const DiamondFuncti
     return true;
 }
 
+/* Warns when `value` is the method reference compiled just now
+ * (bound_reference, src/compiler_internal.h) and it is used where only a
+ * call makes sense. A warning, so programs that compiled on earlier 1.x
+ * releases still do. */
+void warn_method_reference_use(Compiler *compiler,uint16_t value,const char *consequence) {
+    if(compiler->bound_reference.function!=compiler->function||
+       compiler->bound_reference.code_end!=compiler->function->code_count||
+       compiler->bound_reference.reg!=value)return;
+    const DiamondSpan name=compiler->bound_reference.name;
+    char message[DIAMOND_MAX_FUNCTION_NAME*2+160];
+    snprintf(message,sizeof message,
+        "'%.*s' without parentheses is a method reference, %s: to call it, write %.*s()",
+        (int)name.length,compiler->source+name.start,consequence,
+        (int)name.length,compiler->source+name.start);
+    warn_at(compiler,name,message);
+}
+
 static uint16_t parse_bound_method_reference(Compiler *compiler,uint16_t receiver,
         DiamondSpan method_name,const uint16_t *type_arguments,
         size_t type_argument_count) {
@@ -2942,8 +2959,23 @@ static uint16_t parse_invoke_named_impl(Compiler *compiler, uint16_t receiver,
             type_arguments, type_argument_count, &value, 1);
     }
     if (compiler->current.kind != DIAMOND_TOKEN_LEFT_PAREN) {
-        if(!writer_name)return parse_bound_method_reference(compiler,receiver,name,
-            type_arguments,type_argument_count);
+        if(!writer_name) {
+            const uint16_t reference=parse_bound_method_reference(compiler,receiver,name,
+                type_arguments,type_argument_count);
+            compiler->bound_reference.function=compiler->function;
+            compiler->bound_reference.code_end=compiler->function->code_count;
+            compiler->bound_reference.reg=reference;
+            compiler->bound_reference.name=name;
+            /* `obj.reader != nil`: Ruby calls the reader; here it compares a
+             * method reference, which is never nil. */
+            if(compiler->current.kind==DIAMOND_TOKEN_EQUAL_EQUAL||
+               compiler->current.kind==DIAMOND_TOKEN_BANG_EQUAL) {
+                DiamondLexer lookahead=compiler->lexer;
+                if(diamond_lexer_next(&lookahead).kind==DIAMOND_TOKEN_NIL)
+                    warn_method_reference_use(compiler,reference,"which is never nil");
+            }
+            return reference;
+        }
         fail(compiler,compiler->current.span,
             "member access requires a method call with '()'");return 0;
     }

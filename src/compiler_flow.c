@@ -181,6 +181,7 @@ static void merge_branch_new_locals(Compiler *compiler,size_t flow_local_count,
 uint16_t parse_if(Compiler *compiler,bool inverted) {
     compiler->narrowing=(Narrowing){};
     const uint16_t condition = parse_expression(compiler);
+    warn_method_reference_use(compiler,condition,"which is always true as a condition");
     const Narrowing narrowing=condition_narrowing(compiler,condition);
     compiler->narrowing=(Narrowing){};
     if (!consume_conditional_start(compiler)) return 0;
@@ -581,6 +582,7 @@ static uint16_t parse_while_core(Compiler *compiler,bool inverted,const PostfixL
         compiler->current=diamond_lexer_next(&compiler->lexer);
     }
     const uint16_t condition = parse_expression(compiler);
+    warn_method_reference_use(compiler,condition,"which is always true as a condition");
     if(postfix!=nullptr) {
         end_lexer=compiler->lexer;end_current=compiler->current;
         end_previous=compiler->previous;

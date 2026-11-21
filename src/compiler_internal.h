@@ -454,6 +454,17 @@ typedef struct Compiler {
     /* Set by compile_expression_statement: whether the statement it just compiled was an
      * assignment of some kind rather than a plain expression. */
     bool statement_is_assignment;
+    /* The last `obj.method` written without parentheses (a bound method
+     * reference, not a call): where its code ended, its register and the
+     * method name. warn_method_reference_use checks a condition or an
+     * interpolation against it, since a reference is always truthy and prints
+     * as #<Closure>, which is never what `if obj.reader` meant. */
+    struct {
+        const DiamondFunction *function;
+        size_t code_end;
+        uint16_t reg;
+        DiamondSpan name;
+    } bound_reference;
     /* Discarded-copy calls (above) that were the last statement of a block, so
      * the block's value: whether that value is used is known only once the
      * statement holding the block (an if, unless or case) has finished.
@@ -715,6 +726,8 @@ typedef struct DestructureNode {
 
 DIAMOND_INTERNAL void fail(Compiler *compiler, DiamondSpan span, const char *message);
 DIAMOND_INTERNAL void warn_at(Compiler *compiler, DiamondSpan span, const char *message);
+DIAMOND_INTERNAL void warn_method_reference_use(Compiler *compiler, uint16_t value,
+    const char *consequence);
 DIAMOND_INTERNAL const char *closed_type_name(const Compiler *compiler,uint16_t id);
 DIAMOND_INTERNAL void advance_token(Compiler *compiler);
 DIAMOND_INTERNAL void skip_newlines(Compiler *compiler);

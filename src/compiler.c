@@ -2265,6 +2265,7 @@ uint16_t parse_string(Compiler *compiler) {
         compiler->lexer=embedded;
         compiler->current=diamond_lexer_next(&compiler->lexer);
         const uint16_t value=parse_expression(compiler);
+        warn_method_reference_use(compiler,value,"which interpolates as #<Closure>");
         if(compiler->current.kind!=DIAMOND_TOKEN_RIGHT_BRACE)
             fail(compiler,compiler->current.span,"expected '}' after interpolation");
         const size_t close=compiler->current.span.start;
@@ -2362,6 +2363,7 @@ uint16_t parse_heredoc(Compiler *compiler) {
         compiler->lexer=embedded;
         compiler->current=diamond_lexer_next(&compiler->lexer);
         const uint16_t value=parse_expression(compiler);
+        warn_method_reference_use(compiler,value,"which interpolates as #<Closure>");
         if(compiler->current.kind!=DIAMOND_TOKEN_RIGHT_BRACE)
             fail(compiler,compiler->current.span,"expected '}' after interpolation");
         const size_t close=compiler->current.span.start;
@@ -3575,6 +3577,7 @@ uint16_t compile_sequence(Compiler *compiler) {
             compiler->current=diamond_lexer_next(&compiler->lexer);
             compiler->narrowing=(Narrowing){};
             const uint16_t condition = parse_expression(compiler);
+            warn_method_reference_use(compiler,condition,"which is always true as a condition");
             postfix_narrowing=condition_narrowing(compiler,condition);
             compiler->narrowing=(Narrowing){};
             condition_end=compiler->lexer;condition_end_current=compiler->current;

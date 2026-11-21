@@ -324,6 +324,12 @@ key/value callbacks expose those types to the body and editor hover.
 numeric graphs containing Float. Other element graphs remain dynamic because
 their repeated `+` dispatch may be overloaded.
 
+`object.convert` without parentheses is a bound method reference, not a call,
+where Ruby would call it. A reference is never `nil`, is always true as a
+condition, and interpolates as `#<Closure>`, so the compiler warns when one is
+compared with `nil` (`box.label != nil`), used as a condition (`if box.label`)
+or interpolated (`"#{box.label}"`): each almost certainly meant `box.label()`.
+
 A fixed-arity bound method reference such as `object.convert` retains its
 declared parameter and return contract. Explicit generic references such as
 `object.wrap[Int]` and `Factory.wrap[Int]` retain the substituted contract, so
