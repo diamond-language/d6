@@ -16,6 +16,9 @@ record. From 1.0.0, releases follow the [1.x compatibility policy](docs/compatib
   renderer the documentation site uses, which now loads it from `packages/markdown`.
 - The `mustache` cut renders Mustache templates at run time, for templates that are data (a site
   generator's layouts, editable emails) rather than code compiled ahead of time with `div`.
+- `Process.spawn(argv, {"process_group": true})` starts the child in its own process group, and
+  that handle's `terminate`/`kill` stop the whole group, so stopping a `sh -c` child no longer
+  leaves the commands it started running.
 
 ### Fixed
 

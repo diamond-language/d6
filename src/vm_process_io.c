@@ -543,6 +543,8 @@ typedef struct DiamondProcessOptions {
     const char *stdout_path;
     const char *stderr_path;
     bool stderr_to_stdout;
+    /* Process.spawn only: start the child in a new process group it leads. */
+    bool process_group;
 } DiamondProcessOptions;
 
 static void process_options_free(DiamondProcessOptions *options) {
@@ -641,6 +643,13 @@ static DiamondVmStatus process_parse_options(DiamondVm *vm,const char *owner,
                 return DIAMOND_VM_TYPE_ERROR;
             }
             out->stderr_to_stdout=value.as.boolean;
+        } else if(for_spawn&&key->length==13&&memcmp(key->chars,"process_group",13)==0) {
+            if(value.kind!=DIAMOND_VALUE_BOOL) {
+                snprintf(vm->error,sizeof vm->error,
+                    "%s option 'process_group' must be true or false",owner);
+                return DIAMOND_VM_TYPE_ERROR;
+            }
+            out->process_group=value.as.boolean;
         } else {
             snprintf(vm->error,sizeof vm->error,"unrecognized %s option '%.*s'",owner,
                 (int)key->length,key->chars);
@@ -1040,10 +1049,20 @@ static DiamondVmStatus process_spawn_with_options(DiamondVm *vm,
     posix_spawn_file_actions_addclose(&actions,stderr_pipe[0]);
     posix_spawn_file_actions_addclose(&actions,stderr_pipe[1]);
 
+    /* A new process group (pgid 0 = the child's own pid), set before exec, so the
+     * group exists by the time posix_spawnp returns. */
+    const bool new_group=options!=nullptr&&options->process_group;
+    posix_spawnattr_t attributes;
+    posix_spawnattr_init(&attributes);
+    if(new_group) {
+        posix_spawnattr_setflags(&attributes,POSIX_SPAWN_SETPGROUP);
+        posix_spawnattr_setpgroup(&attributes,0);
+    }
     pid_t pid=0;
-    const int spawn_status=posix_spawnp(&pid,command_name,&actions,nullptr,argv,
+    const int spawn_status=posix_spawnp(&pid,command_name,&actions,&attributes,argv,
         options!=nullptr&&options->envp!=nullptr?options->envp:environ);
     posix_spawn_file_actions_destroy(&actions);
+    posix_spawnattr_destroy(&attributes);
     close(stdout_pipe[1]);
     close(stderr_pipe[1]);
     if(pipe_stdin)close(stdin_pipe[0]);
@@ -1087,6 +1106,7 @@ static DiamondVmStatus process_spawn_with_options(DiamondVm *vm,
     }
 
     handle->pid=pid;
+    handle->own_group=new_group;
     /* `handle` is already rooted (assigned to the caller's dest register
      * before this helper runs -- see DIAMOND_OP_PROCESS_SPAWN), so each
      * stream field write below needs its own gc_write_barrier call, the
@@ -1227,13 +1247,28 @@ DiamondVmStatus process_handle_dispatch_helper(DiamondVm *vm,
          * still safe to signal -- POSIX guarantees a zombie's pid stays
          * reserved until reaped, so this is only a mistake, never a
          * race, past that point. */
+        const int signal_number=terminate?SIGTERM:SIGKILL;
+        /* A group handle signals the whole group. The group can outlive its leader
+         * (a shell's background job, a command it started), so this works after
+         * the child is reaped too: the kernel does not reuse a pid while a group
+         * with that id still has members. ESRCH means the group is empty, so there
+         * is nothing left to stop. (Once it is empty the id can be reused, as any
+         * pid can, so callers stop a group soon after it finishes, not much later.) */
+        if(target->own_group) {
+            if(kill(-target->pid,signal_number)!=0&&errno!=ESRCH) {
+                snprintf(vm->error,sizeof vm->error,"Process::Handle#%s: %s",
+                    terminate?"terminate":"kill",strerror(errno));
+                return DIAMOND_VM_IO_ERROR;
+            }
+            registers[dest]=DIAMOND_NIL;return DIAMOND_VM_OK;
+        }
         if(target->reaped) {
             snprintf(vm->error,sizeof vm->error,
                 "Process::Handle#%s: process has already exited",
                 terminate?"terminate":"kill");
             return DIAMOND_VM_IO_ERROR;
         }
-        if(kill(target->pid,terminate?SIGTERM:SIGKILL)!=0) {
+        if(kill(target->pid,signal_number)!=0) {
             snprintf(vm->error,sizeof vm->error,"Process::Handle#%s: %s",
                 terminate?"terminate":"kill",strerror(errno));
             return DIAMOND_VM_IO_ERROR;

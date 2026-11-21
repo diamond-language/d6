@@ -1,0 +1,37 @@
+# Process.spawn(argv, {"process_group": true}): terminate/kill reach the child's
+# own children too, which a plain handle's terminate leaves running.
+
+# Whether a process with this pid is still running.
+def alive?(pid: String) -> Bool
+  Process.run(["kill", "-0", pid]).success?()
+end
+
+# A shell that starts a background sleep, prints its pid, and waits on it.
+script = "sleep 30 & echo $!; wait"
+
+grouped = Process.spawn(["sh", "-c", script], {"process_group": true})
+grouped_child = grouped.stdout().gets()
+grouped.terminate()
+grouped.wait()
+sleep(0.1)
+grouped_child_alive = alive?(grouped_child)
+
+# The shell is reaped, but signalling its (now empty) group is still allowed.
+grouped.kill()
+
+plain = Process.spawn(["sh", "-c", script])
+plain_child = plain.stdout().gets()
+plain.terminate()
+plain.wait()
+sleep(0.1)
+plain_child_alive = alive?(plain_child)
+Process.run(["kill", plain_child])
+
+rejected = false
+begin
+  Process.spawn(["true"], {"process_group": "yes"})
+rescue e: TypeError
+  rejected = true
+end
+
+[grouped_child_alive, plain_child_alive, rejected]

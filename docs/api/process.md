@@ -45,6 +45,12 @@ plus:
   pipe.
 - `"stderr_to_stdout"`: `true` to send standard error wherever standard
   output goes.
+- `"process_group"`: `true` to start the child in a new process group it
+  leads, so `terminate` and `kill` reach the commands it starts as well. A
+  task runner or supervisor running `sh -c` wants this: otherwise stopping the
+  shell leaves its commands running. The child is then out of the terminal's
+  foreground group, so Ctrl-C reaches only this program: trap `"INT"` with
+  `Signal.trap` and call `terminate` to pass it on.
 
 ### `Process.pid() -> Int`
 
@@ -113,6 +119,9 @@ Whether the child is still running, without waiting.
 
 Sends `SIGTERM` or `SIGKILL`. Raises `IOError` once the handle has seen the
 child exit.
+On a handle spawned with `"process_group"`, they signal the whole group,
+and still work after `wait`: the child's own children may outlive it. Once
+the group is empty they do nothing.
 
 ```ruby
 child = Process.spawn(["sleep", "30"])
