@@ -1,0 +1,4 @@
+# map_with_index: the block gets each element and its index.
+labels = ["a", "b", "c"].map_with_index() do |x, i| "#{i}:#{x}" end
+widths = [3, 1].map_with_index() do |width, column| width + column end
+[labels, widths, [].map_with_index() do |x, i| x end]

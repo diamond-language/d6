@@ -1460,6 +1460,16 @@ def diamond_array_filter_map(values: Array, callback: Callable[1]) -> Array
   result
 end
 
+def diamond_array_map_with_index(values: Array, callback: Callable[2]) -> Array
+  result = []
+  index = 0
+  while index < values.length()
+    result.push(callback(values[index], index))
+    index += 1
+  end
+  result
+end
+
 # What Array#select, any?, all? and reduce call (Array#map calls array_map).
 # enumerable_* wraps the block in a closure for values.each to call; a direct
 # loop costs a fraction of that per element. Array#select and #map usually

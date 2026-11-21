@@ -449,6 +449,15 @@ The block's value for each element.
 [1, 2].map() do |x| x * 2 end   # => [2, 4]
 ```
 
+### `map_with_index() do |x, i| ... end -> Array`
+
+The block's value for each element and its index, which Ruby writes
+`each_with_index.map` or `map.with_index`.
+
+```ruby
+["a", "b"].map_with_index() do |x, i| "#{i}:#{x}" end   # => ["0:a", "1:b"]
+```
+
 ### `max() -> Value`
 
 ### `max(n) -> Array`

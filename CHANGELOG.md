@@ -36,6 +36,7 @@ record. From 1.0.0, releases follow the [1.x compatibility policy](docs/compatib
 - `File#pos` and `File#seek(offset)`. `read` and `gets` on a regular file that reached its end try
   again, so a program can follow a log as another process appends to it (they kept returning
   `nil` once the end was reached).
+- `Array#map_with_index() do |x, i| ... end`, for what Ruby writes `each_with_index.map`.
 
 ### Fixed
 
