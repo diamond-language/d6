@@ -62,6 +62,26 @@ The rest of the file, or up to `n` bytes of it.
 
 The next line without its line ending, or `nil` at the end.
 
+`read` and `gets` on a regular file that was read to its end try again, so a
+file another program appends to (a log) can be read as it grows. A pipe or a
+socket's end is final.
+
+### `pos() -> Int`
+
+The byte offset the next read or write starts from.
+
+### `seek(offset) -> File`
+
+Moves to byte `offset` from the start and returns the file. A pipe or socket
+can't seek (`IOError`).
+
+<!-- doc-check: skip -->
+```ruby
+log = File.open("app.log", "r")
+log.seek(File.size("app.log"))   # only lines written from now on
+line = log.gets()                # nil until another line arrives
+```
+
 ### `write(value)`
 
 Writes `value`, converted to text as `print` does.

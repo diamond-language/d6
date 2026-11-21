@@ -158,7 +158,7 @@ static const char *const NATIVE_OBJECT_MEMBERS_SUPERVISOR[]={
     "add_child","alive?","child_count","failed?","join","last_error","restart_count",
     "restart_policy","stop"};
 static const char *const NATIVE_OBJECT_MEMBERS_FILE[]={
-    "close","flush","gets","peer_address","read","shutdown_write","write"};
+    "close","flush","gets","peer_address","pos","read","seek","shutdown_write","write"};
 static const char *const NATIVE_OBJECT_MEMBERS_LISTENER[]={"accept","close","port"};
 static const char *const NATIVE_OBJECT_MEMBERS_SOCKET[]={
     "close","finish_connect","peer_address","read","shutdown_write","write"};

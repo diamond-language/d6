@@ -33,6 +33,9 @@ record. From 1.0.0, releases follow the [1.x compatibility policy](docs/compatib
   the rest of the union below it.
 - `Callable#call(args...)`: `block.call(x)` makes the same call as `block(x)`, as Ruby's `Proc#call`
   does. It used to fail with "undefined method 'call' for Callable".
+- `File#pos` and `File#seek(offset)`. `read` and `gets` on a regular file that reached its end try
+  again, so a program can follow a log as another process appends to it (they kept returning
+  `nil` once the end was reached).
 
 ### Fixed
 
