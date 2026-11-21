@@ -30,10 +30,10 @@ class Client
     payload = JSON.stringify(event)
     mask = SecureRandom.bytes(4).bytes()
     header = 0x81.chr()
-    if payload.length() < 126
-      header = header + (0x80 | payload.length()).chr()
+    if payload.bytesize() < 126
+      header = header + (0x80 | payload.bytesize()).chr()
     else
-      header = header + (0x80 | 126).chr() + (payload.length() >> 8).chr() + (payload.length() & 255).chr()
+      header = header + (0x80 | 126).chr() + (payload.bytesize() >> 8).chr() + (payload.bytesize() & 255).chr()
     end
     bytes = payload.bytes()
     masked = ""
@@ -46,8 +46,8 @@ class Client
 
   def read_exact(count: Int)
     data = ""
-    while data.length() < count
-      chunk = @socket.read(count - data.length())
+    while data.bytesize() < count
+      chunk = @socket.read(count - data.bytesize())
       raise "connection closed" if chunk == nil || chunk == ""
       data = data + chunk
     end

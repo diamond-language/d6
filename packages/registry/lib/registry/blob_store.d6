@@ -55,7 +55,7 @@ module Registry
       end
       File.publish(self.path(digest), bytes)
       if @shared then File.chmod(self.path(digest), 0o640) end
-      bytes.length()
+      bytes.bytesize()
     end
 
     ## The bytes stored under `digest`.

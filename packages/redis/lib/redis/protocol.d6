@@ -46,7 +46,7 @@ def redis_encode_command(args)
   sb.append("*#{args.length()}\r\n")
   args.each() do |raw_arg|
     arg = "#{raw_arg}"
-    sb.append("$#{arg.length()}\r\n")
+    sb.append("$#{arg.bytesize()}\r\n")
     sb.append(arg)
     sb.append("\r\n")
   end
@@ -63,7 +63,7 @@ def redis_read_exact(conn, length)
     return ""
   end
   data = conn.read(length)
-  if data.length() != length
+  if data.bytesize() != length
     raise IOError.new("Redis connection closed mid-reply")
   end
   data
@@ -192,7 +192,7 @@ def redis_read_reply(conn)
     # string.
     length = rest.to_i()
     body = redis_read_length_prefixed_body(conn, length)
-    body.slice(4, body.length() - 4)
+    body.byteslice(4, body.bytesize() - 4)
   elsif reply_type == "%"
     # RESP3 Map: `rest` is the number of key-VALUE *pairs*, so twice as
     # many individual RESP values follow as a same-count Array would

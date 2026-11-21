@@ -118,7 +118,14 @@ typedef struct DiamondObject {
 
 typedef struct DiamondString {
     DiamondObject object;
+    /* Bytes, not counting the terminating NUL. */
     size_t length;
+    /* Characters (UTF-8 code points, a malformed byte counting as one) plus one, or 0
+     * until string_char_count first needs it (src/vm_utf8.c). A String never changes
+     * once built, so the count is computed at most once; allocate_string resets it.
+     * Equal to length + 1 means every byte is ASCII, which keeps character positions
+     * byte positions. */
+    size_t char_count_plus_one;
     char chars[];
 } DiamondString;
 
@@ -130,6 +137,8 @@ typedef struct DiamondString {
 typedef struct DiamondSymbol {
     DiamondObject object;
     size_t length;
+    /* Kept so the layout matches DiamondString's, which code relies on. */
+    size_t char_count_plus_one;
     char chars[];
 } DiamondSymbol;
 

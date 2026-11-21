@@ -29,10 +29,18 @@ StringBuilder.new().append("a").append(1).append(:b).to_s()   # => "a1b"
 
 ### `length() -> Int`
 
+The length of the text so far, in characters.
+
+```ruby
+StringBuilder.new().append("hé").length()   # => 2
+```
+
+### `bytesize() -> Int`
+
 The length of the text so far, in bytes.
 
 ```ruby
-StringBuilder.new().append("hé").length()   # => 3
+StringBuilder.new().append("hé").bytesize()   # => 3
 ```
 
 ### `to_s() -> String`

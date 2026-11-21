@@ -49,11 +49,11 @@ def board_interactive(args)
         next
       end
       if pending.empty?()
-        byte = key.ord()
+        byte = key.getbyte(0)
         expected = if byte >= 240 then 4 elsif byte >= 224 then 3 elsif byte >= 192 then 2 else 1 end
       end
       pending += key
-      if pending.length() == expected
+      if pending.bytesize() == expected
         board.key(pending)
         pending = ""
         dirty = !board.key_pending?()

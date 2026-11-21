@@ -78,21 +78,21 @@ end
 def base64url_encode(bytes)
   alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
   chars = []
-  length = bytes.length()
+  length = bytes.bytesize()
   index = 0
   while index < length
     remaining = length - index
-    b0 = bytes.slice(index, 1).ord()
+    b0 = bytes.getbyte(index)
     chars.push(alphabet.slice(b0 / 4, 1))
     if remaining == 1
       chars.push(alphabet.slice(mod(b0, 4) * 16, 1))
     else
-      b1 = bytes.slice(index + 1, 1).ord()
+      b1 = bytes.getbyte(index + 1)
       chars.push(alphabet.slice(mod(b0, 4) * 16 + b1 / 16, 1))
       if remaining == 2
         chars.push(alphabet.slice(mod(b1, 16) * 4, 1))
       else
-        b2 = bytes.slice(index + 2, 1).ord()
+        b2 = bytes.getbyte(index + 2)
         chars.push(alphabet.slice(mod(b1, 16) * 4 + b2 / 64, 1))
         chars.push(alphabet.slice(mod(b2, 64), 1))
       end

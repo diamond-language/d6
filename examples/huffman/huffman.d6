@@ -37,7 +37,7 @@ def byte_frequencies(data: String) -> Hash
   freqs = {}
   index = 0
 
-  while index < data.length()
+  while index < data.bytesize()
     byte = data.getbyte(index)
     freqs[byte] = freqs.fetch(byte, 0) + 1
     index += 1
@@ -61,7 +61,7 @@ def encode(input_path: String, output_path: String) -> Int
   # "0"/"1" characters (packed into real bytes only at the end).
   bits = ""
   index = 0
-  while index < data.length()
+  while index < data.bytesize()
     bits = bits + codes[data.getbyte(index)]
     index += 1
   end
@@ -77,10 +77,10 @@ def encode(input_path: String, output_path: String) -> Int
 
   # Step 4: assemble and write. The ratio is the compressed size as a whole
   # percentage of the original (below 100 means it shrank).
-  container = MAGIC + pack_u32(data.length()) + table + pack_bits(bits)
+  container = MAGIC + pack_u32(data.bytesize()) + table + pack_bits(bits)
   File.write(output_path, container)
-  ratio = container.length() * 100 / data.length()
-  puts("#{input_path}: #{data.length()} -> #{container.length()} bytes (#{ratio}%)")
+  ratio = container.bytesize() * 100 / data.bytesize()
+  puts("#{input_path}: #{data.bytesize()} -> #{container.bytesize()} bytes (#{ratio}%)")
   0
 end
 
@@ -102,7 +102,7 @@ def read_code_table(container: String, at: Int, symbol_count: Int) -> Array
     # them. Unpack them all, then keep only the first `length` bits and
     # discard the padding.
     packed_length = (length + 7) / 8
-    code = unpack_bits(container.slice(position, packed_length)).slice(0, length)
+    code = unpack_bits(container.byteslice(position, packed_length)).slice(0, length)
     codes_by_string[code] = byte
     position += packed_length
     index += 1
@@ -116,7 +116,7 @@ def decode(input_path: String, output_path: String) -> Int
 
   # Check the header: the magic bytes, and that there are at least the 10
   # fixed header bytes (4 magic + 4 length + 2 symbol count).
-  unless container.length() >= 10 && container.slice(0, 4) == MAGIC
+  unless container.bytesize() >= 10 && container.byteslice(0, 4) == MAGIC
     raise HuffmanError.new("not a huffman container (bad magic)")
   end
   original_length = unpack_u32(container, 4)
@@ -126,7 +126,7 @@ def decode(input_path: String, output_path: String) -> Int
   # expanded back into a "0"/"1" string.
   table = read_code_table(container, 10, symbol_count)
   codes_by_string = table[0]
-  bits = unpack_bits(container.slice(table[1], container.length() - table[1]))
+  bits = unpack_bits(container.byteslice(table[1], container.bytesize() - table[1]))
 
   # Decode by accumulating bits until they form a known code. This works
   # because Huffman codes are PREFIX-FREE: no code is the start of another, so

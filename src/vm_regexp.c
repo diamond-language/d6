@@ -185,6 +185,12 @@ DiamondVmStatus regexp_match_helper(DiamondVm *vm, const DiamondRegexp *regexp,
     return DIAMOND_VM_OK;
 }
 
+/* Past an empty match at `at`: one whole character on, so the search never resumes
+ * (or copies) half a UTF-8 sequence. */
+static size_t step_past_empty_match(const DiamondString *subject,size_t at) {
+    return at<subject->length?utf8_char_size(subject->chars,subject->length,at):1;
+}
+
 /* Expands a String#sub/String#gsub replacement into `out`, honoring Ruby's
  * backslash escapes: `\0`/`\&` is the whole match, `\1`-`\9` is that capture
  * group (empty if the group didn't participate, e.g. an unmatched `(x)?`),
@@ -255,9 +261,10 @@ DiamondVmStatus regexp_replace_helper(DiamondVm *vm,const DiamondRegexp *regexp,
            regexp_append_replacement(&output,subject,replacement,&match_result);
         reginold_match_free(&match_result);
         if(match_end==match_begin) {
+            const size_t step=step_past_empty_match(subject,match_end);
             if(match_end<subject->length)
-                ok=ok&&byte_buffer_append(&output,subject->chars+match_end,1);
-            cursor=match_end+1;
+                ok=ok&&byte_buffer_append(&output,subject->chars+match_end,step);
+            cursor=match_end+step;
         } else {
             cursor=match_end;
         }
@@ -328,11 +335,12 @@ DiamondVmStatus regexp_replace_block_helper(DiamondVm *vm,
             status=DIAMOND_VM_OUT_OF_MEMORY;break;
         }
         if(match_end==match_begin) {
+            const size_t step=step_past_empty_match(subject,match_end);
             if(match_end<subject->length&&
-               !byte_buffer_append(&output,subject->chars+match_end,1)) {
+               !byte_buffer_append(&output,subject->chars+match_end,step)) {
                 status=DIAMOND_VM_OUT_OF_MEMORY;break;
             }
-            cursor=match_end+1;
+            cursor=match_end+step;
         } else {
             cursor=match_end;
         }
@@ -426,7 +434,8 @@ DiamondVmStatus regexp_scan_helper(DiamondVm *vm,const DiamondRegexp *regexp,
             }
         }
         reginold_match_free(&match_result);
-        cursor=match_end==match_begin?match_end+1:match_end;
+        cursor=match_end==match_begin?match_end+step_past_empty_match(subject,match_end):
+            match_end;
     }
     return DIAMOND_VM_OK;
 }
@@ -462,7 +471,7 @@ DiamondVmStatus regexp_split_helper(DiamondVm *vm,const DiamondRegexp *regexp,
         const size_t match_end=(size_t)match_result.overall.end;
         reginold_match_free(&match_result);
         if(match_end==match_begin) {
-            cursor=match_end+1;
+            cursor=match_end+step_past_empty_match(subject,match_end);
             continue;
         }
         DiamondString *piece=allocate_string(vm,
@@ -481,19 +490,21 @@ DiamondVmStatus regexp_split_helper(DiamondVm *vm,const DiamondRegexp *regexp,
     return DIAMOND_VM_OK;
 }
 
-/* Regexp#diamond_match_spans(text, start): the first match at or after byte
- * offset `start`, as a flat Array of Ints -- the whole match's begin and end,
+/* Regexp#diamond_match_spans(text, start): the first match at or after character
+ * `start`, as a flat Array of character positions -- the whole match's begin and end,
  * then each group's (-1, -1 for a group that took no part) -- or nil. The
  * prelude's MatchData (lib/core.d6) is built on it. */
 static DiamondVmStatus regexp_match_spans(DiamondVm *vm,const DiamondRegexp *regexp,
         const DiamondString *subject,int64_t start,DiamondValue *registers,uint16_t dest) {
-    if(start<0||(uint64_t)start>subject->length) {
+    if(start<0||(uint64_t)start>string_char_count(subject)) {
         registers[dest]=DIAMOND_NIL;
         return DIAMOND_VM_OK;
     }
+    /* reginold works in bytes; positions in and out are characters. */
+    const size_t byte_start=string_byte_offset(subject,(size_t)start);
     reginold_match match_result={0};
     const reginold_status search_status=reginold_search(regexp->handle,
-        subject->chars,subject->length,(size_t)start,&match_result);
+        subject->chars,subject->length,byte_start,&match_result);
     if(search_status==REGINOLD_ERROR) {
         snprintf(vm->error,sizeof vm->error,"regexp match failed");
         return DIAMOND_VM_REGEXP_ERROR;
@@ -512,8 +523,10 @@ static DiamondVmStatus regexp_match_spans(DiamondVm *vm,const DiamondRegexp *reg
         const reginold_span span=index==0?match_result.overall:
             match_result.captures[index-1];
         const bool matched=span.beg>=0&&span.end>=0;
-        array->values[index*2]=DIAMOND_INT(matched?span.beg:-1);
-        array->values[index*2+1]=DIAMOND_INT(matched?span.end:-1);
+        array->values[index*2]=DIAMOND_INT(matched?
+            (int64_t)string_char_index(subject,(size_t)span.beg):-1);
+        array->values[index*2+1]=DIAMOND_INT(matched?
+            (int64_t)string_char_index(subject,(size_t)span.end):-1);
     }
     reginold_match_free(&match_result);
     registers[dest]=DIAMOND_OBJECT(array);

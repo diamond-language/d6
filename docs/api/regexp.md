@@ -65,7 +65,7 @@ Whether the pattern matches anywhere in `text`, without collecting captures.
 
 ### `match_data(text, position = 0) -> MatchData | Nil`
 
-The first match starting at or after byte offset `position`, as a
+The first match starting at or after character `position`, as a
 [MatchData](match_data.md), or `nil` when there is none.
 
 ```ruby

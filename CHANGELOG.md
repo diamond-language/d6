@@ -121,6 +121,18 @@ programs run unchanged ([release notes](docs/release-1.3.0.md)).
   `rescue e: Type`, instead of a confusing one about the `=>`.
 - `String#index(needle, start)` searches in place: it copied the rest of the String on every
   call, so a scanner stepping through a long page with it took quadratic time.
+- **Breaking:** Strings count characters. `length`, `size`, `slice`, `s[i]`, `s[range]`,
+  `index_of`, `index`, `rindex`, `insert`, `chars`, `each_char`, `reverse`, `ljust`, `rjust`,
+  `center`, `split("")`, `tr`, `%s` widths in `format`, `MatchData` offsets and
+  `match_data`'s start position work in UTF-8 characters, so `"日本".length()` is 2 (it was
+  6) and `reverse` no longer breaks multi-byte text. A byte that isn't valid UTF-8 counts
+  as one character. `ord` returns the first character's code point. For binary data and
+  wire protocols use the byte methods: `bytesize` (now native), `byteslice(start, length)`
+  (new), `getbyte`, `bytes`, `each_byte`; `StringBuilder#bytesize` is new too. ASCII-only
+  Strings keep their old speed: the character count is computed once and cached.
+- `String#display_width`: terminal columns, with East Asian wide characters and emoji as
+  two and combining marks as none.
+- `String#lines` is native.
 
 ## 1.2.0 — 2026-11-20
 

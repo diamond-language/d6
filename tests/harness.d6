@@ -193,7 +193,7 @@ module Harness
     begin
       head = "#{method} #{path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n"
       if body != nil
-        head = head + "Content-Type: application/json\r\nContent-Length: #{body.length()}\r\n"
+        head = head + "Content-Type: application/json\r\nContent-Length: #{body.bytesize()}\r\n"
       end
       socket.write(head + "\r\n" + (body == nil ? "" : body))
       socket.flush()
@@ -247,7 +247,7 @@ module Harness
       headers_in.each() do |name, value|
         head = head + "#{name}: #{value}\r\n"
       end
-      head = head + "Content-Length: #{body.length()}\r\n" if body != nil
+      head = head + "Content-Length: #{body.bytesize()}\r\n" if body != nil
       socket.write(head + "\r\n" + (body == nil ? "" : body))
       status_line = socket.gets()
       raise IOError.new("no response") if status_line == nil
@@ -283,7 +283,7 @@ module Harness
       headers_in.each() do |name, value|
         head = head + "#{name}: #{value}\r\n"
       end
-      head = head + "Content-Length: #{body.length()}\r\n" if body != nil
+      head = head + "Content-Length: #{body.bytesize()}\r\n" if body != nil
       socket.write(head + "\r\n" + (body == nil ? "" : body))
       socket.flush()
       status_line = socket.gets()

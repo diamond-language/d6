@@ -45,7 +45,7 @@ def show_info(path: String) -> Bool
     entry = text_entry(chunk)
     detail = "  #{entry[0]}: #{entry[1]}" unless entry == nil
     detail = "  #{time_text(chunk)}" if chunk.kind() == "tIME"
-    puts("  #{chunk.kind()} #{chunk.data().length().to_s().rjust(6, " ")}#{detail}#{status}")
+    puts("  #{chunk.kind()} #{chunk.data().bytesize().to_s().rjust(6, " ")}#{detail}#{status}")
   end
   intact
 end

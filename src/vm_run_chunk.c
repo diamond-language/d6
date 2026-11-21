@@ -76,7 +76,7 @@ static inline bool collection_invoke_fast(DiamondVm *vm,DiamondValue *registers,
             length=((DiamondArray *)registers[recv].as.object)->count;
         else if(receiver_kind==DIAMOND_OBJECT_HASH)
             length=((DiamondHash *)registers[recv].as.object)->count;
-        else length=((DiamondString *)registers[recv].as.object)->length;
+        else length=string_char_count((DiamondString *)registers[recv].as.object);
         registers[dest]=DIAMOND_INT((int64_t)length);
         *status=DIAMOND_VM_OK;return true;
     }

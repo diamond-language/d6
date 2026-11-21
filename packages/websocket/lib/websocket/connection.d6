@@ -112,11 +112,11 @@ class WebSocketConnection
         return nil
       end
       opcode = frame["opcode"]
-      if opcode >= 8 && (frame["payload"].length() > 125 || !frame["fin"])
+      if opcode >= 8 && (frame["payload"].bytesize() > 125 || !frame["fin"])
         raise IOError.new("WebSocket control frame must be final and carry at most 125 bytes (RFC 6455 section 5.5)")
       end
       unless opcode >= 8
-        received += frame["payload"].length()
+        received += frame["payload"].bytesize()
         if received > @max_message_size
           raise IOError.new("WebSocket message exceeds the maximum of #{@max_message_size} bytes")
         end
@@ -161,7 +161,7 @@ class WebSocketConnection
   # onto an already-completing close handshake.
   def handle_close_frame(payload)
     unless @closed
-      code_bytes = if payload.length() >= 2 then payload.slice(0, 2) else "" end
+      code_bytes = if payload.bytesize() >= 2 then payload.byteslice(0, 2) else "" end
       self.send_frame(websocket_opcode_close(), code_bytes)
       @closed = true
     end

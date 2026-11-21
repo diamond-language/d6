@@ -4,7 +4,7 @@
 
 A `MatchData` is one match, from `Regexp#match_data` or `String#match_data`.
 Group `0` is the whole match and the capture groups follow it. A group is
-reached by number, by name or by Symbol. Offsets are byte offsets into the
+reached by number, by name or by Symbol. Offsets are character positions in the
 matched String, the units `String#slice` uses.
 
 ```ruby
@@ -28,7 +28,7 @@ share a name, the last one that took part answers.
 
 ### `offset(group) -> Array | Nil`
 
-A group's `[begin, end]` byte offsets, or `nil` when it took no part.
+A group's `[begin, end]` character positions, or `nil` when it took no part.
 
 ### `pre_match() -> String`
 

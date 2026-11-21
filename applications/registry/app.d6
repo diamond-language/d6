@@ -55,7 +55,7 @@ def handle_registry(request, context)
     log = Logger.new("registry", "info", nil, "json")
     context["registry_log"] = log
   end
-  log.info("request.started", {"request_id": id, "method": request["method"], "request_bytes": request["body"].length()})
+  log.info("request.started", {"request_id": id, "method": request["method"], "request_bytes": request["body"].bytesize()})
   begin
     response = dispatch_registry(request, context)
   rescue error: StandardError
@@ -68,7 +68,7 @@ def handle_registry(request, context)
     body["request_id"] = id
     response[2] = JSON.stringify(body)
   end
-  fields = {"request_id": id, "method": request["method"], "status": response[0], "duration_ms": (Time.monotonic() - started) * 1000, "response_bytes": response[2].length()}
+  fields = {"request_id": id, "method": request["method"], "status": response[0], "duration_ms": (Time.monotonic() - started) * 1000, "response_bytes": response[2].bytesize()}
   if response[0] >= 500
     log.error("request.completed", fields)
   elsif response[0] >= 400

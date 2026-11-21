@@ -98,25 +98,25 @@ class NonblockingConnection
   # never nil (that's #gets' own EOF signal, not #read's).
   ## `n` bytes, or fewer if the stream ends first.
   def read(n)
-    while @buffer.length() < n && @eof == false
+    while @buffer.bytesize() < n && @eof == false
       self.fill_more()
     end
-    took = @buffer.length()
+    took = @buffer.bytesize()
     if took > n
       took = n
     end
-    result = @buffer.slice(0, took)
-    @buffer = @buffer.slice(took, @buffer.length())
+    result = @buffer.byteslice(0, took)
+    @buffer = @buffer.byteslice(took, @buffer.bytesize())
     result
   end
 
   ## Writes `value`, waiting while the socket is full.
   def write(value)
     remaining = value
-    while remaining.length() > 0
+    while remaining.bytesize() > 0
       begin
         written = @socket.write(remaining)
-        remaining = remaining.slice(written, remaining.length())
+        remaining = remaining.byteslice(written, remaining.bytesize())
       rescue error: WouldBlockError
         @want_write = true
         yield

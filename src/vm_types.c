@@ -69,6 +69,9 @@ static const DiamondNativeMethod DIAMOND_NATIVE_METHODS[]={
     {DIAMOND_TYPE_HASH,"length",0,DIAMOND_TYPE_INT},
     {DIAMOND_TYPE_STRING,"repeat",1,DIAMOND_TYPE_STRING},
     {DIAMOND_TYPE_STRING,"ord",0,DIAMOND_TYPE_INT},
+    {DIAMOND_TYPE_STRING,"bytesize",0,DIAMOND_TYPE_INT},
+    {DIAMOND_TYPE_STRING,"display_width",0,DIAMOND_TYPE_INT},
+    {DIAMOND_TYPE_STRING,"byteslice",2,DIAMOND_TYPE_STRING},
     {DIAMOND_TYPE_STRING,"split",1,DIAMOND_TYPE_ARRAY},
     {DIAMOND_TYPE_STRING,"strip",0,DIAMOND_TYPE_STRING},
     {DIAMOND_TYPE_STRING,"empty?",0,DIAMOND_TYPE_BOOL},
@@ -113,9 +116,9 @@ static const DiamondNativeMethod DIAMOND_NATIVE_METHODS[]={
  * name may appear in both. tests/lsp_test.sh calls every completed name on a
  * real value, so a name listed here that the VM does not implement fails CI. */
 static const char *const NATIVE_MEMBERS_STRING[]={
-    "bytes","capitalize","chars","chomp","count","deep_freeze","delete","downcase",
-    "dup","empty?","end_with?","equal?","format","freeze","frozen?","getbyte","gsub",
-    "include?","index_of","inspect","length","ljust","lstrip","match","match?","nil?","ord",
+    "bytes","bytesize","byteslice","capitalize","chars","chomp","count","deep_freeze","delete","downcase",
+    "display_width","dup","empty?","end_with?","equal?","format","freeze","frozen?","getbyte","gsub",
+    "include?","index_of","inspect","length","lines","ljust","lstrip","match","match?","nil?","ord",
     "partition","repeat","reverse","rjust","rstrip","scan","size","slice","split",
     "start_with?","strip","sub","tap","to_f","to_i","to_s","tr","upcase"};
 static const char *const NATIVE_MEMBERS_ARRAY[]={

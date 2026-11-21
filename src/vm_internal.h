@@ -330,6 +330,19 @@ typedef struct StringBuilder {
 
 /* Allocation and shared primitives that stay in vm.c (the garbage collector lives there). */
 DIAMOND_INTERNAL DiamondString *allocate_string(DiamondVm *vm, const char *chars, size_t length);
+/* Characters in Strings (src/vm_utf8.c). */
+DIAMOND_INTERNAL size_t utf8_char_size(const char *chars,size_t length,size_t at);
+DIAMOND_INTERNAL size_t utf8_count(const char *chars,size_t length);
+DIAMOND_INTERNAL size_t string_char_count(const DiamondString *string);
+DIAMOND_INTERNAL bool string_is_ascii(const DiamondString *string);
+DIAMOND_INTERNAL size_t string_byte_offset(const DiamondString *string,size_t index);
+DIAMOND_INTERNAL size_t string_char_index(const DiamondString *string,size_t offset);
+DIAMOND_INTERNAL void string_cursors_invalidate(void);
+DIAMOND_INTERNAL uint32_t utf8_code_point(const char *chars,size_t length,size_t at);
+DIAMOND_INTERNAL size_t utf8_encode(uint32_t point,char *out);
+DIAMOND_INTERNAL size_t string_display_width(const DiamondString *string);
+DIAMOND_INTERNAL DiamondVmStatus string_char_slice(DiamondVm *vm,const DiamondString *source,
+        int64_t start,int64_t requested_length,DiamondValue *out);
 [[nodiscard]] DIAMOND_INTERNAL bool copy_value_into_vm(DiamondVm *dest_vm, DiamondValue value,
                                          DiamondProgram *source_program,
                                          DiamondClass *const *rebase_source_classes,

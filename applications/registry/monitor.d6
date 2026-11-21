@@ -84,7 +84,7 @@ def probe(base, ca_file, timeout, archive)
     socket.close()
   end
   body = "" if body == nil
-  raise ArgumentError.new("health response failed") if status != 200 || body.length() > 4096
+  raise ArgumentError.new("health response failed") if status != 200 || body.bytesize() > 4096
   health = JSON.parse(body)
   unless health.is_a?(Hash) && health["protocol"] == 1 && health["status"] == "ok"
     raise ArgumentError.new("unexpected health response")

@@ -47,13 +47,13 @@ def make_chunk(kind: String, data: String) -> Chunk = Chunk.new(kind, data, Crc3
 
 # A chunk as bytes: length, type, data, CRC.
 def encode_chunk(chunk: Chunk) -> String =
-  u32_bytes(chunk.data().length()) + chunk.kind() + chunk.data() + u32_bytes(chunk.crc())
+  u32_bytes(chunk.data().bytesize()) + chunk.kind() + chunk.data() + u32_bytes(chunk.crc())
 
 # Splits a PNG into chunks, checking the structure (but NOT the CRCs: see
 # `intact?` and pngmeta.d6's load_intact, since `info` wants to report a bad
 # CRC rather than refuse the file).
 def parse_png(bytes: String) -> Array[Chunk]
-  unless bytes.slice(0, 8) == png_signature()
+  unless bytes.byteslice(0, 8) == png_signature()
     raise PngError.new("not a PNG file (bad signature)")
   end
   chunks = []
@@ -63,22 +63,22 @@ def parse_png(bytes: String) -> Array[Chunk]
   # first means the file was cut off, and each check below guards a
   # different way that can happen.
   loop do
-    raise PngError.new("truncated: no IEND chunk") if at == bytes.length()
-    raise PngError.new("truncated chunk header at byte #{at}") if at + 8 > bytes.length()
+    raise PngError.new("truncated: no IEND chunk") if at == bytes.bytesize()
+    raise PngError.new("truncated chunk header at byte #{at}") if at + 8 > bytes.bytesize()
 
     # Header: 4-byte length, 4-letter type. A chunk occupies 12 bytes plus
     # its data (length, type, CRC are 4 bytes each).
     length = read_u32(bytes, at)
-    kind = bytes.slice(at + 4, 4)
+    kind = bytes.byteslice(at + 4, 4)
     unless Regexp.new("^[A-Za-z]{4}$").match?(kind)
       raise PngError.new("bad chunk type at byte #{at + 4}")
     end
-    if at + 12 + length > bytes.length()
+    if at + 12 + length > bytes.bytesize()
       raise PngError.new("truncated #{kind} chunk at byte #{at}")
     end
 
     # Data starts after the 8 header bytes; the stored CRC follows it.
-    chunks.push(Chunk.new(kind, bytes.slice(at + 8, length), read_u32(bytes, at + 8 + length)))
+    chunks.push(Chunk.new(kind, bytes.byteslice(at + 8, length), read_u32(bytes, at + 8 + length)))
     at += 12 + length
     break if kind == "IEND"
   end
@@ -115,7 +115,7 @@ end
 # always 0 in PNG, so they are skipped; interlace is 1 when interlaced.
 def header_of(chunks: Array[Chunk]) -> Header
   data = chunks[0].data()
-  raise PngError.new("IHDR is #{data.length()} bytes, not 13") unless data.length() == 13
+  raise PngError.new("IHDR is #{data.bytesize()} bytes, not 13") unless data.bytesize() == 13
   Header.new(read_u32(data, 0), read_u32(data, 4), data.getbyte(8), data.getbyte(9),
     data.getbyte(12) == 1)
 end

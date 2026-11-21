@@ -25,7 +25,7 @@ module TOML
   class Parser
     def initialize(text: String)
       @text = text
-      @length = text.length()
+      @length = text.bytesize()
       @pos = 0
       @line = 1
       @line_start = 0
@@ -45,14 +45,14 @@ module TOML
     end
 
     def at?(literal: String) -> Bool
-      @pos + literal.length() <= @length && @text.slice(@pos, literal.length()) == literal
+      @pos + literal.bytesize() <= @length && @text.byteslice(@pos, literal.bytesize()) == literal
     end
 
     def describe(byte: Int) -> String
       return "end of input" if byte < 0
       return "a newline" if byte == 10 || byte == 13
       return "byte #{byte}" if byte < 32 || byte == 127
-      @text.slice(@pos, 1).inspect()
+      @text.byteslice(@pos, 1).inspect()
     end
 
     def new_meta(kind: String) -> Hash
@@ -340,7 +340,7 @@ module TOML
         @pos += 1
       end
       self.fail("expected a key, found #{self.describe(byte)}") if @pos == start
-      @text.slice(start, @pos - start)
+      @text.byteslice(start, @pos - start)
     end
 
     # ---- values: each returns [value, meta kind] ----
@@ -432,11 +432,11 @@ module TOML
         self.fail("string never closes") if @pos >= @length
         byte = @text.getbyte(@pos)
         if byte == 34
-          out.append(@text.slice(segment, @pos - segment))
+          out.append(@text.byteslice(segment, @pos - segment))
           @pos += 1
           return out.to_s()
         elsif byte == 92
-          out.append(@text.slice(segment, @pos - segment))
+          out.append(@text.byteslice(segment, @pos - segment))
           self.parse_escape(out)
           segment = @pos
         else
@@ -460,11 +460,11 @@ module TOML
           while extra < 2 && self.peek_at(3 + extra) == 34
             extra += 1
           end
-          out.append(@text.slice(segment, @pos + extra - segment))
+          out.append(@text.byteslice(segment, @pos + extra - segment))
           @pos += 3 + extra
           return out.to_s()
         elsif byte == 92
-          out.append(@text.slice(segment, @pos - segment))
+          out.append(@text.byteslice(segment, @pos - segment))
           if self.line_ending_backslash?()
             # A backslash at the end of a line trims the line break and the
             # whitespace that follows it.
@@ -518,20 +518,20 @@ module TOML
       elsif byte == 117 || byte == 85
         digits = if byte == 117 then 4 else 8 end
         @pos -= 1
-        self.fail("\\#{@text.slice(@pos, 1)} needs #{digits} hex digits") if @pos + 1 + digits > @length
-        hex = @text.slice(@pos + 1, digits)
+        self.fail("\\#{@text.byteslice(@pos, 1)} needs #{digits} hex digits") if @pos + 1 + digits > @length
+        hex = @text.byteslice(@pos + 1, digits)
         hex.chars().each() do |ch|
-          self.fail("\\#{@text.slice(@pos, 1)} needs #{digits} hex digits") unless TOML.hex_digit?(ch.ord())
+          self.fail("\\#{@text.byteslice(@pos, 1)} needs #{digits} hex digits") unless TOML.hex_digit?(ch.ord())
         end
         code = hex.to_i(16)
         if code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF)
-          self.fail("\\#{@text.slice(@pos, 1)}#{hex} isn't a Unicode scalar value")
+          self.fail("\\#{@text.byteslice(@pos, 1)}#{hex} isn't a Unicode scalar value")
         end
         out.append(TOML.utf8(code))
         @pos += 1 + digits
       else
         @pos -= 1
-        self.fail("unknown escape \\#{if byte < 0 then "" else @text.slice(@pos, 1) end}")
+        self.fail("unknown escape \\#{if byte < 0 then "" else @text.byteslice(@pos, 1) end}")
       end
     end
 
@@ -545,7 +545,7 @@ module TOML
         self.check_string_byte(byte, false)
         @pos += 1
       end
-      text = @text.slice(start, @pos - start)
+      text = @text.byteslice(start, @pos - start)
       @pos += 1
       text
     end
@@ -563,7 +563,7 @@ module TOML
           while extra < 2 && self.peek_at(3 + extra) == 39
             extra += 1
           end
-          out.append(@text.slice(segment, @pos + extra - segment))
+          out.append(@text.byteslice(segment, @pos + extra - segment))
           @pos += 3 + extra
           return out.to_s()
         elsif byte == 10 || byte == 13
@@ -591,7 +591,7 @@ module TOML
         break unless TOML.bare_key_byte?(byte) || byte == 43 || byte == 46
         @pos += 1
       end
-      token = @text.slice(start, @pos - start)
+      token = @text.byteslice(start, @pos - start)
       @pos = start
       self.fail("expected a value, found #{self.describe(self.peek())}") if token.empty?()
       value = TOML.number(token)
@@ -601,13 +601,13 @@ module TOML
         self.fail("expected a value, found #{token}; strings need quotes: \"#{token}\"")
       end
       self.fail("invalid number #{token.inspect()}") if value == nil
-      @pos = start + token.length()
+      @pos = start + token.bytesize()
       value
     end
 
     def two_digits(what: String) -> Int
       self.fail("expected two digits for the #{what}") unless TOML.digits_at?(@text, @pos, 2)
-      value = @text.slice(@pos, 2).to_i()
+      value = @text.byteslice(@pos, 2).to_i()
       @pos += 2
       value
     end
@@ -625,7 +625,7 @@ module TOML
       minute = self.two_digits("minute")
       self.expect_byte(58, ": and seconds in the time")
       second = self.two_digits("second")
-      self.fail("time #{@text.slice(start, @pos - start)} is out of range") if hour > 23 || minute > 59 || second > 60
+      self.fail("time #{@text.byteslice(start, @pos - start)} is out of range") if hour > 23 || minute > 59 || second > 60
       if self.peek() == 46
         @pos += 1
         digits = @pos
@@ -634,7 +634,7 @@ module TOML
         end
         self.fail("expected digits after the decimal point in the time") if @pos == digits
       end
-      @text.slice(start, @pos - start)
+      @text.byteslice(start, @pos - start)
     end
 
     def parse_local_time() -> String
@@ -645,14 +645,14 @@ module TOML
     # offset ("1979-05-27T07:32:00"). With an offset it's a Time.
     def parse_date_time()
       start = @pos
-      year = @text.slice(@pos, 4).to_i()
+      year = @text.byteslice(@pos, 4).to_i()
       @pos += 4
       self.expect_byte(45, "- in the date")
       month = self.two_digits("month")
       self.expect_byte(45, "- in the date")
       day = self.two_digits("day")
-      self.fail("date #{@text.slice(start, 10)} doesn't exist") unless TOML.valid_date?(year, month, day)
-      date = @text.slice(start, 10)
+      self.fail("date #{@text.byteslice(start, 10)} doesn't exist") unless TOML.valid_date?(year, month, day)
+      date = @text.byteslice(start, 10)
       byte = self.peek()
       has_time = byte == 84 || byte == 116 || (byte == 32 && TOML.digits_at?(@text, @pos + 1, 2) && self.peek_at(3) == 58)
       return date unless has_time
@@ -671,7 +671,7 @@ module TOML
         self.expect_byte(58, ": in the offset")
         offset_minute = self.two_digits("offset minute")
         self.fail("offset is out of range") if offset_hour > 23 || offset_minute > 59
-        return self.to_time(local + @text.slice(offset_start, 6))
+        return self.to_time(local + @text.byteslice(offset_start, 6))
       end
       local
     end
