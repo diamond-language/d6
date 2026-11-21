@@ -1,0 +1,4 @@
+xs = [1, 2]
+while x = xs.pop()
+  puts(x)
+end

@@ -1,0 +1,19 @@
+# `(name = expr)` is an expression whose value is the assigned value.
+def drain(items: Array[String]) -> Array[String]
+  seen = []
+  while (item = items.shift()) != nil
+    seen.push(item.upcase())
+    [1].each() do |n| seen.push(item * n) end
+  end
+  seen
+end
+
+class Counter
+  def bump() -> Int = (@count = 7) + 1
+  def count() -> Int = @count
+end
+
+counter = Counter.new()
+length = (word = "four").length()
+big = if (sum = 2 + 3) > 4 then "big #{sum}" else "small" end
+[drain(["a", "b"]), word, length, big, counter.bump(), counter.count()]

@@ -1,0 +1,4 @@
+xs = [1, 2]
+if x = xs.pop()
+  puts(x)
+end

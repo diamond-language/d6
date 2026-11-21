@@ -8279,6 +8279,10 @@ class Parser
   end
 
   def consume_block_start()
+    if @current.kind() == :equal
+      self.fail("an assignment in a condition needs parentheses: `while (x = value)`; to compare, write `==`")
+      return false
+    end
     if @current.kind() != :newline
       self.fail("expected newline before block body")
       return false
@@ -9583,8 +9587,10 @@ class Parser
     destination
   end
 
+  # `(name = expr)` is an expression whose value is the assigned value (see
+  # parse_grouping in src/compiler_expressions.c).
   def parse_grouping()
-    result = self.parse_expression()
+    result = self.assignment_ahead?() ? self.compile_assignment() : self.parse_expression()
     if @current.kind() != :right_paren
       self.fail("expected ')' after expression")
       return result

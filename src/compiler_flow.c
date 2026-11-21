@@ -19,6 +19,12 @@
 /* `if`/`unless`, `while`/`until` and `loop` compilation. */
 
 bool consume_block_start(Compiler *compiler) {
+    if (compiler->current.kind == DIAMOND_TOKEN_EQUAL) {
+        fail(compiler, compiler->current.span,
+             "an assignment in a condition needs parentheses: `while (x = value)`; "
+             "to compare, write `==`");
+        return false;
+    }
     if (compiler->current.kind != DIAMOND_TOKEN_NEWLINE) {
         fail(compiler, compiler->current.span, "expected newline before block body");
         return false;

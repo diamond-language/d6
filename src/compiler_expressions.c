@@ -20,7 +20,12 @@
  * precedence parsers, operators and the ternary. */
 
 static uint16_t parse_grouping(Compiler *compiler) {
-    const uint16_t result = parse_expression(compiler);
+    /* `(name = expr)` is an expression whose value is the assigned value, so
+     * `while (line = file.gets()) != nil` reads a line per pass. Only the
+     * parenthesized form: a bare `if x = y` is far more often a typo for `==`,
+     * and consume_block_start explains how to write it instead. */
+    const uint16_t result = assignment_ahead(compiler) ?
+        compile_assignment(compiler) : parse_expression(compiler);
     if (compiler->current.kind != DIAMOND_TOKEN_RIGHT_PAREN) {
         fail(compiler, compiler->current.span, "expected ')' after expression");
         return result;
