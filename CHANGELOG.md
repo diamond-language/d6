@@ -49,6 +49,8 @@ record. From 1.0.0, releases follow the [1.x compatibility policy](docs/compatib
 - A loop holding a trailing modifier (`return "x" if n > 5`) no longer marks every local in the
   function as captured when another `def` follows it. That dropped narrowing after it (a
   `return problem if problem != nil` failed its return type) and made the loop's locals slower.
+- `box.items[key]` (a Ruby reader call without parentheses) says that `items` is a method reference
+  and to write `items()[...]`, instead of "unknown type annotation".
 
 ## 1.3.1 — 2026-11-20
 

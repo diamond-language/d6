@@ -1,0 +1,8 @@
+class Box
+  attr_reader items: Hash
+  def initialize()
+    @items = {}
+  end
+end
+key = 1
+Box.new().items[key]

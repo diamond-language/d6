@@ -1148,6 +1148,17 @@ uint16_t emit_build_spread_arguments(Compiler *compiler,
  * Same balanced-bracket lookahead index_assignment_ahead already uses;
  * only reads as generics when the matching ']' is directly followed by
  * '(', exactly the shape every ordinary generic call already requires. */
+/* The current token is '[' after a method name: does a type name follow, as
+ * explicit type arguments (`decode[Int](text)`) need? Type names start with a
+ * capital letter; anything else means the program meant to index. */
+static bool type_name_ahead(const Compiler *compiler) {
+    DiamondLexer lookahead = compiler->lexer;
+    const DiamondToken token = diamond_lexer_next(&lookahead);
+    if (token.kind != DIAMOND_TOKEN_IDENTIFIER || token.span.length == 0) return false;
+    const char first = compiler->source[token.span.start];
+    return first >= 'A' && first <= 'Z';
+}
+
 static bool writer_generic_arguments_ahead(const Compiler *compiler) {
     DiamondLexer lookahead = compiler->lexer;
     size_t depth = 1;
@@ -2902,6 +2913,18 @@ static uint16_t parse_invoke_named_impl(Compiler *compiler, uint16_t receiver,
     uint16_t type_arguments[8];size_t type_argument_count=0;
     if(compiler->current.kind==DIAMOND_TOKEN_LEFT_BRACKET &&
        (!writer_name||writer_generic_arguments_ahead(compiler))) {
+        if(!writer_name&&!type_name_ahead(compiler)) {
+            /* `stats.buckets[key]`: Ruby calls the reader; here the bare name is
+             * a method reference and `[...]` after it would be type arguments. */
+            char message[DIAMOND_MAX_FUNCTION_NAME*2+160];
+            snprintf(message,sizeof message,
+                "'%.*s' without parentheses is a method reference, not a call; "
+                "to index what it returns, call it first: %.*s()[...]",
+                (int)name.length,compiler->source+name.start,
+                (int)name.length,compiler->source+name.start);
+            fail(compiler,compiler->current.span,message);
+            return 0;
+        }
         if(!parse_explicit_type_arguments(compiler,type_arguments,&type_argument_count))
             return 0;
     }
