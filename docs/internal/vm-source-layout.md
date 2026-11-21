@@ -54,7 +54,7 @@ kinds from Channel through ProgramBuilder are dispatched from one more outlined 
 inline, since it hands a `DIAMOND_VM_EXCEPTION` to this frame's handlers itself.
 
 The special methods every native receiver answers (`public_send`, `tap`, `shuffle`/`sample`,
-`arity`, `to_s`/`inspect`, the `dup` family, bignum formatting) are name-checked inline, in their
+`arity`, `call`, `to_s`/`inspect`, the `dup` family, bignum formatting) are name-checked inline, in their
 original order, because the checks run on every native-receiver call. Only the longer bodies they
 select (`tap`, `shuffle`/`sample`, `arity` and the two bignum conversions) are `outlined_*`
 functions.

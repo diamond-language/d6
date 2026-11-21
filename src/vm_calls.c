@@ -2658,6 +2658,19 @@ DiamondVmStatus diamond_invoke_general(DiamondVm *vm,const DiamondChunk *chunk,
             const DiamondVmStatus arity_status=outlined_callable_arity(chunk,registers,recv,dest);
             return arity_status;
         }
+        /* Callable#call(args...): the same call as `block(args...)`, under
+         * the name Ruby's Proc uses. */
+        if(method_name->length==4&&memcmp(method_name->chars,"call",4)==0&&
+           type_argument_count==0&&
+           registers[recv].kind==DIAMOND_VALUE_OBJECT&&
+           registers[recv].as.object->kind==DIAMOND_OBJECT_CLOSURE) {
+            DiamondValue result=DIAMOND_NIL;
+            const DiamondVmStatus call_status=
+                call_closure_value(vm,chunk,registers,recv,base,argc,depth,&result);
+            if(call_status!=DIAMOND_VM_OK)return call_status;
+            registers[dest]=result;
+            return DIAMOND_VM_OK;
+        }
         /* to_s() on any built-in value: the same text string
          * interpolation produces. (Int, Float, and Time also
          * have their own to_s further down; this matches them.) */

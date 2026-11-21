@@ -1,0 +1,15 @@
+# `block.call(args)` is the same call as `block(args)`, as Ruby's Proc#call.
+def twice(&block)
+  block.call(1) + block.call(2)
+end
+
+def add(a: Int, b: Int) -> Int = a + b
+
+adder = add
+message = begin
+  adder.call(1)
+  "no error"
+rescue error: ArgumentError
+  "ArgumentError"
+end
+[twice() do |x| x * 10 end, adder.call(2, 3), message]

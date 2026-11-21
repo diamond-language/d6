@@ -643,7 +643,7 @@ define its own `array_foo(values, ...)` (or `hash_`, `string_`, `integer_`,
   `round(digits)`; on Int, `step(limit, by) do |i| ... end` (downward for a
   negative `by`).
 - **Every value**: `to_s()` (the text interpolation gives it) and `nil?()`;
-  `Callable#arity`.
+  `Callable#arity` and `Callable#call(args...)`.
 - **Math**: `Math.sqrt`, `cbrt`, `sin`, `cos`, `tan`, `exp`, `log`, `log2`,
   `log10`, `tanh`, `hypot`, `pi`, `e`. The same builtins are also plain
   functions (`sqrt(x)`).

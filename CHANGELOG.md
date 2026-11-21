@@ -31,6 +31,8 @@ record. From 1.0.0, releases follow the [1.x compatibility policy](docs/compatib
 - An endless def can assign: `def reset() = @count = 0`, `def bump(n: Int) -> Int = @count += n`.
 - `x.is_a?(T)` narrows `x` the way `x is T` does, so `return x if x.is_a?(String)` leaves
   the rest of the union below it.
+- `Callable#call(args...)`: `block.call(x)` makes the same call as `block(x)`, as Ruby's `Proc#call`
+  does. It used to fail with "undefined method 'call' for Callable".
 
 ### Fixed
 
