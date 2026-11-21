@@ -1243,6 +1243,11 @@ def diamond_array_insert(values: Array, index: Int, item) -> Array
   length = values.length()
   at = if index < 0 then index + length + 1 else index end
   raise IndexError.new("index #{index} out of bounds for insert into Array of length #{length}") if at < 0 || at > length
+  # Push first: an array whose type contract rejects the item (or a frozen
+  # one) raises before anything has moved. Moving the tail out first lost it
+  # when that push raised.
+  values.push(item)
+  values.pop()
   tail = []
   while values.length() > at
     tail.push(values.pop())

@@ -56,6 +56,11 @@ record. From 1.0.0, releases follow the [1.x compatibility policy](docs/compatib
   `return problem if problem != nil` failed its return type) and made the loop's locals slower.
 - `box.items[key]` (a Ruby reader call without parentheses) says that `items` is a method reference
   and to write `items()[...]`, instead of "unknown type annotation".
+- Returning an Array or Hash that already carries the declared element type no longer re-checks every
+  element, so pushing through a reader typed `Array[Float]` is no longer quadratic (200,000 pushes
+  took minutes).
+- `insert` or `unshift` that an Array's element type rejects leaves the Array as it was; it used to
+  empty everything after the insertion point.
 
 ## 1.3.1 — 2026-11-20
 
