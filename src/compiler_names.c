@@ -2666,8 +2666,8 @@ static uint16_t parse_is_a_call(Compiler *compiler,uint16_t receiver) {
         fail(compiler,type_span,"type name is too long");
         return 0;
     }
-    const uint16_t resolved_type=(uint16_t)resolve_type_name(
-        compiler,type_name,type_span);
+    const int tested=resolve_type_name(compiler,type_name,type_span);
+    const uint16_t resolved_type=(uint16_t)tested;
     skip_newlines(compiler);
     if(compiler->current.kind!=DIAMOND_TOKEN_RIGHT_PAREN) {
         fail(compiler,compiler->current.span,
@@ -2679,6 +2679,8 @@ static uint16_t parse_is_a_call(Compiler *compiler,uint16_t receiver) {
     emit_instruction(compiler,DIAMOND_OP_IS_TYPE,destination,receiver,
                      resolved_type,3);
     compiler->known_types[destination]=DIAMOND_TYPE_BOOL;
+    /* The same test as `receiver is Type`, so it narrows the same way. */
+    publish_type_test_narrowing(compiler,destination,receiver,tested);
     return destination;
 }
 

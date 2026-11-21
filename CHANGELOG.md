@@ -29,6 +29,8 @@ record. From 1.0.0, releases follow the [1.x compatibility policy](docs/compatib
 - Compound assignment through an attribute: `counter.count += 1`, `job.label ||= "x"`. The
   receiver is evaluated once; the reader and writer are ordinary method calls.
 - An endless def can assign: `def reset() = @count = 0`, `def bump(n: Int) -> Int = @count += n`.
+- `x.is_a?(T)` narrows `x` the way `x is T` does, so `return x if x.is_a?(String)` leaves
+  the rest of the union below it.
 
 ### Fixed
 
@@ -44,6 +46,9 @@ record. From 1.0.0, releases follow the [1.x compatibility policy](docs/compatib
   from calling them ("undefined module singleton function").
 - docs/sandbox.md lists every function the sandbox denies; `File.read`, `File.write`, `File.size` and
   others were missing.
+- A loop holding a trailing modifier (`return "x" if n > 5`) no longer marks every local in the
+  function as captured when another `def` follows it. That dropped narrowing after it (a
+  `return problem if problem != nil` failed its return type) and made the loop's locals slower.
 
 ## 1.3.1 — 2026-11-20
 

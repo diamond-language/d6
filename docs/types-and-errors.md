@@ -355,7 +355,8 @@ A one-line guard that exits narrows everything after it:
 `return "none" if x == nil` leaves `x` non-nil below it, and
 `raise ... unless x is String` leaves it a `String`. The same holds for
 `break`, `next`, `redo`, and `retry` guards, and for the block form of
-`if`.
+`if`. `x.is_a?(String)` is the same test as `x is String` and narrows the
+same way.
 
 A plain truthiness test narrows too. Only `nil` and `false` are falsy, so
 for `name: String | Nil`, `if name` sees a `String` in its body and `Nil`
