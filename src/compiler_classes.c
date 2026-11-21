@@ -16,6 +16,9 @@
 #include <string.h>
 #include <time.h>
 
+static void fail_name_taken(Compiler *compiler,DiamondSpan name,const char *stored_name,
+        const char *declaring);
+
 /* Class, module, struct and interface compilation, plus visibility, aliasing and delegation. */
 
 /* Decodes a type_set index (as stored in compiler->function->type_sets,
@@ -1319,7 +1322,7 @@ uint16_t compile_class(Compiler *compiler) {
      * comment. Only a cross-kind collision stays a hard error. */
     if(find_interface_name(compiler,stored_name)>=0||
        find_module_name(compiler,stored_name)>=0) {
-        fail(compiler,name,"type name is already defined");return 0;
+        fail_name_taken(compiler,name,stored_name,"a class");return 0;
     }
     int index;
     DiamondClass *class;
@@ -2175,7 +2178,7 @@ uint16_t compile_struct(Compiler *compiler) {
     }
     if(find_interface_name(compiler,stored_name)>=0||
        find_module_name(compiler,stored_name)>=0) {
-        fail(compiler,name,"type name is already defined");return 0;
+        fail_name_taken(compiler,name,stored_name,"a struct");return 0;
     }
     /* Registered *before* the field list parses (unlike compile_class's
      * own superclass clause, which is likewise parsed only after this
@@ -2609,6 +2612,24 @@ bool top_level_function_declared(Compiler *compiler,DiamondSpan name) {
     free(methods);return found;
 }
 
+/* `module Board` when Board is already a class (or any cross-kind clash): says what
+ * holds the name, since the other declaration is often in another file. `declaring`
+ * is "a class", "a struct", "an interface" or "a module". */
+static void fail_name_taken(Compiler *compiler,DiamondSpan name,const char *stored_name,
+        const char *declaring) {
+    const char *existing="a module";
+    if(find_class_name(compiler,stored_name)>=0)existing="a class";
+    else if(find_interface_name(compiler,stored_name)>=0)existing="an interface";
+    char message[DIAMOND_MAX_FUNCTION_NAME+96];
+    if(strcmp(existing,declaring)==0)
+        snprintf(message,sizeof message,"'%.*s' is already defined as %s",
+            (int)name.length,compiler->source+name.start,existing);
+    else
+        snprintf(message,sizeof message,"'%.*s' is already %s, so it can't also be %s",
+            (int)name.length,compiler->source+name.start,existing,declaring);
+    fail(compiler,name,message);
+}
+
 /* Finds or creates the module named by `name` and readies its slot for this
  * pass (see the reopen and reset comments below). Returns nullptr on error. */
 static DiamondModule *declare_module(Compiler *compiler,DiamondSpan name,
@@ -2621,7 +2642,7 @@ static DiamondModule *declare_module(Compiler *compiler,DiamondSpan name,
      * class or interface) stays a hard error. */
     if(find_class_name(compiler,stored_name)>=0||
        find_interface_name(compiler,stored_name)>=0) {
-        fail(compiler,name,"module name is already defined");return nullptr;
+        fail_name_taken(compiler,name,stored_name,"a module");return nullptr;
     }
     int index;
     DiamondModule *module;
@@ -2895,7 +2916,7 @@ uint16_t compile_interface(Compiler *compiler) {
     if(!claiming&&(existing_interface>=0||
        find_class_name(compiler,stored_name)>=0||
        find_module_name(compiler,stored_name)>=0)) {
-        fail(compiler,name,"type name is already defined");return 0;
+        fail_name_taken(compiler,name,stored_name,"an interface");return 0;
     }
     if(!claiming&&compiler->program->interface_count==DIAMOND_MAX_INTERFACES) {
         char message[128];

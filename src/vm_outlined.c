@@ -744,6 +744,20 @@ DiamondVmStatus outlined_file_path(DiamondVm *vm,const DiamondChunk *chunk,Diamo
     size_t ip=*ip_ref;
     uint16_t dest=0,arg1=0,arg2=0;uint8_t selector=0;
     READ_SHORT(dest);READ_SHORT(arg1);READ_SHORT(arg2);READ_BYTE(selector);
+    if(selector==DIAMOND_FILE_PATH_TERMINAL_RAW||selector==DIAMOND_FILE_PATH_TERMINAL_WINSIZE||
+       selector==DIAMOND_FILE_PATH_STDIN_READ) {
+        DiamondValue result=DIAMOND_NIL;
+        DiamondVmStatus status;
+        if(selector==DIAMOND_FILE_PATH_TERMINAL_RAW)
+            status=terminal_raw(vm,registers[arg1],registers[arg2],&result);
+        else if(selector==DIAMOND_FILE_PATH_TERMINAL_WINSIZE)
+            status=terminal_winsize(vm,registers[arg1],&result);
+        else
+            status=stdin_read_partial(vm,registers[arg1],&result);
+        VM_PROPAGATE(status);
+        registers[dest]=result;
+        HELPER_DONE;
+    }
     if(selector==DIAMOND_FILE_PATH_TTY) {
         /* A Symbol and a String share their layout (length, then chars). */
         const DiamondValue stream=registers[arg1];
@@ -4074,7 +4088,7 @@ DiamondVmStatus outlined_signal_trap(DiamondVm *vm,const DiamondChunk *chunk,Dia
     }
     if(signal_index==DIAMOND_SIGNAL_COUNT) {
         snprintf(vm->error,sizeof vm->error,"Signal.trap: unrecognized signal "
-            "name '%.*s' (supported: INT, TERM, HUP)",
+            "name '%.*s' (supported: INT, TERM, HUP, WINCH)",
             (int)signal_name->length,signal_name->chars);
         VM_RETURN(DIAMOND_VM_TYPE_ERROR);
     }
@@ -4092,6 +4106,10 @@ DiamondVmStatus outlined_signal_trap(DiamondVm *vm,const DiamondChunk *chunk,Dia
      * while a server sits idle in accept()/poll() with
      * nothing connecting). */
     action.sa_flags=0;
+    /* A resize is no reason to cut a blocking call short: with SA_RESTART a
+     * read or waitpid carries on, and the handler still runs at the next
+     * instruction (poll and IO.poll return EINTR either way, so they notice). */
+    if(diamond_signal_numbers[signal_index]==SIGWINCH)action.sa_flags=SA_RESTART;
     if(sigaction(diamond_signal_numbers[signal_index],&action,nullptr)!=0) {
         snprintf(vm->error,sizeof vm->error,"cannot trap signal: %s",
             strerror(errno));

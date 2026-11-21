@@ -2761,6 +2761,34 @@ class StandardStream
   ## Whether the stream is a terminal, as `IO.tty?`.
   def tty?() -> Bool = IO.tty?(@name)
 
+  ## Runs the block with the terminal in raw mode (STDIN only): each key arrives as typed,
+  ## unechoed, with no line editing, Ctrl-C arriving as byte 3 instead of interrupting, and
+  ## no carriage return added to "\n" on output. The terminal is put back when the block
+  ## ends, raises, or the program exits inside it. Raises IOError when STDIN is not a
+  ## terminal. A raw block inside another leaves the mode to the outer one.
+  def raw(&block)
+    raise IOError.new("#{self.inspect()} is not open for reading") if @name != :stdin
+    entered = __diamond_terminal(0, @name, true)
+    begin
+      yield()
+    ensure
+      __diamond_terminal(0, @name, false) if entered
+    end
+  end
+
+  ## `[rows, columns]` of the terminal this stream is, or nil when it is a pipe or a file.
+  def winsize() -> Array[Int] | Nil
+    __diamond_terminal(1, @name, nil)
+  end
+
+  ## Up to `limit` bytes of input as soon as at least one is there, or nil at the end
+  ## (STDIN only). In raw mode that is one key, or the bytes of one escape sequence such
+  ## as an arrow key. Wait with `IO.poll([STDIN], [], ms)` first to read with a timeout.
+  def readpartial(limit: Int) -> String | Nil
+    raise IOError.new("#{self.inspect()} is not open for reading") if @name != :stdin
+    __diamond_terminal(2, limit, nil)
+  end
+
   ## Two values for the same stream are equal.
   def ==(other) -> Bool = other is StandardStream && other.name() == @name
 

@@ -2374,12 +2374,12 @@ class Parser
       name = @current_module_name + "::" + name
     end
     if self.find_interface(name) != nil || self.find_class(name) != nil
-      self.fail("type name is already defined")
+      self.fail_name_taken(name, "an interface")
       return 0
     end
     index = 0
     while index < @modules.length()
-      self.fail("type name is already defined") if @modules[index][0] == name
+      self.fail_name_taken(name, "an interface") if @modules[index][0] == name
       index = index + 1
     end
     return 0 if @failed
@@ -2979,12 +2979,12 @@ class Parser
       end
     end
     if self.find_interface(name) != nil
-      self.fail("type name is already defined")
+      self.fail_name_taken(name, "a class")
       return 0
     end
     index = 0
     while index < @modules.length()
-      self.fail("type name is already defined") if @modules[index][0] == name
+      self.fail_name_taken(name, "a class") if @modules[index][0] == name
       index = index + 1
     end
     return 0 if @failed
@@ -3231,12 +3231,12 @@ class Parser
       return 0
     end
     if self.find_interface(name) != nil
-      self.fail("type name is already defined")
+      self.fail_name_taken(name, "a struct")
       return 0
     end
     index = 0
     while index < @modules.length()
-      self.fail("type name is already defined") if @modules[index][0] == name
+      self.fail_name_taken(name, "a struct") if @modules[index][0] == name
       index = index + 1
     end
     return 0 if @failed
@@ -3888,7 +3888,7 @@ class Parser
       module_entry = index if @modules[index][0] == name
       index = index + 1
     end
-    self.fail("module name is already defined") if self.find_class(name) != nil || self.find_interface(name) != nil
+    self.fail_name_taken(name, "a module") if self.find_class(name) != nil || self.find_interface(name) != nil
     return 0 if @failed
     module_index = if module_entry == nil then @builder.declare_module(name) else @modules[module_entry][1] end
     if module_entry == nil
@@ -6394,6 +6394,57 @@ class Parser
     self.emit_register(destination)
     self.emit_register(source)
     self.emit_byte(if newline == true then 1 elsif newline == false then 0 else newline end)
+    destination
+  end
+
+  # A cross-kind name clash (`module Board` when Board is a class), saying what holds the
+  # name, as compiler_classes.c's fail_name_taken.
+  def fail_name_taken(name, declaring)
+    existing = "a module"
+    if self.find_class(name) != nil
+      existing = "a class"
+    elsif self.find_interface(name) != nil
+      existing = "an interface"
+    end
+    local = name.split("::").last()
+    if existing == declaring
+      self.fail("'#{local}' is already defined as #{existing}")
+    else
+      self.fail("'#{local}' is already #{existing}, so it can't also be #{declaring}")
+    end
+  end
+
+  # `__diamond_terminal(kind, a, b)`, as compiler_builtins.c's parse_diamond_terminal_call:
+  # FILE_PATH with selector 29 (raw mode), 30 (winsize) or 31 (stdin readpartial).
+  def parse_diamond_terminal_call()
+    self.advance_token()
+    self.skip_newlines()
+    text = if @current.kind() == :integer then self.token_text(@current) else "" end
+    if text.length() != 1 || text < "0" || text > "2"
+      self.fail("__diamond_terminal takes a literal kind from 0 to 2")
+      return 0
+    end
+    self.advance_token()
+    operands = []
+    2.times() do
+      self.skip_newlines()
+      if @current.kind() != :comma
+        self.fail("__diamond_terminal takes a kind and two values")
+        return 0
+      end
+      self.advance_token()
+      self.skip_newlines()
+      operands.push(self.parse_expression())
+    end
+    self.skip_newlines()
+    if @current.kind() != :right_paren
+      self.fail("expected ')' after arguments")
+      return 0
+    end
+    self.advance_token()
+    destination = self.allocate_register()
+    self.emit_instruction3(Opcode::FILE_PATH, destination, operands[0], operands[1])
+    self.emit_byte(29 + text.to_i())
     destination
   end
 
@@ -9998,6 +10049,7 @@ class Parser
     return self.parse_print_call(false) if name == "print" && self.find_function(name) == nil
     return self.parse_print_call(3) if name == "warn" && self.find_function(name) == nil
     return self.parse_diamond_print_call() if name == "__diamond_print" && self.find_function(name) == nil
+    return self.parse_diamond_terminal_call() if name == "__diamond_terminal" && self.find_function(name) == nil
     return self.parse_builtin_scalar_call(name) if self.is_builtin_scalar_target(name)
     return self.parse_math_unary_call(math_unary_id(name)) if self.is_math_unary_target(name)
     return self.parse_math_binary_call(4) if self.is_math_binary_target(name)

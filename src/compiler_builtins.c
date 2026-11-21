@@ -2051,6 +2051,46 @@ uint16_t parse_diamond_print_call(Compiler *compiler) {
     return dest;
 }
 
+/* `__diamond_terminal(kind, a, b)`: FILE_PATH with a terminal selector (src/vm.h), kind a
+ * literal 0 (TERMINAL_RAW), 1 (TERMINAL_WINSIZE) or 2 (STDIN_READ). Only the prelude's
+ * StandardStream calls it; raw, winsize and readpartial are the public names. */
+uint16_t parse_diamond_terminal_call(Compiler *compiler) {
+    advance_token(compiler); /* consume '(' */
+    skip_newlines(compiler);
+    if(compiler->current.kind!=DIAMOND_TOKEN_INTEGER||compiler->current.span.length!=1||
+       compiler->source[compiler->current.span.start]<'0'||compiler->source[compiler->current.span.start]>'2') {
+        fail(compiler,compiler->current.span,"__diamond_terminal takes a literal kind from 0 to 2");
+        return 0;
+    }
+    static const DiamondFilePathFunction selectors[]={DIAMOND_FILE_PATH_TERMINAL_RAW,
+        DIAMOND_FILE_PATH_TERMINAL_WINSIZE,DIAMOND_FILE_PATH_STDIN_READ};
+    const DiamondFilePathFunction selector=
+        selectors[compiler->source[compiler->current.span.start]-'0'];
+    advance_token(compiler);
+    uint16_t operands[2];
+    for(size_t index=0;index<2;index++) {
+        skip_newlines(compiler);
+        if(compiler->current.kind!=DIAMOND_TOKEN_COMMA) {
+            fail(compiler,compiler->current.span,"__diamond_terminal takes a kind and two values");
+            return 0;
+        }
+        advance_token(compiler);
+        skip_newlines(compiler);
+        operands[index]=parse_expression(compiler);
+    }
+    skip_newlines(compiler);
+    if(compiler->current.kind!=DIAMOND_TOKEN_RIGHT_PAREN) {
+        fail(compiler,compiler->current.span,"expected ')' after arguments");
+        return 0;
+    }
+    advance_token(compiler);
+    const uint16_t dest=allocate_register(compiler);
+    emit_opcode(compiler,DIAMOND_OP_FILE_PATH);
+    emit_register(compiler,dest);emit_register(compiler,operands[0]);
+    emit_register(compiler,operands[1]);emit_byte(compiler,(uint8_t)selector);
+    return dest;
+}
+
 /* p(value): puts(value.inspect()) that then evaluates to value, so it can wrap an
  * expression while debugging. Takes exactly one argument; a user-defined `p` (function
  * or local) takes precedence over it, as for puts. */

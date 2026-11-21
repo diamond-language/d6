@@ -1,0 +1,20 @@
+# Checks STDIN.raw, STDOUT.winsize, STDIN.readpartial and a WINCH trap in a real
+# terminal; docs/internal/terminal-testing.md drives it with tmux. Prints the keys
+# read, how many resizes it saw and the final size, then exits 3 from inside the
+# raw block, which must still leave the terminal as it was.
+RESIZES = {"count" => 0}
+def on_resize()
+  RESIZES["count"] += 1
+end
+Signal.trap("WINCH", on_resize)
+keys = []
+STDIN.raw() do
+  STDOUT.write("size #{STDOUT.winsize()}\r\n")
+  while keys.length() < 4
+    ready = IO.poll([STDIN], [], 200)
+    next unless ready["readable"][0]
+    keys.push(STDIN.readpartial(16).bytes())
+  end
+  STDOUT.write("keys #{keys} resizes #{RESIZES["count"]} size #{STDOUT.winsize()}\r\n")
+  exit(3) if keys.length() == 4
+end

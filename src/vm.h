@@ -767,6 +767,16 @@ typedef enum {
     /* Dir.glob(pattern, base: nil): the sorted paths matching a shell-style pattern (see
      * src/vm_glob.c). The second operand is the base directory String or nil. */
     DIAMOND_FILE_PATH_GLOB,
+    /* The terminal primitives behind STDIN.raw, STDOUT.winsize and STDIN.readpartial (the
+     * prelude's StandardStream, through `__diamond_terminal`; src/vm_terminal.c).
+     * TERMINAL_RAW: the first operand is the stream Symbol, the second true to enter raw
+     * mode (returning whether this call entered it) or false to leave it.
+     * TERMINAL_WINSIZE: [rows, columns] of the stream's terminal, or nil.
+     * STDIN_READ: up to the first operand's Int bytes of stdin, waiting for at least one;
+     * nil at the end. */
+    DIAMOND_FILE_PATH_TERMINAL_RAW,
+    DIAMOND_FILE_PATH_TERMINAL_WINSIZE,
+    DIAMOND_FILE_PATH_STDIN_READ,
 } DiamondFilePathFunction;
 
 typedef enum DiamondMathFunction : uint8_t {
@@ -921,7 +931,7 @@ enum { DIAMOND_INLINE_CACHE_WIDTH = 4 };
 /* INT, TERM, HUP -- see docs/io.md's signals section for why this
  * specific small, fixed set rather than every signal name POSIX knows
  * about. */
-enum { DIAMOND_SIGNAL_COUNT = 3 };
+enum { DIAMOND_SIGNAL_COUNT = 4 };
 
 typedef enum DiamondBuiltinClass : uint8_t {
     DIAMOND_CLASS_EXCEPTION,

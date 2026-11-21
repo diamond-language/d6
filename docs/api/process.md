@@ -161,7 +161,8 @@ child.wait()            # => 0
 ### `Signal.trap(name, handler)`
 
 Runs `handler`, a zero-argument callable, when the process receives `"INT"`,
-`"TERM"` or `"HUP"`. Other names raise `TypeError`. The handler runs
+`"TERM"`, `"HUP"` or `"WINCH"` (the terminal was resized; read the new size with
+`STDOUT.winsize`). Other names raise `TypeError`. The handler runs
 between instructions, including during `IO.poll`, but not while a blocking
 call such as `Process.run` waits.
 
@@ -218,6 +219,37 @@ stream.
 
 Whether the stream is a terminal, as `IO.tty?`.
 
+### `winsize() -> Array[Int] | Nil`
+
+`[rows, columns]` of the terminal the stream is, or `nil` for a pipe or a file.
+
+### `raw() do ... end`
+
+`STDIN` only: runs the block with the terminal in raw mode. Keys arrive as they are
+typed, unechoed and without line editing; Ctrl-C arrives as byte 3 instead of
+interrupting; and output gets no carriage return before `"\n"`, so write `"\r\n"`. The
+terminal is put back when the block ends, raises, or the program exits inside it.
+`IOError` when stdin is not a terminal. A raw block inside another leaves the mode to
+the outer one.
+
+### `readpartial(limit) -> String | Nil`
+
+`STDIN` only: up to `limit` bytes as soon as at least one is there, or `nil` at the end.
+In raw mode one call returns one key, or the bytes of one escape sequence (`"\e[A"` for
+Up). Wait on `IO.poll([STDIN], [], ms)` first to give up after a timeout.
+
+<!-- doc-check: skip -->
+```ruby
+STDIN.raw() do
+  rows, columns = STDOUT.winsize()
+  STDOUT.write("#{columns}x#{rows}, press a key\r\n")
+  if IO.poll([STDIN], [], 5000)["readable"][0]
+    key = STDIN.readpartial(16)
+    STDOUT.write("got #{key.bytes()}\r\n")
+  end
+end
+```
+
 ### `name() -> Symbol`
 
 `:stdout`, `:stderr` or `:stdin`. Two values for the same stream are `==`.
@@ -237,8 +269,8 @@ color = IO.tty?(:stdout) && ENV["NO_COLOR"] == nil
 
 ### `IO.poll(readables, writables, timeout_ms) -> Hash`
 
-Waits until one of the non-blocking sockets, listeners, UDP sockets or
-process streams in the two Arrays is ready, or `timeout_ms` passes (`-1`
+Waits until one of the non-blocking sockets, listeners, UDP sockets,
+process streams or standard streams (`STDIN`) in the two Arrays is ready, or `timeout_ms` passes (`-1`
 waits forever, `0` checks once). Returns
 `{"readable": [Bool, ...], "writable": [Bool, ...]}`, one entry per input in
 the same order.

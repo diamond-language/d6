@@ -154,7 +154,7 @@ DiamondVmStatus file_copy_helper(DiamondVm *vm,const DiamondString *from,
         close(source);
         return DIAMOND_VM_IO_ERROR;
     }
-    char buffer[65536];
+    char buffer[4096];
     int saved=0;
     for(;;) {
         const ssize_t got=read(source,buffer,sizeof buffer);
@@ -1456,7 +1456,7 @@ DiamondVmStatus file_sha256_helper(DiamondVm *vm,const DiamondString *path,
         close(source);
         return DIAMOND_VM_OUT_OF_MEMORY;
     }
-    char buffer[65536];
+    char buffer[4096];
     int saved=0;
     for(;;) {
         const ssize_t got=read(source,buffer,sizeof buffer);
@@ -1663,6 +1663,70 @@ DiamondVmStatus read_line(DiamondVm *vm,FILE *stream,StringBuilder *builder,
     pthread_mutex_unlock(&stdin_reader.lock);
     return status;
 #endif
+}
+
+/* STDIN.readpartial(limit): up to `limit` bytes of stdin, as soon as at least one is
+ * there (unlike gets, which waits for a whole line); nil at the end. In raw mode that
+ * is a key or the bytes of one escape sequence. Shares gets' lock and its partial line,
+ * so a line gets had started is handed out before anything newer. */
+DiamondVmStatus stdin_read_partial(DiamondVm *vm,DiamondValue limit,DiamondValue *result) {
+    if(limit.kind!=DIAMOND_VALUE_INT||limit.as.integer<1) {
+        snprintf(vm->error,sizeof vm->error,"STDIN.readpartial takes a positive Int");
+        return DIAMOND_VM_TYPE_ERROR;
+    }
+    /* Kept small: this can run on a fiber's stack. A longer limit reads in pieces. */
+    const size_t wanted=limit.as.integer>4096?4096:(size_t)limit.as.integer;
+    char buffer[4096];
+    ssize_t got=0;
+    DiamondVmStatus status=DIAMOND_VM_OK;
+#ifdef __wasi__
+    got=read(STDIN_FILENO,buffer,wanted);
+    if(got<0) {
+        snprintf(vm->error,sizeof vm->error,"read error: %s",strerror(errno));
+        return DIAMOND_VM_IO_ERROR;
+    }
+#else
+    int lock_error;
+    while((lock_error=pthread_mutex_trylock(&stdin_reader.lock))==EBUSY) {
+        (void)poll_interruptible(vm,nullptr,0,DIAMOND_INTERRUPT_SLICE_MS,&status);
+        if(status!=DIAMOND_VM_OK)return status;
+    }
+    if(lock_error!=0) {
+        snprintf(vm->error,sizeof vm->error,"stdin reader: %s",strerror(lock_error));
+        return DIAMOND_VM_IO_ERROR;
+    }
+    if(stdin_reader.line.length>0) {
+        /* What an interrupted gets read before the newline came. */
+        got=(ssize_t)(stdin_reader.line.length<wanted?stdin_reader.line.length:wanted);
+        memcpy(buffer,stdin_reader.line.chars,(size_t)got);
+        memmove(stdin_reader.line.chars,stdin_reader.line.chars+got,
+            stdin_reader.line.length-(size_t)got);
+        stdin_reader.line.length-=(size_t)got;
+    } else {
+        for(;;) {
+            if(vm_interrupt_requested(vm)) {status=DIAMOND_VM_INTERRUPTED;break;}
+            struct pollfd interest={.fd=STDIN_FILENO,.events=POLLIN};
+            const int ready=poll_interruptible(vm,&interest,1,-1,&status);
+            if(status!=DIAMOND_VM_OK)break;
+            if(ready<=0)continue;
+            got=read(STDIN_FILENO,buffer,wanted);
+            if(got>=0)break;
+            if(errno==EINTR||errno==EAGAIN||errno==EWOULDBLOCK)continue;
+            snprintf(vm->error,sizeof vm->error,"read error: %s",strerror(errno));
+            status=DIAMOND_VM_IO_ERROR;break;
+        }
+    }
+    pthread_mutex_unlock(&stdin_reader.lock);
+    if(status!=DIAMOND_VM_OK)return status;
+#endif
+    if(got==0) {
+        *result=DIAMOND_NIL;
+        return DIAMOND_VM_OK;
+    }
+    DiamondString *text=allocate_string(vm,buffer,(size_t)got);
+    if(text==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
+    *result=DIAMOND_OBJECT(text);
+    return DIAMOND_VM_OK;
 }
 
 DiamondVmStatus file_invoke_helper(DiamondVm *vm,
