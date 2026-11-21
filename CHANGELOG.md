@@ -43,6 +43,10 @@ record. From 1.0.0, releases follow the [1.x compatibility policy](docs/compatib
 - A warning when a method reference (`box.label` without parentheses) is compared with `nil`, used
   as a condition or interpolated: a reference is never `nil`, always true and prints as
   `#<Closure>`, so each is almost certainly a missing `()`.
+- Full-screen terminal programs: `STDIN.raw() do ... end` (raw mode for the block, restored even on
+  exit), `STDIN.readpartial(n)` (the bytes that have arrived: one key), `STDOUT.winsize()`
+  (`[rows, columns]`, nil without a terminal), `IO.poll` accepting `STDIN`, and
+  `Signal.trap("WINCH", handler)` for resizes.
 
 ### Fixed
 
@@ -68,6 +72,9 @@ record. From 1.0.0, releases follow the [1.x compatibility policy](docs/compatib
   took minutes).
 - `insert` or `unshift` that an Array's element type rejects leaves the Array as it was; it used to
   empty everything after the insertion point.
+- A name clash between a class, struct, interface and module says what already holds the name
+  (`'Board' is already a class, so it can't also be a module`) instead of "module name is
+  already defined".
 
 ## 1.3.1 — 2026-11-20
 

@@ -1,0 +1,29 @@
+# The terminal methods when stdin is a pipe and stdout is captured (tests/run.sh
+# runs this with stdin from a pipe): no size, raw mode refused, readpartial
+# hands out bytes as they come, and a trapped WINCH runs its handler.
+RESIZES = {"count" => 0}
+
+def resized()
+  RESIZES["count"] += 1
+end
+
+Signal.trap("WINCH", resized)
+Process.run(["kill", "-WINCH", Process.pid().to_s()])
+# The handler runs between instructions; IO.poll gives it a moment.
+IO.poll([], [], 50)
+
+raw = begin
+  STDIN.raw() do "entered" end
+rescue error: IOError
+  error.message()
+end
+zero = begin
+  STDIN.readpartial(0)
+rescue error: TypeError
+  error.message()
+end
+ready = IO.poll([STDIN], [], 1000)["readable"]
+first = STDIN.readpartial(3)
+rest = STDIN.readpartial(100)
+finished = STDIN.readpartial(100)
+puts([RESIZES["count"], STDOUT.winsize(), raw, zero, ready, first, rest, finished].inspect())

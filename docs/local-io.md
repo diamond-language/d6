@@ -102,6 +102,18 @@ terminal (`isatty`), and false when it is a file or a pipe -- the usual
 test before printing colour or prompting for input. Any other name raises
 `TypeError`.
 
+### Full-screen programs
+
+`STDIN.raw() do ... end` puts the terminal in raw mode for the block, so a program sees
+each key as it is typed; `STDIN.readpartial(n)` reads what has arrived (one key, or an
+escape sequence such as `"\e[A"` for Up); `IO.poll([STDIN], [], ms)` waits for a key with
+a timeout; `STDOUT.winsize()` is `[rows, columns]`; and `Signal.trap("WINCH", handler)`
+runs `handler` when the window is resized. Drawing is ANSI escape sequences written to
+`STDOUT`: `"\e[?1049h"` switches to the alternate screen, `"\e[ROW;COLH"` moves the
+cursor. The terminal is restored when the raw block ends, even when the program exits
+inside it, but a program killed by a signal it does not trap leaves it raw (`reset`
+fixes that), so trap `TERM` and `HUP` too.
+
 ## Debug printing: `p`
 
 ```ruby

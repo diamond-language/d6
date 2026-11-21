@@ -11,6 +11,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <termios.h>
 
 #define UNSUPPORTED_INT() do { errno = ENOSYS; return -1; } while (0)
 
@@ -93,3 +94,12 @@ int sigaction(int signal_number, const struct sigaction *action, struct sigactio
 
 int mkstemp(char *pattern) { (void)pattern; UNSUPPORTED_INT(); }
 char *mkdtemp(char *pattern) { (void)pattern; errno = ENOSYS; return NULL; }
+
+/* STDIN.raw (src/vm_terminal.c): there is no terminal to configure, so raw mode
+ * reports the same error a pipe gets. */
+int tcgetattr(int descriptor, struct termios *settings) {
+    (void)descriptor; (void)settings; errno = ENOTTY; return -1;
+}
+int tcsetattr(int descriptor, int when, const struct termios *settings) {
+    (void)descriptor; (void)when; (void)settings; errno = ENOTTY; return -1;
+}

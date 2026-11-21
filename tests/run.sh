@@ -2173,6 +2173,12 @@ bash tests/signal_threads.sh "$diamond"
 DIAMOND_BIN="$diamond" bash tests/sleep_signal.sh
 "$diamond" tests/native_members_test.d6
 
+# STDIN.raw, STDOUT.winsize, STDIN.readpartial and a WINCH trap with no terminal
+# (stdin a pipe, stdout captured). Raw mode itself needs a terminal; see
+# docs/internal/terminal-testing.md for checking it by hand.
+terminal_streams="$(printf 'abcdef\n' | "$diamond" tests/terminal/streams_without_terminal.d6 2>&1)"
+[[ "$terminal_streams" == '[1, nil, "STDIN.raw needs a terminal: STDIN is not one", "STDIN.readpartial takes a positive Int", [true], "abc", "def\n", nil]'* ]]
+
 # An untrapped signal still gets the OS default disposition (kills the
 # process) -- Signal.trap is opt-in per signal name, not a blanket
 # "Diamond now handles all signals" switch.

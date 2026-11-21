@@ -34,8 +34,10 @@
  * where waiting for the *next* bytecode instruction to run this check
  * could mean waiting arbitrarily long (TCPServer#accept, IO.poll,
  * UDPSocket#receive -- see their own opcode handlers). */
-const int diamond_signal_numbers[DIAMOND_SIGNAL_COUNT]={SIGINT,SIGTERM,SIGHUP};
-const char *const diamond_signal_names[DIAMOND_SIGNAL_COUNT]={"INT","TERM","HUP"};
+/* WINCH (the terminal was resized) is the one that does not ask the process to stop: a
+ * full-screen program redraws on it. */
+const int diamond_signal_numbers[DIAMOND_SIGNAL_COUNT]={SIGINT,SIGTERM,SIGHUP,SIGWINCH};
+const char *const diamond_signal_names[DIAMOND_SIGNAL_COUNT]={"INT","TERM","HUP","WINCH"};
 /* Signal handlers must never enter an atomic library lock. All supported
  * targets provide lock-free unsigned int atomics. A single mask also avoids
  * losing a delivery between clearing a summary flag and its per-signal flag. */
@@ -112,7 +114,28 @@ DiamondVmStatus dispatch_pending_signals(DiamondVm *vm,const DiamondChunk *chunk
 
 /* Readiness is meaningful for TLS only while its handshake is pending.
  * Completed TLS sockets retain their blocking application I/O contract. */
+/* STDIN, STDOUT and STDERR: instances of the prelude's StandardStream, whose one field is
+ * the stream's name Symbol. -1 for anything else. */
+static int standard_stream_fd(DiamondValue value) {
+    if(value.kind!=DIAMOND_VALUE_OBJECT||value.as.object->kind!=DIAMOND_OBJECT_INSTANCE)return -1;
+    const DiamondInstance *instance=(const DiamondInstance *)value.as.object;
+    if(instance->class==nullptr||strcmp(instance->class->name,"StandardStream")!=0||
+       instance->field_count<1)return -1;
+    const DiamondValue name=instance->fields[0];
+    if(name.kind!=DIAMOND_VALUE_OBJECT||name.as.object->kind!=DIAMOND_OBJECT_SYMBOL)return -1;
+    const DiamondString *symbol=(const DiamondString *)name.as.object;
+    if(symbol->length==5&&memcmp(symbol->chars,"stdin",5)==0)return STDIN_FILENO;
+    if(symbol->length==6&&memcmp(symbol->chars,"stdout",6)==0)return STDOUT_FILENO;
+    if(symbol->length==6&&memcmp(symbol->chars,"stderr",6)==0)return STDERR_FILENO;
+    return -1;
+}
+
 DiamondVmStatus pollable_fd(DiamondVm *vm,DiamondValue value,int *out_fd) {
+    const int standard=standard_stream_fd(value);
+    if(standard>=0) {
+        *out_fd=standard;
+        return DIAMOND_VM_OK;
+    }
     if(value.kind!=DIAMOND_VALUE_OBJECT||
        (value.as.object->kind!=DIAMOND_OBJECT_LISTENER&&
         value.as.object->kind!=DIAMOND_OBJECT_SOCKET&&
@@ -120,7 +143,7 @@ DiamondVmStatus pollable_fd(DiamondVm *vm,DiamondValue value,int *out_fd) {
         value.as.object->kind!=DIAMOND_OBJECT_TLS_SOCKET&&
         value.as.object->kind!=DIAMOND_OBJECT_PROCESS_STREAM)) {
         snprintf(vm->error,sizeof vm->error,"IO.poll arguments must be nonblocking "
-            "TCPServer listeners, their accepted Sockets, UDPSockets, or a Process.spawn stream");
+            "TCPServer listeners, their accepted Sockets, UDPSockets, a Process.spawn stream, or STDIN");
         return DIAMOND_VM_TYPE_ERROR;
     }
     int fd=-1;

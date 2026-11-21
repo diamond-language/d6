@@ -2099,6 +2099,10 @@ DIAMOND_INTERNAL DiamondVmStatus outlined_mysql_open(DiamondVm *vm,const Diamond
         size_t *ip_ref);
 DIAMOND_INTERNAL DiamondVmStatus outlined_semver(DiamondVm *vm,const DiamondChunk *chunk,DiamondValue *registers,
         size_t *ip_ref);
+DIAMOND_INTERNAL DiamondVmStatus stdin_read_partial(DiamondVm *vm,DiamondValue limit,DiamondValue *result);
+DIAMOND_INTERNAL DiamondVmStatus terminal_raw(DiamondVm *vm,DiamondValue stream,DiamondValue on,
+    DiamondValue *result);
+DIAMOND_INTERNAL DiamondVmStatus terminal_winsize(DiamondVm *vm,DiamondValue stream,DiamondValue *result);
 DIAMOND_INTERNAL DiamondVmStatus outlined_file_path(DiamondVm *vm,const DiamondChunk *chunk,DiamondValue *registers,
         size_t *ip_ref);
 DIAMOND_INTERNAL DiamondVmStatus outlined_tcp_listen_nonblock(DiamondVm *vm,const DiamondChunk *chunk,DiamondValue *registers,
