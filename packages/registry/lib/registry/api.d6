@@ -68,7 +68,7 @@ module Registry
         return [200, headers, ""]
       end
       bytes = @store.read(digest)
-      if bytes.length() != found.size() then raise IOError.new("blob size mismatch") end
+      if bytes.bytesize() != found.size() then raise IOError.new("blob size mismatch") end
       [200, headers, bytes]
     end
 

@@ -35,7 +35,7 @@ module Registry
       candidate = File.join(@staging, "upload-#{SecureRandom.hex(32)}")
       File.publish(candidate, bytes)
       begin
-        Archive.new(@verifier, candidate, name, digest, bytes.length())
+        Archive.new(@verifier, candidate, name, digest, bytes.bytesize())
       ensure
         File.delete(candidate)
       end
@@ -47,7 +47,7 @@ module Registry
     ## uploading the same archive again returns the existing release. `key` makes retries
     ## idempotent. Refusals raise a `Failure`.
     def publish(name: String, bytes: String, token: String, key: String = "")
-      if bytes.length() == 0 || bytes.length() > 58720256 then raise PayloadTooLarge.new() end
+      if bytes.bytesize() == 0 || bytes.bytesize() > 58720256 then raise PayloadTooLarge.new() end
       if key.length() > 128 then raise InvalidRequest.new() end
       characters = token.chars()
       index = 0
@@ -86,7 +86,7 @@ module Registry
       if created && !archive.maintainers_listed?() then raise InvalidArchive.new() end
       yanked = false
       if !created
-        if existing.sha256() != digest || existing.size() != bytes.length() || existing.taken_down?()
+        if existing.sha256() != digest || existing.size() != bytes.bytesize() || existing.taken_down?()
           raise ReleaseExists.new()
         end
         yanked = existing.yanked?()
@@ -101,7 +101,7 @@ module Registry
       end
       if created
         @db.execute("INSERT INTO releases (cut_id, version, dependencies, maintainers, sha256, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          [cut.id(), version, JSON.stringify(archive.dependencies()), JSON.stringify(archive.maintainers()), digest, bytes.length(), now])
+          [cut.id(), version, JSON.stringify(archive.dependencies()), JSON.stringify(archive.maintainers()), digest, bytes.bytesize(), now])
         @records.record_details(@db.last_insert_row_id(), archive)
         @records.audit({"subject": credential.subject(), "action": "publish", "cut_name": name, "version": version,
           "sha256": digest, "created_at": now}.merge(@records.credential_fields(credential)))
@@ -110,7 +110,7 @@ module Registry
         @db.execute("INSERT OR IGNORE INTO idempotency_keys (credential_id, key, body_sha256, created_at) VALUES (?, ?, ?, ?)",
           [credential.id(), key, digest, now])
       end
-      {"protocol": 1, "name": name, "version": version, "sha256": digest, "size": bytes.length(), "yanked": yanked, "created": created}
+      {"protocol": 1, "name": name, "version": version, "sha256": digest, "size": bytes.bytesize(), "yanked": yanked, "created": created}
     end
 
     # Reads display details for releases published before they were recorded. A release whose

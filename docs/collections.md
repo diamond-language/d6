@@ -113,14 +113,12 @@ rather than raising, unlike `.to_i()`; neither skips leading
 whitespace, and `"nan"`/`"inf"` parse as `0.0`, matching Ruby's
 `String#to_f`), and `.downcase()`/`.upcase()` (ASCII-only case
 conversion), and
-`.reverse()` (byte-level, not UTF-8-grapheme-aware — consistent with
-the rest of the language having no other Unicode awareness), and
+`.reverse()` (by character: code points, not grapheme clusters), and
 `.strip()` (trims leading/trailing ASCII whitespace; `.lstrip()`/`.rstrip()`
 trim only one side), `.chomp()` (removes one trailing `"\n"`, `"\r\n"` or
 `"\r"`; `.chomp(suffix)` removes `suffix` instead, when the string ends
 with it, and `.chomp("")` removes every trailing `"\n"` and `"\r\n"`), `.capitalize()` (first ASCII letter upper, the
-rest lower), `.chars()` (an `Array` of one-byte strings, so a multi-byte UTF-8
-character becomes several), and `.empty?()`
+rest lower), `.chars()` (an `Array` of one-character strings), and `.empty?()`
 (zero length, like Array's and Hash's own `empty?`). `.split(separator)`
 returns an `Array` of every piece around non-overlapping occurrences of
 `separator` (an empty `separator` splits into one-character strings);

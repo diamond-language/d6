@@ -1951,7 +1951,7 @@ DiamondVmStatus diamond_jit_native_call(DiamondVm *vm,
     if(string_operation) {
         const DiamondString *source=(const DiamondString *)receiver->as.object;
         if(operation==DIAMOND_JIT_NATIVE_STRING_LENGTH) {
-            *out=DIAMOND_INT((int64_t)source->length);return DIAMOND_VM_OK;
+            *out=DIAMOND_INT((int64_t)string_char_count(source));return DIAMOND_VM_OK;
         }
         if(operation==DIAMOND_JIT_NATIVE_STRING_ORD) {
             if(source->length==0) {
@@ -1959,7 +1959,7 @@ DiamondVmStatus diamond_jit_native_call(DiamondVm *vm,
                     "cannot take ord of an empty String");
                 return DIAMOND_VM_INDEX_ERROR;
             }
-            *out=DIAMOND_INT((unsigned char)source->chars[0]);
+            *out=DIAMOND_INT(utf8_code_point(source->chars,source->length,0));
             return DIAMOND_VM_OK;
         }
         if(operation==DIAMOND_JIT_NATIVE_STRING_SLICE) {
@@ -1969,20 +1969,7 @@ DiamondVmStatus diamond_jit_native_call(DiamondVm *vm,
                     "String#slice arguments must be Int");
                 return DIAMOND_VM_TYPE_ERROR;
             }
-            const int64_t start=argument[0].as.integer;
-            const int64_t requested_length=argument[1].as.integer;
-            if(start<0||(uint64_t)start>source->length||requested_length<0) {
-                snprintf(vm->error,sizeof vm->error,
-                    "index %" PRId64 " out of bounds for String of length %zu",
-                    start,source->length);
-                return DIAMOND_VM_INDEX_ERROR;
-            }
-            const size_t available=source->length-(size_t)start;
-            const size_t length=(uint64_t)requested_length>available?
-                available:(size_t)requested_length;
-            DiamondString *slice=allocate_string(vm,source->chars+(size_t)start,length);
-            if(slice==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
-            *out=DIAMOND_OBJECT(slice);return DIAMOND_VM_OK;
+            return string_char_slice(vm,source,argument[0].as.integer,argument[1].as.integer,out);
         }
         if(argument->kind!=DIAMOND_VALUE_OBJECT||
            argument->as.object->kind!=DIAMOND_OBJECT_STRING) {
@@ -1996,7 +1983,7 @@ DiamondVmStatus diamond_jit_native_call(DiamondVm *vm,
         if(needle->length<=source->length)
             for(size_t start=0;start+needle->length<=source->length;start++)
                 if(memcmp(source->chars+start,needle->chars,needle->length)==0) {
-                    *out=DIAMOND_INT((int64_t)start);break;
+                    *out=DIAMOND_INT((int64_t)string_char_index(source,start));break;
                 }
         return DIAMOND_VM_OK;
     }

@@ -4,12 +4,12 @@
 # bytes.
 
 bytes16 = SecureRandom.bytes(16)
-puts(bytes16.length())
+puts(bytes16.bytesize())
 
 other_bytes16 = SecureRandom.bytes(16)
 puts(bytes16 != other_bytes16)
 
-puts(SecureRandom.bytes(0).length())
+puts(SecureRandom.bytes(0).bytesize())
 
 hex8 = SecureRandom.hex(8)
 puts(hex8.length())

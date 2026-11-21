@@ -112,7 +112,7 @@ class Corpus
       end
       i += 1
     end
-    puts("Corpus.load: assembled #{file_count} file(s), #{story_count} JSON stor(y/ies), #{text.length()} bytes total from #{folder}")
+    puts("Corpus.load: assembled #{file_count} file(s), #{story_count} JSON stor(y/ies), #{text.bytesize()} bytes total from #{folder}")
     text
   end
 end

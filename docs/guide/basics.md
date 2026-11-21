@@ -124,8 +124,8 @@ puts("hello".start_with?("he"))     # => true
 puts("42".to_i() + 1)               # => 43
 ```
 
-`length()` counts bytes, so a string with non-ASCII characters is longer
-than the number of characters you see. The
+`length()` counts characters and `bytesize()` counts bytes, so
+`"café".length()` is 4 and `"café".bytesize()` is 5. The
 [collections reference](../collections.md) lists every String method.
 
 ## Calling things

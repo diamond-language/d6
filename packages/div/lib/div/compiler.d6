@@ -247,30 +247,7 @@ module Div
   def escape_helper_lines(escape_fn_name)
     [
       "def #{escape_fn_name}(value)",
-      "  s = \"\#{value}\"",
-      "  if s.index_of(\"&\") == nil && s.index_of(\"<\") == nil && s.index_of(\">\") == nil && s.index_of(\"\\\"\") == nil && s.index_of(\"'\") == nil",
-      "    return s",
-      "  end",
-      "  sb = StringBuilder.new()",
-      "  i = 0",
-      "  while i < s.length()",
-      "    ch = s[i]",
-      "    if ch == \"&\"",
-      "      sb.append(\"&amp;\")",
-      "    elsif ch == \"<\"",
-      "      sb.append(\"&lt;\")",
-      "    elsif ch == \">\"",
-      "      sb.append(\"&gt;\")",
-      "    elsif ch == \"\\\"\"",
-      "      sb.append(\"&quot;\")",
-      "    elsif ch == \"'\"",
-      "      sb.append(\"&#39;\")",
-      "    else",
-      "      sb.append(ch)",
-      "    end",
-      "    i += 1",
-      "  end",
-      "  sb.to_s()",
+      "  \"\#{value}\".escape_html()",
       "end"
     ]
   end

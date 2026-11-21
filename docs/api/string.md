@@ -3,9 +3,12 @@
 [API reference](index.md) · Previous: [Object](object.md) · Next: [Array](array.md)
 
 A `String` is an immutable sequence of bytes, usually UTF-8 text. Every method
-returns a new value and leaves the receiver unchanged. Positions, lengths and
-case conversion work on bytes, so a multi-byte character counts as several
-(`"é".length()` is `2`), and `upcase`/`downcase` change ASCII letters only.
+returns a new value and leaves the receiver unchanged. Positions and lengths
+count characters (`"é".length()` is `1`): a character is one UTF-8 code point,
+and a byte that isn't part of valid UTF-8 counts as one character on its own.
+The byte methods `bytesize`, `byteslice`, `getbyte`, `bytes` and `each_byte`
+work on bytes, for binary data and wire protocols. `upcase`/`downcase` change
+ASCII letters only.
 
 Literals are written `"text"`, with `#{expr}` interpolation and backslash
 escapes (`\n`, `\t`, `\f`, `\xHH`, `\u{H...}` and the rest, listed in
@@ -56,10 +59,19 @@ The bytes as an `Array` of Ints from `0` to `255`.
 
 ### `bytesize() -> Int`
 
-The number of bytes. The same as `length()`.
+The number of bytes. `length()` counts characters instead.
 
 ```ruby
 "hé".bytesize()   # => 3
+```
+
+### `byteslice(start, length) -> String`
+
+`length` bytes from byte `start`, clamped to the end; `slice` in bytes. A `start` past the
+end raises `IndexError`. The piece can cut a character in half.
+
+```ruby
+"héllo".byteslice(0, 3)   # => "hé"
 ```
 
 ### `capitalize() -> String`
@@ -80,7 +92,7 @@ Whether the two strings are equal when ASCII case is ignored.
 
 ### `center(width, padding = " ") -> String`
 
-The receiver centered in `width` bytes, padded on both sides with `padding`.
+The receiver centered in `width` characters, padded on both sides with `padding`.
 A receiver already `width` long or longer comes back unchanged.
 
 ```ruby
@@ -89,10 +101,11 @@ A receiver already `width` long or longer comes back unchanged.
 
 ### `chars() -> Array[String]`
 
-Each byte as a one-byte `String`.
+Each character as a `String`.
 
 ```ruby
 "abc".chars()   # => ["a", "b", "c"]
+"日本".chars()   # => ["日", "本"]
 ```
 
 ### `chomp(suffix = nil) -> String`
@@ -150,6 +163,17 @@ The receiver without `suffix`, when it ends with it.
 "main.d6".delete_suffix(".d6")   # => "main"
 ```
 
+### `display_width() -> Int`
+
+The number of terminal columns the text takes: East Asian wide characters and most emoji
+take two, combining marks and control characters none, everything else one. Use it to line
+up text in a terminal, where `length()` counts characters, not columns.
+
+```ruby
+"日本".display_width()   # => 4
+"e\u{301}".display_width()   # => 1
+```
+
 ### `downcase() -> String`
 
 ASCII letters in lower case.
@@ -174,7 +198,7 @@ total   # => 195
 
 ### `each_char() do |char| ... end -> String`
 
-Calls the block with each byte as a one-byte `String` and returns the receiver.
+Calls the block with each character as a `String` and returns the receiver.
 
 ```ruby
 seen = []
@@ -226,8 +250,9 @@ escape `<%= %>` output the same way.
 
 `sprintf`-style formatting. `values` is one value or an `Array` of them; `%`
 does the same. The directives are `%d`/`%i`, `%f` (with `.N` precision), `%x`,
-`%X`, `%o`, `%b`, `%s` and `%%`, with `-` to left-justify and `0` to zero-pad
-inside a width. A value of the wrong type for its directive raises
+`%X`, `%o`, `%b`, `%s` (with `.N` keeping the first N characters) and `%%`,
+with `-` to left-justify and `0` to zero-pad inside a width; a `%s` width counts
+characters. A value of the wrong type for its directive raises
 `TypeError`, and too few values raise `ArgumentError`.
 
 ```ruby
@@ -298,7 +323,7 @@ The position of the first `needle` at or after `start`, or `nil`.
 
 ### `index_of(needle, start = 0) -> Int | Nil`
 
-The position of the first `needle` at or after byte `start`, or `nil`. Unlike `index`, a
+The position of the first `needle` at or after `start`, or `nil`. Unlike `index`, a
 negative `start` finds nothing. The search starts in place, so stepping through a long String
 with it costs nothing per call for the text already passed.
 
@@ -325,10 +350,11 @@ puts("say \"hi\"".inspect())   # => "say \"hi\""
 
 ### `length() -> Int`
 
-The number of bytes.
+The number of characters. `bytesize()` counts bytes.
 
 ```ruby
 "hello".length()   # => 5
+"日本".length()    # => 2
 ```
 
 ### `lines() -> Array[String]`
@@ -341,7 +367,7 @@ The lines, each with its newline.
 
 ### `ljust(width, padding = " ") -> String`
 
-The receiver padded on the right to `width` bytes. A negative `width` or an
+The receiver padded on the right to `width` characters. A negative `width` or an
 empty `padding` raises `ArgumentError`.
 
 ```ruby
@@ -378,7 +404,7 @@ Whether `pattern` matches anywhere in the receiver.
 ### `match_data(pattern, position = 0) -> MatchData | Nil`
 
 Like `match`, but returns a [MatchData](match_data.md), with named groups and
-offsets, for the first match at or after byte offset `position`.
+offsets, for the first match at or after character `position`.
 
 ```ruby
 "x=12".match_data("(?<n>[0-9]+)")["n"]   # => "12"
@@ -398,8 +424,8 @@ The receiver read as an octal number.
 
 ### `ord() -> Int`
 
-The first byte as an `Int`. An empty string raises `IndexError`. `Int#chr` is
-the inverse.
+The first character's code point as an `Int`. An empty string raises `IndexError`.
+`Int#chr` is the inverse for ASCII; it makes one byte, so above 127 use `[code].pack("U")`.
 
 ```ruby
 "A".ord()   # => 65
@@ -432,7 +458,7 @@ The receiver repeated `n` times. A negative `n` raises `RangeError`.
 
 ### `reverse() -> String`
 
-The bytes in reverse order.
+The characters in reverse order.
 
 ```ruby
 "abc".reverse()   # => "cba"
@@ -448,7 +474,7 @@ The position of the last `needle`, or `nil`.
 
 ### `rjust(width, padding = " ") -> String`
 
-The receiver padded on the left to `width` bytes.
+The receiver padded on the left to `width` characters.
 
 ```ruby
 "7".rjust(3, "0")   # => "007"
@@ -479,8 +505,8 @@ The same as `length()`.
 
 ### `slice(start, length) -> String`
 
-`length` bytes from `start`, clamped to the end of the string. A `start`
-outside the string raises `IndexError`.
+`length` characters from `start`, clamped to the end of the string. A `start`
+outside the string raises `IndexError`. `byteslice` counts bytes.
 
 ```ruby
 "hello".slice(1, 3)    # => "ell"
@@ -490,7 +516,7 @@ outside the string raises `IndexError`.
 ### `split(separator = nil, limit = nil) -> Array[String]`
 
 The pieces around each `separator`, a `String` or a `Regexp`. Empty pieces
-are kept, unlike Ruby. An empty separator splits into one-byte strings, and
+are kept, unlike Ruby. An empty separator splits into characters, and
 no separator splits on runs of whitespace. With `limit`, at most that many
 pieces are returned and the last holds the rest.
 
@@ -582,10 +608,10 @@ The `Symbol` with this name.
 
 ### `tr(from, to) -> String`
 
-Translates each byte found in `from` to the byte at the same position in `to`.
-Both sides accept ranges such as `a-z`, and a leading `^` negates `from`. A
-shorter `to` repeats its last byte, and an empty `to` deletes the matched
-bytes.
+Translates each character found in `from` to the character at the same position
+in `to`. Both sides accept ranges such as `a-z`, and a leading `^` negates `from`.
+A shorter `to` repeats its last character, and an empty `to` deletes the matched
+characters.
 
 ```ruby
 "hello".tr("el", "ip")     # => "hippo"

@@ -39,9 +39,9 @@ def websocket_max_message_size() = 16 * 1024 * 1024
 def websocket_mask(data, key)
   sb = StringBuilder.new()
   index = 0
-  while index < data.length()
-    key_byte = key[index % 4].ord()
-    sb.append(chr(data[index].ord() ^ key_byte))
+  while index < data.bytesize()
+    key_byte = key.getbyte(index % 4)
+    sb.append(chr(data.getbyte(index) ^ key_byte))
     index = index + 1
   end
   sb.to_s()
@@ -66,7 +66,7 @@ end
 def websocket_encode_frame(opcode, payload, masked = false, fin = true)
   fin_bit = if fin then 128 else 0 end
   byte0 = fin_bit | opcode
-  length = payload.length()
+  length = payload.bytesize()
   sb = StringBuilder.new()
   sb.append(chr(byte0))
   mask_bit = if masked then 128 else 0 end
@@ -106,7 +106,7 @@ def websocket_read_exact(conn, n)
     return ""
   end
   data = conn.read(n)
-  if data.length() != n
+  if data.bytesize() != n
     raise IOError.new("WebSocket connection closed mid-frame")
   end
   data
@@ -133,8 +133,8 @@ def websocket_read_frame_start(conn)
   rescue error: IOError
     return nil
   end
-  return nil if header == nil || header.length() == 0
-  if header.length() != 2
+  return nil if header == nil || header.bytesize() == 0
+  if header.bytesize() != 2
     raise IOError.new("WebSocket connection closed mid-frame")
   end
   header
@@ -142,21 +142,21 @@ end
 
 # The rest of a frame whose two header bytes have been read.
 def websocket_read_frame_rest(conn, header)
-  byte0 = header[0].ord()
-  byte1 = header[1].ord()
+  byte0 = header.getbyte(0)
+  byte1 = header.getbyte(1)
   fin = (byte0 & 128) != 0
   opcode = byte0 & 15
   masked = (byte1 & 128) != 0
   length7 = byte1 & 127
   length = if length7 == 126
     extended = websocket_read_exact(conn, 2)
-    (extended[0].ord() << 8) | extended[1].ord()
+    (extended.getbyte(0) << 8) | extended.getbyte(1)
   elsif length7 == 127
     extended = websocket_read_exact(conn, 8)
     value = 0
     index = 0
     while index < 8
-      value = (value << 8) | extended[index].ord()
+      value = (value << 8) | extended.getbyte(index)
       index = index + 1
     end
     value

@@ -19,7 +19,7 @@ module CSV
 
   # The separator must be one byte, and can't be a quote or a line break.
   def self.separator_byte(separator: String) -> Int
-    if separator.length() != 1
+    if separator.bytesize() != 1
       raise ArgumentError.new("CSV separator must be one byte, got #{separator.inspect()}")
     end
     byte = separator.getbyte(0)
@@ -58,10 +58,10 @@ module CSV
       rows = []
       unless @started
         # A UTF-8 byte-order mark (from Excel and other Windows tools) isn't data.
-        if @buffer.length() < 3 && !final && "\xEF\xBB\xBF".start_with?(@buffer)
+        if @buffer.bytesize() < 3 && !final && "\xEF\xBB\xBF".start_with?(@buffer)
           return rows
         end
-        @buffer = @buffer.slice(3, @buffer.length() - 3) if @buffer.start_with?("\xEF\xBB\xBF")
+        @buffer = @buffer.byteslice(3, @buffer.bytesize() - 3) if @buffer.start_with?("\xEF\xBB\xBF")
         @started = true
       end
       while true
@@ -70,7 +70,7 @@ module CSV
         rows.push(row)
       end
       if @pos > 0
-        @buffer = @buffer.slice(@pos, @buffer.length() - @pos)
+        @buffer = @buffer.byteslice(@pos, @buffer.bytesize() - @pos)
         @pos = 0
       end
       rows
@@ -81,7 +81,7 @@ module CSV
     # @line only move once a whole row has been read.
     def read_row(final: Bool)
       text = @buffer
-      length = text.length()
+      length = text.bytesize()
       pos = @pos
       line = @line
       lf = CSV.lf()
@@ -140,11 +140,11 @@ module CSV
               end
               if pos + 1 < length && text.getbyte(pos + 1) == quote
                 # "" inside a quoted field is one literal quote.
-                field.append(text.slice(segment, pos + 1 - segment))
+                field.append(text.byteslice(segment, pos + 1 - segment))
                 pos += 2
                 segment = pos
               else
-                field.append(text.slice(segment, pos - segment))
+                field.append(text.byteslice(segment, pos - segment))
                 pos += 1
                 break
               end
@@ -160,7 +160,7 @@ module CSV
           end
           byte = text.getbyte(pos)
           if byte != separator && byte != lf && byte != cr
-            raise CSV::MalformedError.new("unexpected #{text.slice(pos, 1).inspect()} after a closing quote", line)
+            raise CSV::MalformedError.new("unexpected #{text.byteslice(pos, 1).inspect()} after a closing quote", line)
           end
         else
           # An unquoted field runs to the next separator or line break. A quote
@@ -172,7 +172,7 @@ module CSV
             pos += 1
           end
           return nil if pos >= length && !final
-          row.push(text.slice(segment, pos - segment))
+          row.push(text.byteslice(segment, pos - segment))
           break if pos >= length
         end
 

@@ -260,7 +260,7 @@ def http_read_chunked_body(conn, limit = http_max_body_size())
       end
       break
     end
-    if builder.length() + chunk_size > limit
+    if builder.bytesize() + chunk_size > limit
       raise IOError.new("chunked response body exceeds maximum of #{limit}")
     end
     builder.append(conn.read(chunk_size))
@@ -293,7 +293,7 @@ def http_read_body(conn, response_headers, limit = http_max_body_size())
   loop do
     piece = conn.read(65536)
     break if piece == nil || piece == ""
-    if builder.length() + piece.length() > limit
+    if builder.bytesize() + piece.bytesize() > limit
       conn.close()
       raise IOError.new("response body exceeds maximum of #{limit}")
     end
@@ -340,7 +340,7 @@ def http_send(conn, method, parsed, headers, body, limit = http_max_body_size())
   end
   headers.each(write_request_header)
   if body.length() > 0
-    conn.write("Content-Length: #{body.length()}\r\n")
+    conn.write("Content-Length: #{body.bytesize()}\r\n")
   end
   if http_header_lookup(headers, "Connection") == nil
     conn.write("Connection: close\r\n")

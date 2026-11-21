@@ -9,7 +9,7 @@ plaintext = "hello, secure cookies"
 blob = Cipher.encrypt(key, plaintext)
 
 # nonce(12) + tag(16) + ciphertext(same length as plaintext for GCM).
-puts(blob.length() == 12 + 16 + plaintext.length())
+puts(blob.bytesize() == 12 + 16 + plaintext.bytesize())
 puts(Cipher.decrypt(key, blob) == plaintext)
 
 # Same plaintext, two calls: different random nonce, different blob.
@@ -31,9 +31,9 @@ puts(Cipher.decrypt(key, Cipher.encrypt(key, binary)) == binary)
 # "tamper" that legitimately round-trips, an intermittent false test
 # failure with no bug behind it, confirmed directly: 500 runs of a
 # fixed-byte version reproduced it once).
-original_byte = blob.slice(20, 21).ord()
+original_byte = blob.getbyte(20)
 tamper_byte = ((original_byte + 1) % 256).chr()
-tampered = blob.slice(0, 20) + tamper_byte + blob.slice(21, blob.length())
+tampered = blob.byteslice(0, 20) + tamper_byte + blob.byteslice(21, blob.bytesize())
 puts(Cipher.decrypt(key, tampered))
 
 # The wrong key is an ordinary decrypt failure too.

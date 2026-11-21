@@ -854,6 +854,7 @@ DiamondString *allocate_string(DiamondVm *vm, const char *chars,
         .kind = DIAMOND_OBJECT_STRING,
     };
     string->length = length;
+    string->char_count_plus_one = 0;
     /* `chars` can be nullptr here with length 0 -- an empty StringBuilder
      * (File#read at EOF, an empty gets() line, ...) never allocates its
      * `chars` buffer at all. memcpy's first two arguments are declared
@@ -894,6 +895,7 @@ DiamondSymbol *allocate_symbol(DiamondVm *vm, const char *chars,
         .kind = DIAMOND_OBJECT_SYMBOL,
     };
     symbol->length = length;
+    symbol->char_count_plus_one = 0;
     /* See allocate_string's own comment just above: a null `chars` with
      * length 0 is well-defined for every current caller (a String/Symbol
      * object's own `chars` is never null, even empty), but the same

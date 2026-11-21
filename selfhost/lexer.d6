@@ -54,14 +54,14 @@ class Lexer
         next
       elsif code == "#".ord()
         reset = false
-        if @current + 7 <= @source.length()
-          if @source.slice(@current, 7) == "#line 1"
+        if @current + 7 <= @source.bytesize()
+          if @source.byteslice(@current, 7) == "#line 1"
             reset = true
           end
         end
         if reset
           after_index = @current + 7
-          after_ok = after_index >= @source.length()
+          after_ok = after_index >= @source.bytesize()
           if !after_ok
             after_code = self.code_at(after_index)
             after_ok = after_code == "\n".ord() || after_code == 0
@@ -320,7 +320,7 @@ class Lexer
     while self.identifier_part?(self.code_at(index))
       index = index + 1
     end
-    name = @source.slice(name_start, index - name_start)
+    name = @source.byteslice(name_start, index - name_start)
     if raw
       return nil if self.code_at(index) != "'".ord()
       index = index + 1
@@ -331,44 +331,44 @@ class Lexer
     body = @heredoc_resume
     if body == 0
       scan = @current
-      while scan < @source.length() && self.code_at(scan) != "\n".ord()
+      while scan < @source.bytesize() && self.code_at(scan) != "\n".ord()
         scan = scan + 1
       end
-      return self.make_token(:error) if scan >= @source.length()
+      return self.make_token(:error) if scan >= @source.bytesize()
       body = scan + 1
     end
     line = body
-    while line < @source.length()
+    while line < @source.bytesize()
       cursor = line
       while self.code_at(cursor) == " ".ord() || self.code_at(cursor) == "\t".ord()
         cursor = cursor + 1
       end
-      if @source.slice(cursor, name.length()) == name
-        after = cursor + name.length()
+      if @source.byteslice(cursor, name.bytesize()) == name
+        after = cursor + name.bytesize()
         while self.code_at(after) == " ".ord() || self.code_at(after) == "\t".ord() || self.code_at(after) == "\r".ord()
           after = after + 1
         end
-        if after >= @source.length() || self.code_at(after) == "\n".ord()
-          resume = after >= @source.length() ? after : after + 1
+        if after >= @source.bytesize() || self.code_at(after) == "\n".ord()
+          resume = after >= @source.bytesize() ? after : after + 1
           @heredoc_resume = resume
           @heredoc_skip = resume
           kind = raw ? :heredoc_raw : :heredoc
           return Token.new(kind, body, line - body, @token_line, @token_column)
         end
       end
-      while line < @source.length() && self.code_at(line) != "\n".ord()
+      while line < @source.bytesize() && self.code_at(line) != "\n".ord()
         line = line + 1
       end
-      line = line + 1 if line < @source.length()
+      line = line + 1 if line < @source.bytesize()
     end
     self.make_token(:error)
   end
 
   def code_at(index)
-    if index >= @source.length()
+    if index >= @source.bytesize()
       0
     else
-      @source[index].ord()
+      @source.getbyte(index)
     end
   end
 
@@ -382,8 +382,8 @@ class Lexer
       if code == " ".ord() || code == "\t".ord() || code == "\r".ord() || code == "\n".ord()
         index = index + 1
       elsif code == "#".ord()
-        return false if index + 7 <= @source.length() && @source.slice(index, 7) == "#line 1"
-        while index < @source.length() && self.code_at(index) != "\n".ord()
+        return false if index + 7 <= @source.bytesize() && @source.byteslice(index, 7) == "#line 1"
+        while index < @source.bytesize() && self.code_at(index) != "\n".ord()
           index = index + 1
         end
       else
@@ -399,7 +399,7 @@ class Lexer
     end
   end
 
-  def at_end?() = @current >= @source.length()
+  def at_end?() = @current >= @source.bytesize()
 
   def advance()
     code = self.code_at(@current)
@@ -425,8 +425,8 @@ class Lexer
   def identifier_part?(code) = self.identifier_start?(code) || (code >= "0".ord() && code <= "9".ord())
 
   def text_equals?(text)
-    return false if @current - @start != text.length()
-    @source.slice(@start, @current - @start) == text
+    return false if @current - @start != text.bytesize()
+    @source.byteslice(@start, @current - @start) == text
   end
 
   # `sealed` is only a keyword directly before `class` on the same line,
@@ -436,8 +436,8 @@ class Lexer
     while self.code_at(index) == " ".ord() || self.code_at(index) == "\t".ord()
       index += 1
     end
-    return false unless index + 5 <= @source.length()
-    return false unless @source.slice(index, 5) == "class"
+    return false unless index + 5 <= @source.bytesize()
+    return false unless @source.byteslice(index, 5) == "class"
     !self.identifier_part?(self.code_at(index + 5))
   end
 

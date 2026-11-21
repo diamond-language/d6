@@ -41,7 +41,7 @@ def respond(request: String, protocol: String | Nil, peer: String | Nil = nil) -
       build_reply("ERR GZIP needs tlsecho/2")
     else
       packed = Gzip.compress(((text + "\n") * 20))
-      build_reply("GZ #{packed.length()}", packed)
+      build_reply("GZ #{packed.bytesize()}", packed)
     end
   when "QUIT" then build_reply("BYE", nil, true)
   else build_reply("ERR unknown command '#{command}'")
@@ -59,9 +59,9 @@ end
 # Reads exactly `count` bytes; a TLS read may return fewer than asked for.
 def read_exactly(conn, count: Int) -> String
   data = ""
-  while data.length() < count
-    chunk = conn.read(count - data.length())
-    raise IOError.new("connection closed after #{data.length()} of #{count} bytes") if chunk == nil
+  while data.bytesize() < count
+    chunk = conn.read(count - data.bytesize())
+    raise IOError.new("connection closed after #{data.bytesize()} of #{count} bytes") if chunk == nil
     data = data + chunk
   end
   data

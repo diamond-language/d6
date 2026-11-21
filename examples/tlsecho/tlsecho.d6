@@ -113,7 +113,7 @@ def print_reply(conn, command: String)
     size = head.slice(3, head.length()).to_i()
     text = Gzip.decompress(read_exactly(conn, size), GUNZIP_LIMIT)
     lines = text.strip().split("\n")
-    puts("#{command} -> #{lines.length()} lines of '#{lines[0]}', #{text.length()} bytes, compressed on the wire: #{size < text.length()}")
+    puts("#{command} -> #{lines.length()} lines of '#{lines[0]}', #{text.bytesize()} bytes, compressed on the wire: #{size < text.bytesize()}")
   else
     puts("#{command} -> #{head}")
   end

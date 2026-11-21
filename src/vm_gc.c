@@ -370,6 +370,8 @@ static void mark_roots(DiamondVm *vm, bool minor) {
  * a non-moving collector). */
 static void sweep_list(DiamondVm *vm, DiamondObject **list_head,
         DiamondObject **promote_to) {
+    /* Freed Strings' addresses can be reused: forget the String cursors (vm_utf8.c). */
+    string_cursors_invalidate();
     DiamondObject **object = list_head;
     while (*object != nullptr) {
         if ((*object)->marked) {

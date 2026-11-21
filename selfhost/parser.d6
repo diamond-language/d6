@@ -972,7 +972,7 @@ class Parser
   def at_block_end?() =
     @current.kind() == :eof || @current.kind() == :else || @current.kind() == :elsif || @current.kind() == :when || @current.kind() == :rescue || @current.kind() == :ensure || @current.kind() == :end
 
-  def token_text(token) = @source.slice(token.start(), token.length())
+  def token_text(token) = @source.byteslice(token.start(), token.length())
 
   # --- emission, mirroring compiler.c's emit_byte/emit_opcode/
   # emit_instruction/allocate_register/add_constant/add_string ---
@@ -3072,7 +3072,7 @@ class Parser
     while !@failed && @current.kind() != :right_bracket
       start = @current.start()
       annotations.push(self.parse_type_annotation())
-      texts.push(@source.slice(start, @previous.start() + @previous.length() - start)) unless @failed
+      texts.push(@source.byteslice(start, @previous.start() + @previous.length() - start)) unless @failed
       self.skip_newlines()
       break if @current.kind() != :comma
       self.advance_token()
@@ -3156,7 +3156,7 @@ class Parser
       self.advance_token()
       break if depth == 0
     end
-    parameters = @source.slice(start, @previous.start() + @previous.length() - start)
+    parameters = @source.byteslice(start, @previous.start() + @previous.length() - start)
     if @current.kind() != :comma
       self.fail("expected ', to:' after delegated parameters")
       return
@@ -3357,7 +3357,7 @@ class Parser
       self.parse_type_annotation()
       return nil if @failed
       type_end = @previous.start() + @previous.length()
-      fields.push([field_name, @source.slice(type_start, type_end - type_start), field_token])
+      fields.push([field_name, @source.byteslice(type_start, type_end - type_start), field_token])
       self.skip_newlines()
       break if @current.kind() != :comma
       self.advance_token()
@@ -12549,7 +12549,7 @@ class Parser
       (128 | ((value >> 6) & 63)).chr() + (128 | (value & 63)).chr()
   end
 
-  def decode_string_range(start, length) = self.decode_string_text(@source.slice(start, length))
+  def decode_string_range(start, length) = self.decode_string_text(@source.byteslice(start, length))
 
   def decode_string_text(raw)
     result = ""
@@ -12640,9 +12640,9 @@ class Parser
     ignore_case = false
     multiline = false
     extended = false
-    while @source[close - 1] != "/"
+    while @source.byteslice(close - 1, 1) != "/"
       close = close - 1
-      flag = @source[close]
+      flag = @source.byteslice(close, 1)
       if flag == "i"
         ignore_case = true
       elsif flag == "m"
@@ -12654,7 +12654,7 @@ class Parser
     options = (ignore_case ? 1 : 0) + (multiline ? 2 : 0) + (extended ? 4 : 0)
     pattern_start = span.start() + 1
     pattern_length = close - 1 - pattern_start
-    raw = @source.slice(pattern_start, pattern_length)
+    raw = @source.byteslice(pattern_start, pattern_length)
     text = ""
     index = 0
     while index < raw.length()
@@ -12694,11 +12694,11 @@ class Parser
     while piece < finish && !@failed
       index = piece
       while index + 1 < finish
-        if @source[index] == "\\"
+        if @source.byteslice(index, 1) == "\\"
           index = index + 2
           next
         end
-        break if @source[index] == "#" && @source[index + 1] == "{"
+        break if @source.byteslice(index, 1) == "#" && @source.byteslice(index + 1, 1) == "{"
         index = index + 1
       end
       index = finish if index + 1 >= finish
@@ -12767,10 +12767,10 @@ class Parser
   # start, as src/compiler.c's add_heredoc_text.
   def heredoc_text(start, length, indent, body_start)
     text = ""
-    skip = (start == body_start || @source[start - 1] == "\n") ? indent : 0
+    skip = (start == body_start || @source.byteslice(start - 1, 1) == "\n") ? indent : 0
     index = 0
     while index < length
-      character = @source[start + index]
+      character = @source.byteslice(start + index, 1)
       index = index + 1
       if skip > 0 && (character == " " || character == "\t")
         skip = skip - 1
@@ -12786,18 +12786,18 @@ class Parser
   def parse_heredoc()
     span = @previous
     raw = span.kind() == :heredoc_raw
-    indent = self.heredoc_indent(@source.slice(span.start(), span.length()))
+    indent = self.heredoc_indent(@source.byteslice(span.start(), span.length()))
     finish = span.start() + span.length()
     piece = span.start()
     result = nil
     while !@failed
       index = raw ? finish : piece
       while index < finish
-        if @source[index] == "\\" && index + 1 < finish
+        if @source.byteslice(index, 1) == "\\" && index + 1 < finish
           index = index + 2
           next
         end
-        break if @source[index] == "#" && index + 1 < finish && @source[index + 1] == "{"
+        break if @source.byteslice(index, 1) == "#" && index + 1 < finish && @source.byteslice(index + 1, 1) == "{"
         index = index + 1
       end
       index = finish if index > finish
@@ -12818,7 +12818,7 @@ class Parser
       line_start = span.start()
       scan = span.start()
       while scan < index
-        if @source[scan] == "\n"
+        if @source.byteslice(scan, 1) == "\n"
           line = line + 1
           line_start = scan + 1
         end
@@ -12907,7 +12907,7 @@ def parse_and_run_with_core(path)
   reset = "\n#line 1\n"
   combined = core_source + reset + expanded
   parser = Parser.new(combined, builder)
-  parser.set_offset_correction(core_source.length() + reset.length())
+  parser.set_offset_correction(core_source.bytesize() + reset.bytesize())
   if parser.compile()
     builder.run()
   else

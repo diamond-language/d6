@@ -173,10 +173,10 @@ module Cancellation
       unless value is String then raise TypeError.new("expected a String") end
       self.checkpoint()
       offset = 0
-      while offset < value.length()
+      while offset < value.bytesize()
         self.checkpoint()
         begin
-          written = socket.write(value.slice(offset, value.length() - offset))
+          written = socket.write(value.byteslice(offset, value.bytesize() - offset))
           offset += written
         rescue error: WouldBlockError
           self.poll([], [socket])

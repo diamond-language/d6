@@ -925,8 +925,8 @@ def lex_error(source)
   end
 end
 text = string_value("\"a\\u0041\\u00e9\\u20ac\\b\\f\"")
-puts(text.length())
-puts(text.slice(0, 7))
+puts(text.bytesize())
+puts(text.slice(0, 4))
 puts(string_value("\"\\ud83d\\ude00\"").bytes().length())
 puts(string_value("\"\\ud83d\\ude00\"") == "\u{1F600}")
 puts(lex_error("\"\\ud83d x\""))

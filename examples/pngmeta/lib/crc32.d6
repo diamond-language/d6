@@ -36,7 +36,7 @@ module Crc32
 
     # Fold in one byte at a time: the table entry chosen by the low byte of
     # (crc XOR input byte), XORed with the crc shifted down a byte.
-    while index < data.length()
+    while index < data.bytesize()
       crc = table[(crc ^ data.getbyte(index)) & 0xFF] ^ (crc >> 8)
       index += 1
     end

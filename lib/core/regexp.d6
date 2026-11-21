@@ -21,7 +21,7 @@ def string_match_data(text: String, pattern: Regexp | String, position: Int = 0)
 end
 
 # One match: the whole match is group 0 and the capture groups follow. Offsets
-# are byte offsets into the matched String, like String#slice's.
+# are character positions in the matched String, like String#slice's.
 class MatchData
   def initialize(regexp: Regexp, string: String, spans: Array, group_names: Array)
     @regexp = regexp
@@ -49,7 +49,7 @@ class MatchData
     @string.slice(start, @spans[index * 2 + 1] - start)
   end
 
-  # A group's [begin, end] byte offsets, or nil when it took no part.
+  # A group's [begin, end] character positions, or nil when it took no part.
   def offset(key) -> Array | Nil
     index = group_index(key)
     return nil if index == nil || @spans[index * 2] < 0

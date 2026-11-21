@@ -27,7 +27,7 @@ module HTML
     LEADING_NEWLINE = ["pre", "listing", "textarea"]
 
     def initialize(text: String)
-      text = text.slice(3, text.length() - 3) if text.start_with?("\u{FEFF}")
+      text = text.slice(1, text.length() - 1) if text.start_with?("\u{FEFF}")
       @text = text.index("\r") == nil ? text : text.gsub("\r\n", "\n").gsub("\r", "\n")
       @length = @text.length()
       @pos = 0

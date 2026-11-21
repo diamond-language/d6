@@ -2080,7 +2080,6 @@ end
 # --- String ---------------------------------------------------------------
 
 def diamond_string_size(text: String) -> Int = text.length()
-def diamond_string_bytesize(text: String) -> Int = text.length()
 # index(needle, start) searches from `start` (negative counts from the end).
 def diamond_string_index(text: String, needle: String, start: Int = 0) -> Int | Nil
   return text.index_of(needle) if start == 0
@@ -2166,24 +2165,8 @@ def diamond_string_squeeze(text: String, only: String | Nil = nil) -> String
   result.join("")
 end
 
-# The lines, each keeping its "\n" (the last one may not have one).
-def diamond_string_lines(text: String) -> Array[String]
-  result = []
-  start = 0
-  index = 0
-  while index < text.length()
-    if text.getbyte(index) == 10
-      result.push(text.slice(start, index - start + 1))
-      start = index + 1
-    end
-    index += 1
-  end
-  result.push(text.slice(start, text.length() - start)) if start < text.length()
-  result
-end
-
 def diamond_string_each_line(text: String, callback: Callable[1]) -> String
-  diamond_string_lines(text).each(callback)
+  text.lines().each(callback)
   text
 end
 
@@ -2194,7 +2177,7 @@ end
 
 def diamond_string_each_byte(text: String, callback: Callable[1]) -> String
   index = 0
-  while index < text.length()
+  while index < text.bytesize()
     callback(text.getbyte(index))
     index += 1
   end
@@ -2507,11 +2490,11 @@ def diamond_array_pack(items: Array, format: String) -> String
       text = items[position]
       position += 1
       raise TypeError.new("pack '#{letter}' needs a String") unless text.is_a?(String)
-      width = count == nil ? 1 : (count < 0 ? text.length() + (letter == "Z" ? 1 : 0) : count)
+      width = count == nil ? 1 : (count < 0 ? text.bytesize() + (letter == "Z" ? 1 : 0) : count)
       padding = letter == "A" ? " " : 0.chr()
-      body = text.length() > width ? text.slice(0, width) : text
+      body = text.bytesize() > width ? text.byteslice(0, width) : text
       out.push(body)
-      missing = width - body.length()
+      missing = width - body.bytesize()
       while missing > 0
         out.push(padding)
         missing -= 1
@@ -2561,10 +2544,10 @@ def diamond_string_unpack(data: String, format: String) -> Array
     layout = diamond_pack_integer_layout(letter)
     if layout != nil
       width = layout[0]
-      repeat = count == nil ? 1 : (count < 0 ? (data.length() - offset) / width : count)
+      repeat = count == nil ? 1 : (count < 0 ? (data.bytesize() - offset) / width : count)
       while repeat > 0
         repeat -= 1
-        if offset + width > data.length()
+        if offset + width > data.bytesize()
           result.push(nil)
         else
           value = 0
@@ -2579,15 +2562,16 @@ def diamond_string_unpack(data: String, format: String) -> Array
         offset += width
       end
     elsif letter == "a" || letter == "A" || letter == "Z"
-      remaining = data.length() - offset
+      remaining = data.bytesize() - offset
       width = count == nil ? 1 : (count < 0 ? remaining : count)
       width = remaining if width > remaining
-      text = data.slice(offset, width)
+      text = data.byteslice(offset, width)
       if letter == "Z"
-        stop = text.index_of(0.chr())
-        if stop != nil
+        stop = 0
+        stop += 1 while stop < text.bytesize() && text.getbyte(stop) != 0
+        if stop < text.bytesize()
           offset += count == -1 ? stop + 1 : width
-          text = text.slice(0, stop)
+          text = text.byteslice(0, stop)
         else
           offset += width
         end
@@ -2603,7 +2587,7 @@ def diamond_string_unpack(data: String, format: String) -> Array
       end
       result.push(text)
     elsif letter == "H"
-      remaining = (data.length() - offset) * 2
+      remaining = (data.bytesize() - offset) * 2
       digits = count == nil ? 1 : (count < 0 ? remaining : count)
       digits = remaining if digits > remaining
       hex = ""
@@ -2616,8 +2600,8 @@ def diamond_string_unpack(data: String, format: String) -> Array
       offset += (digits + 1) / 2
       result.push(hex)
     elsif letter == "U"
-      repeat = count == nil ? 1 : (count < 0 ? data.length() : count)
-      while repeat > 0 && offset < data.length()
+      repeat = count == nil ? 1 : (count < 0 ? data.bytesize() : count)
+      while repeat > 0 && offset < data.bytesize()
         repeat -= 1
         lead = data.getbyte(offset)
         extra = lead >= 240 ? 3 : (lead >= 224 ? 2 : (lead >= 192 ? 1 : 0))

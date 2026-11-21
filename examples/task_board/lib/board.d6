@@ -330,19 +330,14 @@ end
 # Strip terminal control bytes from persisted/user text before rendering it.
 def board_safe(text) = text.gsub(Regexp.new("[\\x00-\\x1f\\x7f-\\x9f]"), "?")
 
+# `text` cut or padded to `width` characters; cut text ends in "~".
 def board_cell(text, width)
   text = board_safe(text)
-  if text.length() > width
-    cut = width - 1
-    while cut > 0 && text[cut].ord() >= 128 && text[cut].ord() < 192
-      cut -= 1
-    end
-    text = text.slice(0, cut) + "~"
-  end
-  text + " " * (width - text.length())
+  text = text.slice(0, width - 1) + "~" if text.length() > width
+  text.ljust(width)
 end
 
-# Wrap instead of truncating detail text, keeping UTF-8 code points whole.
+# Wrap instead of truncating detail text.
 def board_wrap(text, width)
   lines = []
   logical = (text + "\n|").split("\n")
@@ -350,12 +345,8 @@ def board_wrap(text, width)
   logical.each() do |line|
     line = board_safe(line)
     while line.length() > width
-      cut = width
-      while cut > 0 && line[cut].ord() >= 128 && line[cut].ord() < 192
-        cut -= 1
-      end
-      lines.push(line.slice(0, cut))
-      line = line.slice(cut, line.length())
+      lines.push(line.slice(0, width))
+      line = line.slice(width, line.length())
     end
     lines.push(line)
   end

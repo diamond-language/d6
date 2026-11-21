@@ -62,9 +62,9 @@ class FakeConn
     @closed = false
   end
   def read(n)
-    took = if n > @input.length() then @input.length() else n end
-    result = @input.slice(0, took)
-    @input = @input.slice(took, @input.length())
+    took = if n > @input.bytesize() then @input.bytesize() else n end
+    result = @input.byteslice(0, took)
+    @input = @input.byteslice(took, @input.bytesize())
     result
   end
   def write(value)
@@ -102,11 +102,11 @@ class FakeSocket
   end
   def written() = @written.to_s()
   def write(data)
-    if @block_after != nil && @written.length() >= @block_after
+    if @block_after != nil && @written.bytesize() >= @block_after
       raise WouldBlockError.new("would block")
     end
-    accepted = if @first_chunk != nil && @first_chunk < data.length() then @first_chunk else data.length() end
-    @written.append(data.slice(0, accepted))
+    accepted = if @first_chunk != nil && @first_chunk < data.bytesize() then @first_chunk else data.bytesize() end
+    @written.append(data.byteslice(0, accepted))
     accepted
   end
 end
@@ -380,7 +380,7 @@ conn = FakeConn.new("")
 ws = WebSocketConnection.new(conn)
 check(ws.receive() == nil, "expected nil when the peer vanishes between frames")
 check(ws.closed?() && conn.closed?(), "expected a vanished peer to close the connection")
-truncated = websocket_encode_frame(websocket_opcode_text(), "cut short", true).slice(0, 5)
+truncated = websocket_encode_frame(websocket_opcode_text(), "cut short", true).byteslice(0, 5)
 truncated_rejected = false
 begin
   WebSocketConnection.new(FakeConn.new(truncated)).receive()

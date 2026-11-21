@@ -652,7 +652,7 @@ DiamondVmStatus collection_invoke_helper(DiamondVm *vm,const DiamondChunk *chunk
             length=((DiamondArray *)registers[recv].as.object)->count;
         else if(receiver_kind==DIAMOND_OBJECT_HASH)
             length=((DiamondHash *)registers[recv].as.object)->count;
-        else length=((DiamondString *)registers[recv].as.object)->length;
+        else length=string_char_count((DiamondString *)registers[recv].as.object);
         registers[dest]=DIAMOND_INT((int64_t)length);return DIAMOND_VM_OK;
     }
     /* array_join_helper below does the real work -- kept out
@@ -1352,11 +1352,15 @@ DiamondVmStatus diamond_jit_index_get(DiamondVm *vm, const DiamondChunk *chunk,
         {
             const DiamondString *text = (const DiamondString *)receiver->as.object;
             size_t slice_start = 0, slice_length = 0;
-            const int slice_result = resolve_array_range(vm, chunk, "String", *index, text->length,
-                &slice_start, &slice_length);
+            const int slice_result = resolve_array_range(vm, chunk, "String", *index,
+                string_char_count(text), &slice_start, &slice_length);
             if (slice_result == 0) return DIAMOND_VM_INDEX_ERROR;
             if (slice_result == 1) {
-                DiamondString *piece = allocate_string(vm, text->chars + slice_start, slice_length);
+                /* Character positions to bytes. */
+                const size_t byte_start = string_byte_offset(text, slice_start);
+                const size_t byte_end = string_byte_offset(text, slice_start + slice_length);
+                DiamondString *piece = allocate_string(vm, text->chars + byte_start,
+                    byte_end - byte_start);
                 if (piece == nullptr) return DIAMOND_VM_OUT_OF_MEMORY;
                 *out = DIAMOND_OBJECT(piece);
                 return DIAMOND_VM_OK;
@@ -1369,16 +1373,19 @@ DiamondVmStatus diamond_jit_index_get(DiamondVm *vm, const DiamondChunk *chunk,
             return DIAMOND_VM_TYPE_ERROR;
         }
         const DiamondString *source = (const DiamondString *)receiver->as.object;
-        /* A negative index counts from the end: s[-1] is the last byte. */
+        /* A negative index counts from the end: s[-1] is the last character. */
+        const size_t char_count = string_char_count(source);
         int64_t char_index = index->as.integer;
-        if (char_index < 0) char_index += (int64_t)source->length;
-        if (char_index < 0 || (uint64_t)char_index >= source->length) {
+        if (char_index < 0) char_index += (int64_t)char_count;
+        if (char_index < 0 || (uint64_t)char_index >= char_count) {
             snprintf(vm->error, sizeof vm->error,
                      "index %" PRId64 " out of bounds for String of length %zu",
-                     index->as.integer, source->length);
+                     index->as.integer, char_count);
             return DIAMOND_VM_INDEX_ERROR;
         }
-        DiamondString *character = allocate_string(vm, source->chars + (size_t)char_index, 1);
+        const size_t at = string_byte_offset(source, (size_t)char_index);
+        DiamondString *character = allocate_string(vm, source->chars + at,
+            utf8_char_size(source->chars, source->length, at));
         if (character == nullptr) return DIAMOND_VM_OUT_OF_MEMORY;
         *out = DIAMOND_OBJECT(character);
         return DIAMOND_VM_OK;

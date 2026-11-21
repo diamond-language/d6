@@ -19,9 +19,10 @@ def url_encode(text)
   hex_digits = "0123456789ABCDEF"
   result = StringBuilder.new()
   index = 0
-  while index < text.length()
-    ch = text.slice(index, 1)
-    code = ch.ord()
+  # Byte by byte: a non-ASCII character is percent-encoded as its UTF-8 bytes.
+  while index < text.bytesize()
+    code = text.getbyte(index)
+    ch = code.chr()
     is_unreserved = (code >= 65 && code <= 90) || (code >= 97 && code <= 122) ||
       (code >= 48 && code <= 57) || ch == "-" || ch == "_" || ch == "." || ch == "~"
     if is_unreserved

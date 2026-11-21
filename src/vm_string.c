@@ -22,42 +22,44 @@
  * matching Ruby's own tr. */
 static DiamondVmStatus tr_expand_spec(const DiamondString *spec,
         bool interpret_negation,bool *negate,ByteBuffer *out) {
+    /* `out` gets the expanded set as uint32_t code points (a malformed byte is its
+     * own value, as everywhere else in String). */
     size_t start=0;
     *negate=false;
     if(interpret_negation&&spec->length>1&&spec->chars[0]=='^') {
         *negate=true;start=1;
     }
     const size_t remaining=spec->length-start;
-    char *literal=remaining>0?malloc(remaining):nullptr;
+    uint32_t *literal=remaining>0?malloc(remaining*sizeof *literal):nullptr;
     bool *escaped=remaining>0?malloc(remaining):nullptr;
     if(remaining>0&&(literal==nullptr||escaped==nullptr)) {
         free(literal);free(escaped);return DIAMOND_VM_OUT_OF_MEMORY;
     }
     size_t count=0;
-    for(size_t index=start;index<spec->length;index++) {
-        char ch=spec->chars[index];
+    size_t index=start;
+    while(index<spec->length) {
         bool is_escaped=false;
-        if(ch=='\\'&&index+1<spec->length) {
-            index++;ch=spec->chars[index];is_escaped=true;
+        if(spec->chars[index]=='\\'&&index+1<spec->length) {
+            index++;is_escaped=true;
         }
-        literal[count]=ch;escaped[count]=is_escaped;count++;
+        literal[count]=utf8_code_point(spec->chars,spec->length,index);
+        escaped[count]=is_escaped;count++;
+        index+=utf8_char_size(spec->chars,spec->length,index);
     }
     bool ok=true;
-    size_t index=0;
+    index=0;
     while(index<count&&ok) {
         if(!escaped[index]&&index+2<count&&
            !escaped[index+1]&&literal[index+1]=='-') {
-            const unsigned char low=(unsigned char)literal[index];
-            const unsigned char high=(unsigned char)literal[index+2];
+            const uint32_t low=literal[index];
+            const uint32_t high=literal[index+2];
             if(low<=high) {
-                for(unsigned int code=low;code<=high&&ok;code++) {
-                    const char byte=(char)(unsigned char)code;
-                    ok=byte_buffer_append(out,&byte,1);
-                }
+                for(uint32_t code=low;code<=high&&ok;code++)
+                    ok=byte_buffer_append(out,(const char *)&code,sizeof code);
                 index+=3;continue;
             }
         }
-        ok=byte_buffer_append(out,&literal[index],1);
+        ok=byte_buffer_append(out,(const char *)&literal[index],sizeof literal[index]);
         index++;
     }
     free(literal);free(escaped);
@@ -202,12 +204,20 @@ static DiamondVmStatus string_format_helper(DiamondVm *vm,const DiamondChunk *ch
             if(status!=DIAMOND_VM_OK)break;
             const DiamondString *piece_string=
                 (const DiamondString *)stringified.as.object;
-            const size_t pad=width>0&&(size_t)width>piece_string->length?
-                (size_t)width-piece_string->length:0;
+            /* Width and precision count characters, as in Ruby: %.3s keeps the first
+             * three, %-8s pads to eight. */
+            size_t shown_chars=string_char_count(piece_string);
+            size_t shown_bytes=piece_string->length;
+            if(precision>=0&&(size_t)precision<shown_chars) {
+                shown_chars=(size_t)precision;
+                shown_bytes=string_byte_offset(piece_string,shown_chars);
+            }
+            const size_t pad=width>0&&(size_t)width>shown_chars?
+                (size_t)width-shown_chars:0;
             bool ok=true;
             if(pad>0&&!left_justify)
                 for(size_t i=0;i<pad&&ok;i++)ok=builder_append(&builder," ",1);
-            if(ok)ok=builder_append(&builder,piece_string->chars,piece_string->length);
+            if(ok)ok=builder_append(&builder,piece_string->chars,shown_bytes);
             if(pad>0&&left_justify)
                 for(size_t i=0;i<pad&&ok;i++)ok=builder_append(&builder," ",1);
             if(!ok){status=DIAMOND_VM_OUT_OF_MEMORY;break;}
@@ -426,6 +436,50 @@ static DiamondVmStatus string_getbyte_method(DiamondVm *vm,DiamondValue *registe
     return DIAMOND_VM_OK;
 }
 
+/* lines(): each line keeps its "\n"; the last may not have one. */
+__attribute__((noinline))
+static DiamondVmStatus string_lines_method(DiamondVm *vm,DiamondValue *registers,uint8_t argc,uint16_t dest,const DiamondString *source) {
+    if(argc!=0)return DIAMOND_VM_ARITY_ERROR;
+    DiamondArray *lines=allocate_array(vm,nullptr,0);
+    if(lines==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
+    registers[dest]=DIAMOND_OBJECT(lines);
+    size_t start=0;
+    while(start<source->length) {
+        const char *newline=memchr(source->chars+start,'\n',source->length-start);
+        const size_t stop=newline==nullptr?source->length:(size_t)(newline-source->chars)+1;
+        DiamondString *line=allocate_string(vm,source->chars+start,stop-start);
+        if(line==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
+        if(!array_push(vm,lines,DIAMOND_OBJECT(line)))return DIAMOND_VM_OUT_OF_MEMORY;
+        start=stop;
+    }
+    return DIAMOND_VM_OK;
+}
+
+/* byteslice(start, length): bytes, where slice counts characters. Same bounds rules
+ * as slice; the piece may cut a character in half. */
+__attribute__((noinline))
+static DiamondVmStatus string_byteslice_method(DiamondVm *vm,DiamondValue *registers,uint16_t base,uint8_t argc,uint16_t dest,const DiamondString *source) {
+    if(argc!=2)return DIAMOND_VM_ARITY_ERROR;
+    if(registers[base].kind!=DIAMOND_VALUE_INT||
+       registers[(size_t)base+1].kind!=DIAMOND_VALUE_INT) {
+        snprintf(vm->error,sizeof vm->error,"String#byteslice arguments must be Int");
+        return DIAMOND_VM_TYPE_ERROR;
+    }
+    const int64_t start=registers[base].as.integer;
+    const int64_t requested_length=registers[(size_t)base+1].as.integer;
+    if(start<0||(uint64_t)start>source->length||requested_length<0) {
+        snprintf(vm->error,sizeof vm->error,
+            "index %" PRId64 " out of bounds for String of %zu bytes",start,source->length);
+        return DIAMOND_VM_INDEX_ERROR;
+    }
+    const size_t available=source->length-(size_t)start;
+    const size_t take=(uint64_t)requested_length<available?(size_t)requested_length:available;
+    DiamondString *sliced=allocate_string(vm,source->chars+(size_t)start,take);
+    if(sliced==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
+    registers[dest]=DIAMOND_OBJECT(sliced);
+    return DIAMOND_VM_OK;
+}
+
 __attribute__((noinline))
 static DiamondVmStatus string_split_method(DiamondVm *vm,DiamondValue *registers,uint16_t base,uint8_t argc,uint16_t dest,const DiamondString *source) {
     if(argc!=1)return DIAMOND_VM_ARITY_ERROR;
@@ -452,12 +506,16 @@ static DiamondVmStatus string_split_method(DiamondVm *vm,DiamondValue *registers
      * GC collection - registers are the VM's root set. */
     registers[dest]=DIAMOND_OBJECT(pieces);
     if(separator->length==0) {
-        for(size_t index=0;index<source->length;index++) {
+        /* One String per character, as chars() gives. */
+        size_t index=0;
+        while(index<source->length) {
+            const size_t size=utf8_char_size(source->chars,source->length,index);
             DiamondString *piece=
-                allocate_string(vm,source->chars+index,1);
+                allocate_string(vm,source->chars+index,size);
             if(piece==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
             if(!array_push(vm,pieces,DIAMOND_OBJECT(piece)))
                 return DIAMOND_VM_OUT_OF_MEMORY;
+            index+=size;
         }
     } else {
         size_t start=0,cursor=0;
@@ -507,11 +565,22 @@ static DiamondVmStatus string_reverse_method(DiamondVm *vm,DiamondValue *registe
     DiamondString *reversed=
         allocate_string(vm,source->chars,source->length);
     if(reversed==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
-    for(size_t index=0;index<reversed->length/2;index++) {
-        const char swap=reversed->chars[index];
-        reversed->chars[index]=
-            reversed->chars[reversed->length-1-index];
-        reversed->chars[reversed->length-1-index]=swap;
+    if(string_is_ascii(source)) {
+        for(size_t index=0;index<reversed->length/2;index++) {
+            const char swap=reversed->chars[index];
+            reversed->chars[index]=
+                reversed->chars[reversed->length-1-index];
+            reversed->chars[reversed->length-1-index]=swap;
+        }
+    } else {
+        /* Each character's bytes keep their order; the characters swap ends. */
+        size_t at=0;
+        while(at<source->length) {
+            const size_t size=utf8_char_size(source->chars,source->length,at);
+            memcpy(reversed->chars+source->length-at-size,source->chars+at,size);
+            at+=size;
+        }
+        reversed->char_count_plus_one=source->char_count_plus_one;
     }
     registers[dest]=DIAMOND_OBJECT(reversed);return DIAMOND_VM_OK;
 }
@@ -641,9 +710,10 @@ static DiamondVmStatus string_index_of_method(DiamondVm *vm,DiamondValue *regist
             "String#index_of argument must be a String");
         return DIAMOND_VM_TYPE_ERROR;
     }
-    /* index_of(needle, start) searches from byte `start` in place, so a
+    /* index_of(needle, start) searches from character `start` in place, so a
      * scanner stepping through a long String doesn't copy the rest of it
-     * for every search. */
+     * for every search. Positions are characters; the search itself is on bytes,
+     * which finds the same match since UTF-8 sequences can't start mid-character. */
     size_t start=0;
     if(argc==2) {
         const DiamondValue from=registers[(size_t)base+1];
@@ -653,18 +723,22 @@ static DiamondVmStatus string_index_of_method(DiamondVm *vm,DiamondValue *regist
             return DIAMOND_VM_TYPE_ERROR;
         }
         registers[dest]=DIAMOND_NIL;
-        if(from.as.integer<0||(uint64_t)from.as.integer>source->length)return DIAMOND_VM_OK;
-        start=(size_t)from.as.integer;
+        if(from.as.integer<0||(uint64_t)from.as.integer>string_char_count(source))
+            return DIAMOND_VM_OK;
+        start=string_byte_offset(source,(size_t)from.as.integer);
     }
     const DiamondString *needle=
         (const DiamondString *)registers[base].as.object;
     registers[dest]=DIAMOND_NIL;
     if(needle->length==0) {
-        registers[dest]=DIAMOND_INT((int64_t)start);
+        registers[dest]=DIAMOND_INT((int64_t)string_char_index(source,start));
     } else {
         const char *found=find_bytes(source->chars+start,source->length-start,
             needle->chars,needle->length);
-        if(found!=nullptr)registers[dest]=DIAMOND_INT((int64_t)(found-source->chars));
+        if(found!=nullptr) {
+            const size_t offset=(size_t)(found-source->chars);
+            registers[dest]=DIAMOND_INT((int64_t)string_char_index(source,offset));
+        }
     }
     return DIAMOND_VM_OK;
 }
@@ -678,23 +752,8 @@ static DiamondVmStatus string_slice_method(DiamondVm *vm,DiamondValue *registers
             "String#slice arguments must be Int");
         return DIAMOND_VM_TYPE_ERROR;
     }
-    const int64_t start=registers[base].as.integer;
-    const int64_t requested_length=
-        registers[(size_t)base+1].as.integer;
-    if(start<0||(uint64_t)start>source->length||
-       requested_length<0) {
-        snprintf(vm->error,sizeof vm->error,
-            "index %" PRId64 " out of bounds for String of length %zu",
-            start,source->length);
-        return DIAMOND_VM_INDEX_ERROR;
-    }
-    const size_t available=source->length-(size_t)start;
-    const size_t take=(size_t)requested_length<available?
-        (size_t)requested_length:available;
-    DiamondString *sliced=
-        allocate_string(vm,source->chars+(size_t)start,take);
-    if(sliced==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
-    registers[dest]=DIAMOND_OBJECT(sliced);return DIAMOND_VM_OK;
+    return string_char_slice(vm,source,registers[base].as.integer,
+        registers[(size_t)base+1].as.integer,&registers[dest]);
 }
 
 __attribute__((noinline))
@@ -762,12 +821,14 @@ static DiamondVmStatus string_chars_method(DiamondVm *vm,DiamondValue *registers
     DiamondArray *pieces=allocate_array(vm,nullptr,0);
     if(pieces==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
     registers[dest]=DIAMOND_OBJECT(pieces);
-    for(size_t index=0;index<source->length;index++) {
-        DiamondString *piece=
-            allocate_string(vm,source->chars+index,1);
+    size_t at=0;
+    while(at<source->length) {
+        const size_t size=utf8_char_size(source->chars,source->length,at);
+        DiamondString *piece=allocate_string(vm,source->chars+at,size);
         if(piece==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
         if(!array_push(vm,pieces,DIAMOND_OBJECT(piece)))
             return DIAMOND_VM_OUT_OF_MEMORY;
+        at+=size;
     }
     return DIAMOND_VM_OK;
 }
@@ -855,7 +916,8 @@ static DiamondVmStatus string_justify_method(DiamondVm *vm,DiamondValue *registe
     }
     const DiamondString *pad=argc==1?default_pad:(const DiamondString *)
         registers[(size_t)base+1].as.object;
-    if((uint64_t)width<=source->length) {
+    const size_t source_chars=string_char_count(source);
+    if((uint64_t)width<=source_chars) {
         DiamondString *unchanged=
             allocate_string(vm,source->chars,source->length);
         if(unchanged==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
@@ -867,21 +929,22 @@ static DiamondVmStatus string_justify_method(DiamondVm *vm,DiamondValue *registe
             ljust_method?"ljust":"rjust");
         return DIAMOND_VM_ARITY_ERROR;
     }
-    const size_t pad_needed=(size_t)width-source->length;
-    char *buffer=malloc((size_t)width+1);
+    /* The padding in bytes: `pad_needed` characters of `pad`, repeated and cut
+     * on a character boundary. */
+    const size_t pad_needed=(size_t)width-source_chars;
+    const size_t pad_chars=string_char_count(pad);
+    const size_t whole=pad_needed/pad_chars;
+    const size_t partial=string_byte_offset(pad,pad_needed%pad_chars);
+    const size_t pad_bytes=whole*pad->length+partial;
+    char *buffer=malloc(source->length+pad_bytes+1);
     if(buffer==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
-    if(ljust_method) {
-        memcpy(buffer,source->chars,source->length);
-        for(size_t index=0;index<pad_needed;index++)
-            buffer[source->length+index]=
-                pad->chars[index%pad->length];
-    } else {
-        for(size_t index=0;index<pad_needed;index++)
-            buffer[index]=pad->chars[index%pad->length];
-        memcpy(buffer+pad_needed,source->chars,source->length);
-    }
+    char *padding=ljust_method?buffer+source->length:buffer;
+    for(size_t index=0;index<whole;index++)
+        memcpy(padding+index*pad->length,pad->chars,pad->length);
+    memcpy(padding+whole*pad->length,pad->chars,partial);
+    memcpy(ljust_method?buffer:buffer+pad_bytes,source->chars,source->length);
     DiamondString *justified=
-        allocate_string(vm,buffer,(size_t)width);
+        allocate_string(vm,buffer,source->length+pad_bytes);
     free(buffer);
     if(justified==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
     registers[dest]=DIAMOND_OBJECT(justified);return DIAMOND_VM_OK;
@@ -921,37 +984,36 @@ static DiamondVmStatus string_tr_method(DiamondVm *vm,DiamondValue *registers,ui
         free(from_buffer.data);
         return tr_status;
     }
-    bool member[256]={false};
-    for(size_t index=0;index<from_buffer.length;index++)
-        member[(unsigned char)from_buffer.data[index]]=true;
-    int map[256];
-    for(int code=0;code<256;code++)map[code]=-1;
-    if(!from_negate) {
-        for(size_t index=0;index<from_buffer.length;index++) {
-            const unsigned char key=
-                (unsigned char)from_buffer.data[index];
-            const size_t to_index=index<to_buffer.length?
-                index:to_buffer.length-1;
-            map[key]=to_buffer.length==0?-2:
-                (int)(unsigned char)to_buffer.data[to_index];
-        }
-    }
-    const int negate_replacement=to_buffer.length==0?-2:
-        (int)(unsigned char)to_buffer.data[to_buffer.length-1];
+    const uint32_t *from=(const uint32_t *)(const void *)from_buffer.data;
+    const uint32_t *to=(const uint32_t *)(const void *)to_buffer.data;
+    const size_t from_count=from_buffer.length/sizeof(uint32_t);
+    const size_t to_count=to_buffer.length/sizeof(uint32_t);
+    /* -1 keeps the character, -2 deletes it (an empty to-string), else the
+     * replacement code point. */
+    const int64_t negate_replacement=to_count==0?-2:(int64_t)to[to_count-1];
     ByteBuffer result_buffer={0};
     bool ok=true;
-    for(size_t index=0;index<source->length&&ok;index++) {
-        const unsigned char byte=
-            (unsigned char)source->chars[index];
-        const int replacement=from_negate?
-            (member[byte]?-1:negate_replacement):map[byte];
+    size_t at=0;
+    while(at<source->length&&ok) {
+        const size_t size=utf8_char_size(source->chars,source->length,at);
+        const uint32_t code=utf8_code_point(source->chars,source->length,at);
+        /* The last listing of a character wins, as in Ruby. */
+        ptrdiff_t found=-1;
+        for(size_t index=0;index<from_count;index++)
+            if(from[index]==code)found=(ptrdiff_t)index;
+        int64_t replacement=-1;
+        if(from_negate)replacement=found>=0?-1:negate_replacement;
+        else if(found>=0)
+            replacement=to_count==0?-2:
+                (int64_t)to[(size_t)found<to_count?(size_t)found:to_count-1];
         if(replacement==-1)
-            ok=byte_buffer_append(&result_buffer,
-                &source->chars[index],1);
+            ok=byte_buffer_append(&result_buffer,source->chars+at,size);
         else if(replacement!=-2) {
-            const char byte_out=(char)(unsigned char)replacement;
-            ok=byte_buffer_append(&result_buffer,&byte_out,1);
+            char encoded[4];
+            const size_t encoded_length=utf8_encode((uint32_t)replacement,encoded);
+            ok=byte_buffer_append(&result_buffer,encoded,encoded_length);
         }
+        at+=size;
     }
     free(from_buffer.data);free(to_buffer.data);
     if(!ok) {
@@ -1047,6 +1109,20 @@ DiamondVmStatus string_invoke_helper(DiamondVm *vm,const DiamondChunk *chunk,siz
         return string_scan_method(vm,registers,base,argc,dest,source);
     if(repeat_method)
         return string_repeat_method(vm,registers,base,argc,dest,source);
+    if(method_name->length==8&&memcmp(method_name->chars,"bytesize",8)==0) {
+        if(argc!=0)return DIAMOND_VM_ARITY_ERROR;
+        registers[dest]=DIAMOND_INT((int64_t)source->length);return DIAMOND_VM_OK;
+    }
+    if(method_name->length==5&&memcmp(method_name->chars,"lines",5)==0)
+        return string_lines_method(vm,registers,argc,dest,source);
+    if(method_name->length==9&&memcmp(method_name->chars,"byteslice",9)==0)
+        return string_byteslice_method(vm,registers,base,argc,dest,source);
+    /* Terminal cells: wide characters take two, combining marks none. */
+    if(method_name->length==13&&memcmp(method_name->chars,"display_width",13)==0) {
+        if(argc!=0)return DIAMOND_VM_ARITY_ERROR;
+        registers[dest]=DIAMOND_INT((int64_t)string_display_width(source));
+        return DIAMOND_VM_OK;
+    }
     if(method_name->length==7&&memcmp(method_name->chars,"getbyte",7)==0)
         return string_getbyte_method(vm,registers,base,argc,dest,source);
     if(ord_method) {
@@ -1057,7 +1133,7 @@ DiamondVmStatus string_invoke_helper(DiamondVm *vm,const DiamondChunk *chunk,siz
             return DIAMOND_VM_INDEX_ERROR;
         }
         registers[dest]=
-            DIAMOND_INT((unsigned char)source->chars[0]);
+            DIAMOND_INT(utf8_code_point(source->chars,source->length,0));
         return DIAMOND_VM_OK;
     }
     /* split() on whitespace, and split(separator, limit):

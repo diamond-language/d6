@@ -5,16 +5,21 @@ class StringBuilder
   def initialize()
     @parts = []
     @total_length = 0
+    @total_bytes = 0
   end
 
   def append(piece) -> StringBuilder
     text = "#{piece}"
     @parts << text
     @total_length = @total_length + text.length()
+    @total_bytes = @total_bytes + text.bytesize()
     self
   end
 
+  # Characters so far, like String#length; bytesize counts bytes.
   def length() -> Int = @total_length
+
+  def bytesize() -> Int = @total_bytes
 
   def to_s() -> String = @parts.join("")
 end

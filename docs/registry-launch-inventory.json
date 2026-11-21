@@ -22,17 +22,17 @@
       "archive": "cookies.tar",
       "dependencies": {},
       "name": "cookies",
-      "sha256": "4fb8299d3b85853e84e0de5cf3cf56b46b3fb06f8168b539827fc9bd2c965d37",
+      "sha256": "aeb6d90523bd3c1c573f31746625b8edcce1ba5726a9956d1c7484f56ccac1bf",
       "size": 33792,
-      "version": "0.2.6"
+      "version": "0.2.7"
     },
     {
       "archive": "csv.tar",
       "dependencies": {},
       "name": "csv",
-      "sha256": "7fb01944463c26e225d7fbf56e3a3adece33d00c6a2a45a37cadb7dd0fed5bb5",
+      "sha256": "a9448856b6380a7d4f2429f6fe26e2c5e87661952669ef257d22c41972d5e8eb",
       "size": 23040,
-      "version": "0.1.0"
+      "version": "0.1.1"
     },
     {
       "archive": "database_config.tar",
@@ -46,17 +46,17 @@
       "archive": "div.tar",
       "dependencies": {},
       "name": "div",
-      "sha256": "d7d4945d405de1489261923ab87c47fa32f5e8c0ac2b18c9178087a0b90c05a6",
-      "size": 35840,
-      "version": "0.3.3"
+      "sha256": "002b81fa3e6878f2322480ecdb645e1a75437e3d00f82f1f513e704ac9efbcdd",
+      "size": 33792,
+      "version": "0.3.4"
     },
     {
       "archive": "graphql.tar",
       "dependencies": {},
       "name": "graphql",
-      "sha256": "25f3d48a41f104796540878657ce124e998cfc15023bad6d7eaa427f8df1a1c3",
+      "sha256": "224c59af13baf1ad29ac9ef3746b43998ad47dc8ebb3b256d52650d9beff9385",
       "size": 231936,
-      "version": "0.3.6"
+      "version": "0.3.7"
     },
     {
       "archive": "graphsql.tar",
@@ -73,9 +73,9 @@
       "archive": "http.tar",
       "dependencies": {},
       "name": "http",
-      "sha256": "c654347b6c636f2ab3b67a2b7f6d9bbe95fb6df439fc90661b3d27835c3c84e1",
+      "sha256": "4b5b86a0ed2fd622300b73ae0a20eaedf23a93a908ac1981636c42366ba07724",
       "size": 53248,
-      "version": "0.2.7"
+      "version": "0.2.8"
     },
     {
       "archive": "logger.tar",
@@ -92,17 +92,17 @@
         "logger": "^0.5.0"
       },
       "name": "gremlin",
-      "sha256": "0c9b1a8aac052170c4c182e53ecf8805f6e3ef924ff329f55d37816628e11942",
+      "sha256": "85143212014e47ee33d54e2e8a04d755e53cc4d1bc245dba0503c411cdb32aee",
       "size": 61952,
-      "version": "0.5.7"
+      "version": "0.5.8"
     },
     {
       "archive": "html.tar",
       "dependencies": {},
       "name": "html",
-      "sha256": "e6c0ff3111aa8d443300676f310fe48431fd5200e15cdfd8a00891da5ac3ef28",
+      "sha256": "cc04a452610d0e7a80e1c34104fd234771d844a088c3a05cd72f9bf20e5ecec1",
       "size": 47104,
-      "version": "0.1.0"
+      "version": "0.1.1"
     },
     {
       "archive": "jobs.tar",
@@ -184,9 +184,9 @@
       "archive": "redis.tar",
       "dependencies": {},
       "name": "redis",
-      "sha256": "233dfdd0295d2a9ef696334740d53bacde590024a2c6a51dfddd68d240b11997",
+      "sha256": "4826fd94d073a587aa8692133c0d76db9cd0c6a0c305fe81e27e68cbb865b658",
       "size": 52736,
-      "version": "0.2.4"
+      "version": "0.2.5"
     },
     {
       "archive": "registry.tar",
@@ -194,25 +194,25 @@
         "mjolnir": "^0.4.0"
       },
       "name": "registry",
-      "sha256": "0970af325076e424a149c6fa2e00cdcfb99c96d03dbe7e3bd0e8e1673dd2bf5b",
+      "sha256": "f4fb898ac053af6c038b119bf4244b3f95376834e54f4783b2628a6f512c6e2c",
       "size": 61952,
-      "version": "0.3.2"
+      "version": "0.3.3"
     },
     {
       "archive": "toml.tar",
       "dependencies": {},
       "name": "toml",
-      "sha256": "02088ac00ef6f8b676990aa694d3c0bdb48cd1cb80d1f5c36665c18e8790993f",
+      "sha256": "242193da534c04ee5984ba7cf09361118629a99d1ce559dbabe6594e49e23dc6",
       "size": 43008,
-      "version": "0.1.1"
+      "version": "0.1.2"
     },
     {
       "archive": "websocket.tar",
       "dependencies": {},
       "name": "websocket",
-      "sha256": "5e8ebb3f189a03a5e50ed5faaf42cd5ec3135e6c7b2c381e102b810499fb95e0",
+      "sha256": "fb5ef1660316bae95b85af2bffac544145e995be8c4114b4a52915630c36641e",
       "size": 44544,
-      "version": "0.2.4"
+      "version": "0.2.5"
     }
   ],
   "format": 1

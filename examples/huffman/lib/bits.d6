@@ -57,7 +57,7 @@ def unpack_bits(bytes: String) -> String
   out = ""
   index = 0
 
-  while index < bytes.length()
+  while index < bytes.bytesize()
     byte = bytes.getbyte(index)
     bit = 7
 

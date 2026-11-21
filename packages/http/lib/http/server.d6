@@ -10,7 +10,7 @@ def http_bounded_line(conn, maximum)
     byte = conn.read(1)
     if byte == "" then raise HttpRequestError.new("400") end
     line = line + byte
-    if line.length() > maximum then raise HttpRequestError.new("431") end
+    if line.bytesize() > maximum then raise HttpRequestError.new("431") end
     if byte == "\n"
       if line.length() < 2 || line.slice(line.length() - 2, 2) != "\r\n" then raise HttpRequestError.new("400") end
       return line.slice(0, line.length() - 2)
@@ -30,11 +30,11 @@ def http_parse_bounded_request(conn, limits)
     if code <= 32 || code >= 127 then raise HttpRequestError.new("400") end
   end
   headers = {}
-  total = line.length() + 2
+  total = line.bytesize() + 2
   count = 0
   loop do
     line = http_bounded_line(conn, limits["line_bytes"])
-    total += line.length() + 2
+    total += line.bytesize() + 2
     if total > limits["header_bytes"] then raise HttpRequestError.new("431") end
     if line == "" then break end
     count += 1
@@ -68,7 +68,7 @@ def http_parse_bounded_request(conn, limits)
   end
   if headers["expect"] != nil then conn.write("HTTP/1.1 100 Continue\r\n\r\n") end
   body = conn.read(length)
-  if body.length() != length then raise HttpRequestError.new("400") end
+  if body.bytesize() != length then raise HttpRequestError.new("400") end
   {"method": pieces[0], "path": pieces[1], "headers": headers, "body": body}
 end
 
@@ -153,7 +153,7 @@ def http_write_response(conn, response, send_body: Bool = true)
     end
   end
   headers.each(write_header)
-  conn.write("Content-Length: #{body.length()}\r\n")
+  conn.write("Content-Length: #{body.bytesize()}\r\n")
   conn.write("\r\n")
   conn.write(body) if send_body
 end
