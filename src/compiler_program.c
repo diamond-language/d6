@@ -694,6 +694,7 @@ void diamond_program_free(DiamondProgram *program) {
     program->namespace_constant_defined=nullptr;
     program->namespace_constant_count=0;
     program->namespace_constant_capacity=0;
+    program->warning_count=0;
 }
 
 bool diamond_program_reserve_namespace_constants(DiamondProgram *program,size_t count) {

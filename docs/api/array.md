@@ -108,6 +108,11 @@ The elements that are not `nil`.
 A new `Array` with `other`'s elements after the receiver's; the receiver does
 not change.
 
+Ruby's `concat` appends in place, so `list.concat(more)` on a line of its own
+does nothing here. The compiler warns about such a line (and about `sort`,
+`reverse`, `uniq`, `compact`, `take` or `drop` used the same way) when the
+receiver is known to be an Array; write `list += more` or `push` each item.
+
 ```ruby
 [1].concat([2, 3])   # => [1, 2, 3]
 ```

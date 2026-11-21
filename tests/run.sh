@@ -1045,7 +1045,7 @@ mkdir -p "$project_dir/bin" "$project_dir/cuts/greeter/lib"
 printf '{"name": "tool", "version": "0.1.0"}\n' >"$project_dir/Cutfile"
 printf '{"name": "greeter", "version": "0.1.0"}\n' >"$project_dir/cuts/greeter/Cutfile"
 printf 'def greet(name)\n  "project: " + name\nend\n' >"$project_dir/cuts/greeter/lib/greeter.d6"
-printf 'require_cut "greeter"\nputs(greet("world"))\n' >"$project_dir/bin/main.d6"
+printf 'require_cut "greeter"\ngreet("world")\n' >"$project_dir/bin/main.d6"
 actual="$(cd "$elsewhere_dir" && "$diamond_abs" "$project_dir/bin/main.d6")"
 [[ "$actual" == "project: world" ]]
 mkdir -p "$elsewhere_dir/cuts/greeter/lib"
@@ -1067,6 +1067,21 @@ if (cd "$elsewhere_dir" && "$diamond_abs" "$project_dir/bin/main.d6") >/dev/null
 fi
 grep -q "declares name 'not_greeter', expected 'greeter'" "$project_error"
 rm -rf "$project_dir" "$elsewhere_dir" "$project_error"
+
+# A line that only calls concat/sort/... on an Array, with more code after it,
+# does nothing: the compiler warns on stderr and the program still runs. A
+# bytecode-cache hit does not compile, so it does not warn again.
+warn_dir="$(mktemp -d)"
+printf 'found = [1]\nfound.concat([2])\nlist = [3, 1]\nlist.sort()\nputs(found.length())\n' >"$warn_dir/warns.d6"
+warn_output="$("$diamond_abs" "$warn_dir/warns.d6" 2>"$warn_dir/stderr")"
+[[ "$warn_output" == 1* ]]
+grep -q "warns.d6:2:1: warning: concat() returns a new Array and leaves the receiver unchanged" "$warn_dir/stderr"
+grep -q "warns.d6:4:1: warning: sort() returns a new Array" "$warn_dir/stderr"
+(unset DIAMOND_NO_CACHE; "$diamond_abs" "$warn_dir/warns.d6" >/dev/null 2>"$warn_dir/first")
+(unset DIAMOND_NO_CACHE; "$diamond_abs" "$warn_dir/warns.d6" >/dev/null 2>"$warn_dir/cached")
+grep -q "warning:" "$warn_dir/first"
+[[ ! -s "$warn_dir/cached" ]]
+rm -rf "$warn_dir"
 
 manifest_dir="$(mktemp -d)"
 mkdir -p "$manifest_dir/cuts/greeter/lib"

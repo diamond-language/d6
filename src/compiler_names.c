@@ -33,6 +33,27 @@
  * `delegate` always calls this with writer_name=false, type_arguments=
  * nullptr, type_argument_count=0, since neither writer-call syntax nor
  * generics apply to its scope. */
+/* Array methods that return a new Array and leave the receiver as it was, with
+ * no block that could do something else. Ruby's concat appends in place, and
+ * its sort! and uniq! change the receiver, so `list.concat(more)` on a line of
+ * its own is an easy slip that silently does nothing. Recorded for
+ * compile_sequence, which rejects such a call when its result goes unused. */
+static void record_copying_call(Compiler *compiler,uint16_t dest,uint16_t method,
+        uint16_t receiver_type) {
+    if(receiver_type!=DIAMOND_TYPE_ARRAY)return;
+    static const char *const names[]={"concat","sort","reverse","uniq","compact","take","drop"};
+    const DiamondStringConstant called=compiler->function->strings[method];
+    for(size_t index=0;index<sizeof names/sizeof names[0];index++) {
+        if(strlen(names[index])!=called.length)continue;
+        if(memcmp(names[index],called.chars,called.length)!=0)continue;
+        compiler->copying_call.function=compiler->function;
+        compiler->copying_call.code_end=compiler->function->code_count;
+        compiler->copying_call.reg=dest;
+        compiler->copying_call.method=method;
+        return;
+    }
+}
+
 static uint16_t emit_invoke_with_name(Compiler *compiler, uint16_t receiver,
         uint16_t method, const uint16_t *type_arguments, size_t type_argument_count,
         const uint16_t *args, size_t count);
@@ -1032,6 +1053,7 @@ static uint16_t emit_invoke_with_name(Compiler *compiler, uint16_t receiver,
     emit_register(compiler,receiver);emit_register(compiler,method);emit_register(compiler,base);
     emit_byte(compiler,(uint8_t)count);
     emit_type_argument_trailer(compiler,type_arguments,type_argument_count);
+    record_copying_call(compiler,dest,method,receiver_type);
     return dest;
 }
 

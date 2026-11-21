@@ -22,6 +22,10 @@ record. From 1.0.0, releases follow the [1.x compatibility policy](docs/compatib
 - `require_cut` falls back to the `cuts/` of the entry file's project (the nearest directory
   above it with a `Cutfile`) when the working directory has no cut of that name, so
   `d6 ~/tools/app/main.d6` runs from any directory.
+- Compile warnings. The first: a line that only calls `concat`, `sort`, `reverse`, `uniq`,
+  `compact`, `take` or `drop` on an Array, with more code after it, does nothing (these return a
+  new Array; Ruby's `concat` appends in place). The program still compiles and runs; the warning
+  is printed when it compiles, and the LSP shows it as a warning.
 
 ### Fixed
 
