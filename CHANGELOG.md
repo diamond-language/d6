@@ -26,9 +26,14 @@ record. From 1.0.0, releases follow the [1.x compatibility policy](docs/compatib
   `compact`, `take` or `drop` on an Array, with more code after it, does nothing (these return a
   new Array; Ruby's `concat` appends in place). The program still compiles and runs; the warning
   is printed when it compiles, and the LSP shows it as a warning.
+- Compound assignment through an attribute: `counter.count += 1`, `job.label ||= "x"`. The
+  receiver is evaluated once; the reader and writer are ordinary method calls.
+- An endless def can assign: `def reset() = @count = 0`, `def bump(n: Int) -> Int = @count += n`.
 
 ### Fixed
 
+- `min`, `max` and `abs` of Ints are typed `Int` (of Floats, `Float`), so `def f(a: Int, b: Int) -> Int = min(a, b)`
+  compiles. With an untyped argument the result is unchecked until the return, as `+`'s is.
 - The `cli`, `tcp` and `udp` templates' READMEs line up their command comments again.
 - A Ruby brace block (`list.map() { |x| ... }`) is reported as "blocks are written 'do |x| ... end';
   braces always make a Hash" instead of whatever the parser expected there (often "expected ':'

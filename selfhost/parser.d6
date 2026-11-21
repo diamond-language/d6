@@ -2801,8 +2801,15 @@ class Parser
       # postfix condition the body never returns, so the declared return
       # type isn't checked against the raised value.
       raises = @current.kind() == :raise
+      # An assignment is a statement too: `def reset() = @count = 0`.
       body_result = if raises
         self.compile_raise()
+      elsif self.index_assignment_ahead?()
+        self.compile_index_assignment()
+      elsif self.compound_assignment_ahead?()
+        self.compile_compound_assignment()
+      elsif self.assignment_ahead?()
+        self.compile_assignment()
       else
         self.expect_annotation(@current_return_type)
         self.parse_expression()
@@ -5206,8 +5213,15 @@ class Parser
       # postfix condition the body never returns, so the declared return
       # type isn't checked against the raised value.
       raises = @current.kind() == :raise
+      # An assignment is a statement too: `def reset() = @count = 0`.
       body_result = if raises
         self.compile_raise()
+      elsif self.index_assignment_ahead?()
+        self.compile_index_assignment()
+      elsif self.compound_assignment_ahead?()
+        self.compile_compound_assignment()
+      elsif self.assignment_ahead?()
+        self.compile_assignment()
       else
         self.expect_annotation(@current_return_type)
         self.parse_expression()
@@ -7484,6 +7498,37 @@ class Parser
     destination
   end
 
+
+  # `recv.attr += value`: the getter, the operator, then the setter, with the
+  # receiver evaluated once. Mirrors compile_setter_compound_assignment in
+  # compiler_names.c.
+  def compile_setter_compound_assignment(receiver, name)
+    op_kind = @current.kind()
+    self.advance_token()
+    current = self.emit_destructure_invoke(receiver, name, nil)
+    if op_kind == :or_or_equal || op_kind == :and_and_equal
+      destination = self.allocate_register()
+      self.emit_instruction2(Opcode::MOVE, destination, current)
+      jump_opcode = Opcode::JUMP_IF_TRUE
+      jump_opcode = Opcode::JUMP_IF_FALSE if op_kind == :and_and_equal
+      end_jump = self.emit_jump(jump_opcode, current)
+      right = self.parse_expression()
+      self.emit_instruction2(Opcode::MOVE, destination, right)
+      self.emit_destructure_invoke(receiver, name + "=", destination)
+      self.patch_jump(end_jump, @code_count)
+      return destination
+    end
+    plain_kind = :percent
+    plain_kind = :plus if op_kind == :plus_equal
+    plain_kind = :minus if op_kind == :minus_equal
+    plain_kind = :star if op_kind == :star_equal
+    plain_kind = :slash if op_kind == :slash_equal
+    right = self.parse_expression()
+    destination = self.allocate_register()
+    self.emit_instruction3(binary_opcode(plain_kind), destination, current, right)
+    self.emit_destructure_invoke(receiver, name + "=", destination)
+    destination
+  end
   def compile_invoke(receiver)
     safe = @current.kind() == :ampersand_dot
     self.advance_token()
@@ -7501,6 +7546,9 @@ class Parser
         value = self.parse_expression()
         return self.emit_destructure_invoke(receiver, name, value)
       end
+    end
+    if compound_assignment_token?(@current.kind())
+      return self.compile_setter_compound_assignment(receiver, name)
     end
     if name == "class" && @current.kind() == :left_paren
       self.advance_token()
