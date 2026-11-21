@@ -3434,11 +3434,8 @@ static bool statement_takes_loop_modifier(const Compiler *compiler) {
 /* Warns about `list.concat(more)` or `list.sort()` on a line of its own, followed
  * by more code: the new Array is thrown away and `list` is unchanged. A warning,
  * not an error, so programs that compiled on earlier 1.x releases still do. */
-static void report_discarded_copy(Compiler *compiler,DiamondSpan statement) {
-    const DiamondStringConstant called=
-        compiler->function->strings[compiler->copying_call.method];
-    const char *start=called.chars;
-    const int length=(int)called.length;
+static void report_discarded_copy(Compiler *compiler,DiamondSpan statement,const char *start) {
+    const int length=(int)strlen(start);
     char message[320];
     if(length==6&&memcmp(start,"concat",6)==0)
         snprintf(message,sizeof message,
@@ -3450,6 +3447,37 @@ static void report_discarded_copy(Compiler *compiler,DiamondSpan statement) {
             "line does nothing: assign the result, as in `list = list.%.*s()`",
             length,start,length,start);
     warn_at(compiler,statement,message);
+}
+
+/* The name of the method copying_call recorded (one of the short names in
+ * record_copying_call, src/compiler_names.c). */
+static void copying_call_name(const Compiler *compiler,char name[8]) {
+    const DiamondStringConstant called=
+        compiler->function->strings[compiler->copying_call.method];
+    snprintf(name,8,"%.*s",(int)called.length,called.chars);
+}
+
+/* Discarded copies recorded since `pending_before` ended the blocks of the
+ * statement just compiled (pending_copies, src/compiler_internal.h). A loop
+ * body's value is always thrown away; an if/unless/case's is when more code
+ * follows it, and is up to the enclosing statement when it ends this block
+ * too. Any other statement (an assignment, a call taking a block, a def)
+ * may use the value, so those are dropped. */
+static void settle_pending_copies(Compiler *compiler,DiamondTokenKind statement_kind,
+        size_t pending_before) {
+    if(compiler->pending_copy_count<=pending_before)return;
+    const bool loop=statement_kind==DIAMOND_TOKEN_WHILE||
+        statement_kind==DIAMOND_TOKEN_UNTIL;
+    const bool conditional=statement_kind==DIAMOND_TOKEN_IF||
+        statement_kind==DIAMOND_TOKEN_UNLESS||statement_kind==DIAMOND_TOKEN_CASE;
+    const bool block_ends_here=at_block_end(compiler);
+    if(conditional&&block_ends_here)return;
+    if(!compiler->failed&&(loop||conditional)) {
+        for(size_t index=pending_before;index<compiler->pending_copy_count;index++)
+            report_discarded_copy(compiler,compiler->pending_copies[index].span,
+                compiler->pending_copies[index].method);
+    }
+    compiler->pending_copy_count=pending_before;
 }
 
 uint16_t compile_sequence(Compiler *compiler) {
@@ -3503,6 +3531,8 @@ uint16_t compile_sequence(Compiler *compiler) {
         /* The statement is only a concat/sort/... call whose new Array goes unused. */
         bool discarded_copy = false;
         const DiamondSpan statement_start = compiler->current.span;
+        const DiamondTokenKind statement_kind = compiler->current.kind;
+        const size_t pending_before = compiler->pending_copy_count;
         /* A statement that never falls through to the next one. With a
          * postfix condition (`return x if y == nil`), everything after it
          * runs only when the condition didn't hold -- see the narrowing
@@ -3675,10 +3705,23 @@ uint16_t compile_sequence(Compiler *compiler) {
                  "postfix modifiers cannot follow declarations");
         } else if (compiler->current.kind == DIAMOND_TOKEN_NEWLINE) {
             skip_newlines(compiler);
-            if(discarded_copy&&!at_block_end(compiler))
-                report_discarded_copy(compiler,statement_start);
+            if(discarded_copy&&!at_block_end(compiler)) {
+                char name[8];
+                copying_call_name(compiler,name);
+                report_discarded_copy(compiler,statement_start,name);
+            }
         } else if (!at_block_end(compiler)) {
             fail(compiler, compiler->current.span, "expected newline after expression");
+        }
+        settle_pending_copies(compiler,statement_kind,pending_before);
+        /* This statement is the block's value: whether anything uses it is up
+         * to the statement around the block. */
+        if(discarded_copy&&at_block_end(compiler)&&
+           compiler->pending_copy_count<sizeof compiler->pending_copies/
+               sizeof compiler->pending_copies[0]) {
+            compiler->pending_copies[compiler->pending_copy_count].span=statement_start;
+            copying_call_name(compiler,compiler->pending_copies[compiler->pending_copy_count].method);
+            compiler->pending_copy_count++;
         }
     }
     compiler->sequence_diverges = last_statement_diverges;

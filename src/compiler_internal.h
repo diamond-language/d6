@@ -454,6 +454,18 @@ typedef struct Compiler {
     /* Set by compile_expression_statement: whether the statement it just compiled was an
      * assignment of some kind rather than a plain expression. */
     bool statement_is_assignment;
+    /* Discarded-copy calls (above) that were the last statement of a block, so
+     * the block's value: whether that value is used is known only once the
+     * statement holding the block (an if, unless or case) has finished.
+     * compile_sequence reports them when that statement is followed by more
+     * code, or when the block is a loop body, and otherwise drops them. */
+    struct {
+        DiamondSpan span;
+        /* The method's name: a block body is its own function, with its own
+         * string table, so an index would not survive leaving it. */
+        char method[8];
+    } pending_copies[8];
+    size_t pending_copy_count;
     /* True only during diamond_compile's first, throwaway pass over the
      * source (see diamond_compile's own comment) -- lets a
      * forward reference to a not-yet-declared class/module/interface

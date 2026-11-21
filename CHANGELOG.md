@@ -24,7 +24,8 @@ record. From 1.0.0, releases follow the [1.x compatibility policy](docs/compatib
   `d6 ~/tools/app/main.d6` runs from any directory.
 - Compile warnings. The first: a line that only calls `concat`, `sort`, `reverse`, `uniq`,
   `compact`, `take` or `drop` on an Array, with more code after it, does nothing (these return a
-  new Array; Ruby's `concat` appends in place). The program still compiles and runs; the warning
+  new Array; Ruby's `concat` appends in place). That includes such a line at the end of a loop body,
+  or of an `if`, `unless` or `case` body when more code follows the whole statement. The program still compiles and runs; the warning
   is printed when it compiles, and the LSP shows it as a warning.
 - Compound assignment through an attribute: `counter.count += 1`, `job.label ||= "x"`. The
   receiver is evaluated once; the reader and writer are ordinary method calls.
