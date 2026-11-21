@@ -1,0 +1,22 @@
+# A trailing modifier inside a loop (`return "x" if n > 5`) has no `end` of
+# its own. The scan for blocks in the loop used to count it as one, run past
+# the loop into the next def, and treat every local as captured, which dropped
+# the narrowing on the guard below it.
+def check(n: Int) -> String | Nil = n == 3 ? "three" : nil
+
+def first_problem(limit: Int) -> Hash | String
+  n = 0
+  while n < limit
+    return "too many" if n > 5
+    problem = check(n)
+    return problem if problem != nil
+    n += 1
+  end
+  {}
+end
+
+def later()
+  [1, 2].each() do |x| x end
+end
+
+[first_problem(2), first_problem(5)]

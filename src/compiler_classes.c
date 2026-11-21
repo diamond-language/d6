@@ -2390,7 +2390,7 @@ static bool prescan_def_is_endless(DiamondLexer lookahead) {
 /* Can a token of this kind end an expression? An if/unless/while/until
  * right after one is a trailing modifier (`x = 1 if y`, `return if done`),
  * which has no `end` of its own. */
-static bool prescan_ends_value(DiamondTokenKind kind) {
+bool token_ends_value(DiamondTokenKind kind) {
     switch(kind) {
         case DIAMOND_TOKEN_IDENTIFIER: case DIAMOND_TOKEN_INTEGER:
         case DIAMOND_TOKEN_FLOAT: case DIAMOND_TOKEN_STRING:
@@ -2422,7 +2422,7 @@ static void prescan_callable_signatures(Compiler *compiler,DiamondMethod **metho
     bool pending_loop_do=false;
     DiamondTokenKind previous=DIAMOND_TOKEN_NEWLINE;
     while(token.kind!=DIAMOND_TOKEN_EOF) {
-        const bool modifier_position=prescan_ends_value(previous);
+        const bool modifier_position=token_ends_value(previous);
         previous=token.kind;
         if(token.kind==DIAMOND_TOKEN_NEWLINE) {
             pending_loop_do=false;

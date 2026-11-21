@@ -1,0 +1,1 @@
+an assignment in a condition needs parentheses: `while (x = value)`; to compare, write `==`

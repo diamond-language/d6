@@ -1243,6 +1243,11 @@ def diamond_array_insert(values: Array, index: Int, item) -> Array
   length = values.length()
   at = if index < 0 then index + length + 1 else index end
   raise IndexError.new("index #{index} out of bounds for insert into Array of length #{length}") if at < 0 || at > length
+  # Push first: an array whose type contract rejects the item (or a frozen
+  # one) raises before anything has moved. Moving the tail out first lost it
+  # when that push raised.
+  values.push(item)
+  values.pop()
   tail = []
   while values.length() > at
     tail.push(values.pop())
@@ -1450,6 +1455,16 @@ def diamond_array_filter_map(values: Array, callback: Callable[1]) -> Array
   while index < values.length()
     mapped = callback(values[index])
     result.push(mapped) unless mapped == nil || mapped == false
+    index += 1
+  end
+  result
+end
+
+def diamond_array_map_with_index(values: Array, callback: Callable[2]) -> Array
+  result = []
+  index = 0
+  while index < values.length()
+    result.push(callback(values[index], index))
     index += 1
   end
   result

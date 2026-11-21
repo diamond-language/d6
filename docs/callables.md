@@ -196,7 +196,8 @@ A function or method can bind its optional trailing block with `&block`.
 Inside that lexical body, `yield(args...)` invokes the bound Callable and
 `block_given?()` reports whether a block was supplied. `yield` accepts zero or
 more arguments. Calling it without guarding an absent optional block is a
-normal non-Callable type error.
+normal non-Callable type error. `block(args...)` and `block.call(args...)`,
+Ruby's spelling, make the same call.
 Unlike Ruby, a method without `&block` does not take a block: passing one is an
 error that says to add the parameter, and `yield` in its body is a fiber yield
 (see [Fibers](fibers.md)).
@@ -322,6 +323,12 @@ key/value callbacks expose those types to the body and editor hover.
 `Array#sum` retains an `Int` result for Int elements and `Int | Float` for
 numeric graphs containing Float. Other element graphs remain dynamic because
 their repeated `+` dispatch may be overloaded.
+
+`object.convert` without parentheses is a bound method reference, not a call,
+where Ruby would call it. A reference is never `nil`, is always true as a
+condition, and interpolates as `#<Closure>`, so the compiler warns when one is
+compared with `nil` (`box.label != nil`), used as a condition (`if box.label`)
+or interpolated (`"#{box.label}"`): each almost certainly meant `box.label()`.
 
 A fixed-arity bound method reference such as `object.convert` retains its
 declared parameter and return contract. Explicit generic references such as

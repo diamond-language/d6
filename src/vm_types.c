@@ -158,7 +158,7 @@ static const char *const NATIVE_OBJECT_MEMBERS_SUPERVISOR[]={
     "add_child","alive?","child_count","failed?","join","last_error","restart_count",
     "restart_policy","stop"};
 static const char *const NATIVE_OBJECT_MEMBERS_FILE[]={
-    "close","flush","gets","peer_address","read","shutdown_write","write"};
+    "close","flush","gets","peer_address","pos","read","seek","shutdown_write","write"};
 static const char *const NATIVE_OBJECT_MEMBERS_LISTENER[]={"accept","close","port"};
 static const char *const NATIVE_OBJECT_MEMBERS_SOCKET[]={
     "close","finish_connect","peer_address","read","shutdown_write","write"};
@@ -1231,13 +1231,12 @@ static bool value_matches_member(const DiamondChunk *chunk,DiamondValue value,
     if((size_t)member->argument_set>=chunk->type_set_count)return false;
     if(member->id==DIAMOND_TYPE_ARRAY) {
         DiamondArray *array=(DiamondArray *)value.as.object;
-        for(size_t index=0;index<array->count;index++)
-            if(!value_matches_set(chunk,array->values[index],member->argument_set,false))
-                return false;
-        if(!attach)return true;
-        for(size_t index=0;index<array->count;index++)
-            if(!value_matches_set(chunk,array->values[index],member->argument_set,true))
-                return false;
+        /* An array already carrying this contract (or one implying it) needs no
+         * scan: its elements were checked when the contract was attached, and
+         * every write since (push, index assignment, and what is built on them)
+         * was checked against it. Without this, a method returning
+         * `Array[Float]` re-checked every element on each call, so pushing
+         * through a typed reader was quadratic. */
         for(size_t index=0;index<array->constraint_count;index++)
             if(array->constraints[index].type_sets==chunk->type_sets&&
                array->constraints[index].set_index==member->argument_set)return true;
@@ -1249,6 +1248,13 @@ static bool value_matches_member(const DiamondChunk *chunk,DiamondValue value,
                    array->constraints[index].interfaces,
                    array->constraints[index].type_variable_count,
                    member->argument_set))return true;
+        for(size_t index=0;index<array->count;index++)
+            if(!value_matches_set(chunk,array->values[index],member->argument_set,false))
+                return false;
+        if(!attach)return true;
+        for(size_t index=0;index<array->count;index++)
+            if(!value_matches_set(chunk,array->values[index],member->argument_set,true))
+                return false;
         if(array->constraint_count==4)return false;
         array->constraints[array->constraint_count++]=(typeof(array->constraints[0])){
             .type_sets=chunk->type_sets,.type_set_count=chunk->type_set_count,
@@ -1272,15 +1278,7 @@ static bool value_matches_member(const DiamondChunk *chunk,DiamondValue value,
     if(member->id!=DIAMOND_TYPE_HASH||member->second_argument_set==DIAMOND_NO_TYPE_SET||
        (size_t)member->second_argument_set>=chunk->type_set_count)return false;
     DiamondHash *hash=(DiamondHash *)value.as.object;
-    for(size_t index=0;index<hash->count;index++)
-        if(!value_matches_set(chunk,hash->entries[index].key,member->argument_set,false)||
-           !value_matches_set(chunk,hash->entries[index].value,
-                              member->second_argument_set,false))return false;
-    if(!attach)return true;
-    for(size_t index=0;index<hash->count;index++)
-        if(!value_matches_set(chunk,hash->entries[index].key,member->argument_set,true)||
-           !value_matches_set(chunk,hash->entries[index].value,
-                              member->second_argument_set,true))return false;
+    /* As for arrays: an existing contract that covers this one needs no scan. */
     for(size_t index=0;index<hash->constraint_count;index++)
         if(hash->constraints[index].type_sets==chunk->type_sets&&
            hash->constraints[index].key_set==member->argument_set&&
@@ -1300,6 +1298,15 @@ static bool value_matches_member(const DiamondChunk *chunk,DiamondValue value,
                hash->constraints[index].interfaces,
                hash->constraints[index].type_variable_count,
                member->second_argument_set))return true;
+    for(size_t index=0;index<hash->count;index++)
+        if(!value_matches_set(chunk,hash->entries[index].key,member->argument_set,false)||
+           !value_matches_set(chunk,hash->entries[index].value,
+                              member->second_argument_set,false))return false;
+    if(!attach)return true;
+    for(size_t index=0;index<hash->count;index++)
+        if(!value_matches_set(chunk,hash->entries[index].key,member->argument_set,true)||
+           !value_matches_set(chunk,hash->entries[index].value,
+                              member->second_argument_set,true))return false;
     if(hash->constraint_count==4)return false;
     hash->constraints[hash->constraint_count++]=(typeof(hash->constraints[0])){
         .type_sets=chunk->type_sets,.type_set_count=chunk->type_set_count,

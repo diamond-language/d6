@@ -1,0 +1,26 @@
+# `x.is_a?(T)` narrows like `x is T`: in a guard, a block if, and the else side.
+class Point
+  def initialize(x: Int)
+    @x = x
+  end
+  def x() -> Int = @x
+end
+
+def make(n: Int) -> Point | String = n > 0 ? Point.new(n) : "none"
+
+def message(n: Int) -> String | Nil
+  value = make(n)
+  return value if value.is_a?(String)
+  nil
+end
+
+def describe(n: Int) -> String
+  value = make(n)
+  if value.is_a?(Point)
+    "point #{value.x()}"
+  else
+    value
+  end
+end
+
+[message(0), message(2), describe(3), describe(-1)]

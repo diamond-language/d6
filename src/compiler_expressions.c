@@ -20,7 +20,12 @@
  * precedence parsers, operators and the ternary. */
 
 static uint16_t parse_grouping(Compiler *compiler) {
-    const uint16_t result = parse_expression(compiler);
+    /* `(name = expr)` is an expression whose value is the assigned value, so
+     * `while (line = file.gets()) != nil` reads a line per pass. Only the
+     * parenthesized form: a bare `if x = y` is far more often a typo for `==`,
+     * and consume_block_start explains how to write it instead. */
+    const uint16_t result = assignment_ahead(compiler) ?
+        compile_assignment(compiler) : parse_expression(compiler);
     if (compiler->current.kind != DIAMOND_TOKEN_RIGHT_PAREN) {
         fail(compiler, compiler->current.span, "expected ')' after expression");
         return result;
@@ -226,6 +231,25 @@ static bool split_nil_type_set(Compiler *compiler,uint16_t source_index,
         .argument_set=DIAMOND_NO_TYPE_SET,.second_argument_set=DIAMOND_NO_TYPE_SET,
         .callable_arity=UINT8_MAX,.callable_return_set=DIAMOND_NO_TYPE_SET}},.count=1});
     return true;
+}
+
+static bool split_type_set(Compiler *compiler,uint16_t source_index,
+                           uint16_t tested_type,int32_t *matching,
+                           int32_t *remaining);
+
+/* `value is Type` and `value.is_a?(Type)`: `condition` holds the test's
+ * result, so a branch on it sees `value` as Type when true and as the rest
+ * of its union when false. Narrowing splits by type id alone, which can't
+ * tell native kinds apart, so a native test doesn't narrow. */
+void publish_type_test_narrowing(Compiler *compiler,uint16_t condition,uint16_t value,
+                                 int tested) {
+    if(diamond_type_operand_is_native(tested)||compiler->known_type_sets[value]<0)return;
+    int32_t matching=-1,remaining=-1;
+    if(!split_type_set(compiler,(uint16_t)compiler->known_type_sets[value],(uint16_t)tested,
+                       &matching,&remaining))return;
+    compiler->narrowing=(Narrowing){.valid=true,.condition=condition,
+        .when_true={{.reg=value,.type_set=matching}},.when_true_count=1,
+        .when_false={{.reg=value,.type_set=remaining}},.when_false_count=1};
 }
 
 static bool split_type_set(Compiler *compiler,uint16_t source_index,
@@ -1466,20 +1490,7 @@ uint16_t parse_precedence(Compiler *compiler, Precedence precedence) {
             emit_instruction(compiler,DIAMOND_OP_IS_TYPE,destination,left,
                              (uint16_t)tested,3);
             compiler->known_types[destination]=DIAMOND_TYPE_BOOL;
-            /* Narrowing splits by type id alone, which can't tell native
-             * kinds apart; a native test doesn't narrow. */
-            if(!tested_native&&compiler->known_type_sets[left]>=0) {
-                int32_t matching=-1,remaining=-1;
-                if(split_type_set(compiler,
-                   (uint16_t)compiler->known_type_sets[left],tested_type,
-                   &matching,&remaining))
-                    compiler->narrowing=(Narrowing){.valid=true,
-                        .condition=destination,
-                        .when_true={{.reg=left,.type_set=matching}},
-                        .when_true_count=1,
-                        .when_false={{.reg=left,.type_set=remaining}},
-                        .when_false_count=1};
-            }
+            publish_type_test_narrowing(compiler,destination,left,tested);
             left=destination;continue;
         }
         if(operator==DIAMOND_TOKEN_AND_AND||operator==DIAMOND_TOKEN_AND||

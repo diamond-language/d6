@@ -1148,6 +1148,17 @@ uint16_t emit_build_spread_arguments(Compiler *compiler,
  * Same balanced-bracket lookahead index_assignment_ahead already uses;
  * only reads as generics when the matching ']' is directly followed by
  * '(', exactly the shape every ordinary generic call already requires. */
+/* The current token is '[' after a method name: does a type name follow, as
+ * explicit type arguments (`decode[Int](text)`) need? Type names start with a
+ * capital letter; anything else means the program meant to index. */
+static bool type_name_ahead(const Compiler *compiler) {
+    DiamondLexer lookahead = compiler->lexer;
+    const DiamondToken token = diamond_lexer_next(&lookahead);
+    if (token.kind != DIAMOND_TOKEN_IDENTIFIER || token.span.length == 0) return false;
+    const char first = compiler->source[token.span.start];
+    return first >= 'A' && first <= 'Z';
+}
+
 static bool writer_generic_arguments_ahead(const Compiler *compiler) {
     DiamondLexer lookahead = compiler->lexer;
     size_t depth = 1;
@@ -2356,6 +2367,23 @@ static bool bind_reference_self_arguments(Compiler *compiler,const DiamondFuncti
     return true;
 }
 
+/* Warns when `value` is the method reference compiled just now
+ * (bound_reference, src/compiler_internal.h) and it is used where only a
+ * call makes sense. A warning, so programs that compiled on earlier 1.x
+ * releases still do. */
+void warn_method_reference_use(Compiler *compiler,uint16_t value,const char *consequence) {
+    if(compiler->bound_reference.function!=compiler->function||
+       compiler->bound_reference.code_end!=compiler->function->code_count||
+       compiler->bound_reference.reg!=value)return;
+    const DiamondSpan name=compiler->bound_reference.name;
+    char message[DIAMOND_MAX_FUNCTION_NAME*2+160];
+    snprintf(message,sizeof message,
+        "'%.*s' without parentheses is a method reference, %s: to call it, write %.*s()",
+        (int)name.length,compiler->source+name.start,consequence,
+        (int)name.length,compiler->source+name.start);
+    warn_at(compiler,name,message);
+}
+
 static uint16_t parse_bound_method_reference(Compiler *compiler,uint16_t receiver,
         DiamondSpan method_name,const uint16_t *type_arguments,
         size_t type_argument_count) {
@@ -2666,8 +2694,8 @@ static uint16_t parse_is_a_call(Compiler *compiler,uint16_t receiver) {
         fail(compiler,type_span,"type name is too long");
         return 0;
     }
-    const uint16_t resolved_type=(uint16_t)resolve_type_name(
-        compiler,type_name,type_span);
+    const int tested=resolve_type_name(compiler,type_name,type_span);
+    const uint16_t resolved_type=(uint16_t)tested;
     skip_newlines(compiler);
     if(compiler->current.kind!=DIAMOND_TOKEN_RIGHT_PAREN) {
         fail(compiler,compiler->current.span,
@@ -2679,6 +2707,8 @@ static uint16_t parse_is_a_call(Compiler *compiler,uint16_t receiver) {
     emit_instruction(compiler,DIAMOND_OP_IS_TYPE,destination,receiver,
                      resolved_type,3);
     compiler->known_types[destination]=DIAMOND_TYPE_BOOL;
+    /* The same test as `receiver is Type`, so it narrows the same way. */
+    publish_type_test_narrowing(compiler,destination,receiver,tested);
     return destination;
 }
 
@@ -2900,6 +2930,18 @@ static uint16_t parse_invoke_named_impl(Compiler *compiler, uint16_t receiver,
     uint16_t type_arguments[8];size_t type_argument_count=0;
     if(compiler->current.kind==DIAMOND_TOKEN_LEFT_BRACKET &&
        (!writer_name||writer_generic_arguments_ahead(compiler))) {
+        if(!writer_name&&!type_name_ahead(compiler)) {
+            /* `stats.buckets[key]`: Ruby calls the reader; here the bare name is
+             * a method reference and `[...]` after it would be type arguments. */
+            char message[DIAMOND_MAX_FUNCTION_NAME*2+160];
+            snprintf(message,sizeof message,
+                "'%.*s' without parentheses is a method reference, not a call; "
+                "to index what it returns, call it first: %.*s()[...]",
+                (int)name.length,compiler->source+name.start,
+                (int)name.length,compiler->source+name.start);
+            fail(compiler,compiler->current.span,message);
+            return 0;
+        }
         if(!parse_explicit_type_arguments(compiler,type_arguments,&type_argument_count))
             return 0;
     }
@@ -2917,8 +2959,23 @@ static uint16_t parse_invoke_named_impl(Compiler *compiler, uint16_t receiver,
             type_arguments, type_argument_count, &value, 1);
     }
     if (compiler->current.kind != DIAMOND_TOKEN_LEFT_PAREN) {
-        if(!writer_name)return parse_bound_method_reference(compiler,receiver,name,
-            type_arguments,type_argument_count);
+        if(!writer_name) {
+            const uint16_t reference=parse_bound_method_reference(compiler,receiver,name,
+                type_arguments,type_argument_count);
+            compiler->bound_reference.function=compiler->function;
+            compiler->bound_reference.code_end=compiler->function->code_count;
+            compiler->bound_reference.reg=reference;
+            compiler->bound_reference.name=name;
+            /* `obj.reader != nil`: Ruby calls the reader; here it compares a
+             * method reference, which is never nil. */
+            if(compiler->current.kind==DIAMOND_TOKEN_EQUAL_EQUAL||
+               compiler->current.kind==DIAMOND_TOKEN_BANG_EQUAL) {
+                DiamondLexer lookahead=compiler->lexer;
+                if(diamond_lexer_next(&lookahead).kind==DIAMOND_TOKEN_NIL)
+                    warn_method_reference_use(compiler,reference,"which is never nil");
+            }
+            return reference;
+        }
         fail(compiler,compiler->current.span,
             "member access requires a method call with '()'");return 0;
     }

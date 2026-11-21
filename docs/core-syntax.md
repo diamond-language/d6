@@ -73,6 +73,19 @@ never run, and the loop evaluates to `nil`. The statement must be an assignment 
 (not `return`, `break`, `next`, a declaration or a block-form `if`/`while`), only one modifier is
 allowed per statement, and `begin ... end while cond` (a body that runs first) is not supported.
 
+An assignment in parentheses is an expression whose value is the assigned value, which reads a
+loop's next item in its condition:
+
+<!-- doc-check: skip -->
+```ruby
+while (line = file.gets()) != nil
+  puts(line)
+end
+```
+
+The parentheses are required: `if x = value` is an error that asks for them, since without them
+it is usually a mistyped `==`.
+
 Strings are double-quoted, with `#{expression}` interpolation. These are the escapes:
 
 | Escape | Byte or text |

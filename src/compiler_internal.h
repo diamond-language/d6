@@ -454,6 +454,29 @@ typedef struct Compiler {
     /* Set by compile_expression_statement: whether the statement it just compiled was an
      * assignment of some kind rather than a plain expression. */
     bool statement_is_assignment;
+    /* The last `obj.method` written without parentheses (a bound method
+     * reference, not a call): where its code ended, its register and the
+     * method name. warn_method_reference_use checks a condition or an
+     * interpolation against it, since a reference is always truthy and prints
+     * as #<Closure>, which is never what `if obj.reader` meant. */
+    struct {
+        const DiamondFunction *function;
+        size_t code_end;
+        uint16_t reg;
+        DiamondSpan name;
+    } bound_reference;
+    /* Discarded-copy calls (above) that were the last statement of a block, so
+     * the block's value: whether that value is used is known only once the
+     * statement holding the block (an if, unless or case) has finished.
+     * compile_sequence reports them when that statement is followed by more
+     * code, or when the block is a loop body, and otherwise drops them. */
+    struct {
+        DiamondSpan span;
+        /* The method's name: a block body is its own function, with its own
+         * string table, so an index would not survive leaving it. */
+        char method[8];
+    } pending_copies[8];
+    size_t pending_copy_count;
     /* True only during diamond_compile's first, throwaway pass over the
      * source (see diamond_compile's own comment) -- lets a
      * forward reference to a not-yet-declared class/module/interface
@@ -703,6 +726,8 @@ typedef struct DestructureNode {
 
 DIAMOND_INTERNAL void fail(Compiler *compiler, DiamondSpan span, const char *message);
 DIAMOND_INTERNAL void warn_at(Compiler *compiler, DiamondSpan span, const char *message);
+DIAMOND_INTERNAL void warn_method_reference_use(Compiler *compiler, uint16_t value,
+    const char *consequence);
 DIAMOND_INTERNAL const char *closed_type_name(const Compiler *compiler,uint16_t id);
 DIAMOND_INTERNAL void advance_token(Compiler *compiler);
 DIAMOND_INTERNAL void skip_newlines(Compiler *compiler);
@@ -1116,6 +1141,11 @@ DIAMOND_INTERNAL void publish_indexed_result_type(Compiler *compiler,uint16_t de
         uint16_t receiver);
 DIAMOND_INTERNAL bool statement_may_capture(const Compiler *compiler,uint64_t *mask);
 DIAMOND_INTERNAL void mark_locals_captured_in(Compiler *compiler,const uint64_t *mask);
+/* Whether a token of this kind can end an expression, so an if/unless/while/until
+ * right after it is a trailing modifier with no `end` of its own. */
+DIAMOND_INTERNAL bool token_ends_value(DiamondTokenKind kind);
+DIAMOND_INTERNAL void publish_type_test_narrowing(Compiler *compiler,uint16_t condition,
+        uint16_t value,int tested);
 DIAMOND_INTERNAL void prepare_reentered_body_captures(Compiler *compiler);
 DIAMOND_INTERNAL bool loop_local_captured(const Compiler *compiler,size_t index);
 DIAMOND_INTERNAL uint16_t parse_while(Compiler *compiler,bool inverted);

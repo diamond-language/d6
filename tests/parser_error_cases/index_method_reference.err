@@ -1,0 +1,1 @@
+'items' without parentheses is a method reference, not a call; to index what it returns, call it first: items()[...]

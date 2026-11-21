@@ -1,0 +1,32 @@
+# A reader typed Array[Float] attaches that contract to the array once; later
+# calls trust the contract instead of re-checking every element, so writes
+# through any path must still be checked against it.
+class Samples
+  attr_reader values: Array[Float]
+  def initialize()
+    @values = []
+  end
+end
+
+def rejected(samples: Samples, how: String) -> String
+  begin
+    case how
+    when "push"
+      samples.values().push("x")
+    when "index"
+      samples.values()[0] = "x"
+    when "insert"
+      samples.values().insert(0, "x")
+    else
+      samples.values().unshift("x")
+    end
+    "accepted"
+  rescue error: TypeError
+    "rejected"
+  end
+end
+
+samples = Samples.new()
+1000.times() do |i| samples.values().push(i * 0.5) end
+results = ["push", "index", "insert", "unshift"].map() do |how| rejected(samples, how) end
+[samples.values().length(), samples.values()[999], results]

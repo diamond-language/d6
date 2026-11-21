@@ -1,0 +1,24 @@
+# File#pos and #seek, and reading again after a regular file grows: the
+# end-of-file a read reached is not final for a file another writer appends to.
+dir = Dir.mktmpdir()
+path = File.join(dir, "grow.log")
+File.write(path, "header\nfirst\n")
+reader = File.open(path, "r")
+reader.seek(7)
+start = reader.pos()
+lines = [reader.gets(), reader.gets()]
+writer = File.open(path, "a")
+writer.write("second\n")
+writer.close()
+lines.push(reader.gets())
+lines.push(reader.gets())
+finish = reader.pos()
+reader.close()
+problem = begin
+  File.open(path, "r").seek(-1)
+  "no error"
+rescue error: TypeError
+  error.message()
+end
+Dir.delete_tree(dir)
+[start, lines, finish, problem]

@@ -1081,6 +1081,21 @@ grep -q "warns.d6:4:1: warning: sort() returns a new Array" "$warn_dir/stderr"
 (unset DIAMOND_NO_CACHE; "$diamond_abs" "$warn_dir/warns.d6" >/dev/null 2>"$warn_dir/cached")
 grep -q "warning:" "$warn_dir/first"
 [[ ! -s "$warn_dir/cached" ]]
+# The call can also end an if body whose value is unused (more code follows the
+# if); when the if is itself the method's value, its last line is used.
+printf 'def rows(list: Array, more: Array, flag: Bool) -> Array\n  if flag\n    list.concat(more)\n  end\n  list\nend\ndef kept(list: Array, flag: Bool) -> Array\n  if flag\n    list.sort()\n  else\n    list\n  end\nend\nputs(rows([1], [2], true).length() + kept([1], true).length())\n' >"$warn_dir/nested.d6"
+[[ "$("$diamond_abs" "$warn_dir/nested.d6" 2>"$warn_dir/nested_stderr")" == 2* ]]
+grep -q "nested.d6:3:5: warning: concat() returns a new Array" "$warn_dir/nested_stderr"
+[[ "$(grep -c "warning:" "$warn_dir/nested_stderr")" == 1 ]]
+# A reader written without parentheses is a method reference: compared with
+# nil, used as a condition or interpolated, it is a slip for a call. Passing
+# or assigning one is not.
+printf 'class Box\n  attr_reader label: String | Nil\n  def initialize()\n    @label = nil\n  end\nend\nbox = Box.new()\nputs("set") if box.label != nil\nputs("yes") if box.label\nputs("#{box.label}")\ncallback = box.label\nputs(callback == nil)\n' >"$warn_dir/reference.d6"
+"$diamond_abs" "$warn_dir/reference.d6" >/dev/null 2>"$warn_dir/reference_stderr"
+grep -q "reference.d6:8:20: warning: 'label' without parentheses is a method reference, which is never nil" "$warn_dir/reference_stderr"
+grep -q "reference.d6:9:20: warning: 'label' without parentheses is a method reference, which is always true" "$warn_dir/reference_stderr"
+grep -q "reference.d6:10:13: warning: 'label' without parentheses is a method reference, which interpolates" "$warn_dir/reference_stderr"
+[[ "$(grep -c "warning:" "$warn_dir/reference_stderr")" == 3 ]]
 rm -rf "$warn_dir"
 
 manifest_dir="$(mktemp -d)"

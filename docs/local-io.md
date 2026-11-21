@@ -199,6 +199,11 @@ compiling to a single
   `print`) and writes it.
 - `.close()` is idempotent — closing an already-closed handle is a no-op,
   not an error.
+- `.pos()` is the byte offset the next read or write starts from, and
+  `.seek(offset)` moves to a byte offset from the start (a pipe or socket
+  raises `IOError`). A regular file read to its end can be read again after
+  it grows: `.read()` and `.gets()` try once more instead of keeping the
+  end-of-file a previous read reached, which is how a program follows a log.
 
 Any operation other than `.close()` on an already-closed handle, or a
 genuine read/write failure (checked via `ferror`, not just a short

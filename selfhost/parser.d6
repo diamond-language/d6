@@ -1434,6 +1434,13 @@ class Parser
     end
   end
 
+  # Tokens that can end an expression: an if/unless/while/until right after
+  # one is a trailing modifier with no `end`. Mirrors token_ends_value in
+  # src/compiler_classes.c.
+  TOKENS_ENDING_VALUES = [:identifier, :integer, :float, :string, :heredoc, :heredoc_raw, :symbol,
+                          :right_paren, :right_bracket, :right_brace, :true, :false, :nil, :self, :end,
+                          :instance_variable, :class_variable, :return, :break, :next, :regex, :redo, :retry]
+
   # Does the loop body starting at the current token contain a def or `do`
   # before its own `end`? A local read by the condition (or early in the
   # body) and captured later in the body must be box-aware from the start,
@@ -1445,10 +1452,19 @@ class Parser
     token = @current
     kind = token.kind()
     depth = 0
+    # The scan starts at the loop's condition, just after while/until.
+    previous = :while
     while kind != :eof
       return true if kind == :def || kind == :closure || kind == :do
       return true if self.string_may_hold_block?(token)
-      if kind == :if || kind == :unless || kind == :while || kind == :until ||
+      # A trailing modifier (`return x if done`) has no `end`; counting it
+      # would carry the scan past the loop's own `end`.
+      modifier = TOKENS_ENDING_VALUES.include?(previous) &&
+        (kind == :if || kind == :unless || kind == :while || kind == :until)
+      previous = kind
+      if modifier
+        # nothing to pair up
+      elsif kind == :if || kind == :unless || kind == :while || kind == :until ||
           kind == :loop || kind == :case || kind == :begin || kind == :class ||
           kind == :module || kind == :interface
         depth = depth + 1
@@ -7591,6 +7607,15 @@ class Parser
     self.compile_invoke_arguments(receiver, name)
   end
 
+  # The current token is '[' after a method name: does a type name follow, as
+  # explicit type arguments need? Type names start with a capital letter.
+  # Mirrors type_name_ahead in src/compiler_names.c.
+  def type_name_ahead?()
+    token = @lexer.clone().next_token()
+    token.kind() == :identifier && self.token_text(token).match?(/^[A-Z]/)
+  end
+
+
   # The rest of a method call, from just after its name.
   def compile_invoke_arguments(receiver, name)
     # Explicit generic arguments (`obj.method[Type](...)`) -- unlike
@@ -7599,7 +7624,15 @@ class Parser
     # resolved at INVOKE time against the receiver's runtime class, the
     # same reason there's no argument-count check above. Mirrors
     # compiler.c's own parse_invoke exactly.
+    # `stats.buckets[key]`: Ruby calls the reader; here the bare name is a
+    # method reference, and `[...]` after it would be type arguments.
+    if @current.kind() == :left_bracket && !name.end_with?("=") && !self.type_name_ahead?()
+      self.fail("'#{name}' without parentheses is a method reference, not a call; " +
+                "to index what it returns, call it first: #{name}()[...]")
+      return 0
+    end
     type_annotations = self.parse_explicit_type_annotations()
+
     return 0 if type_annotations == nil
     if @current.kind() != :left_paren
       return self.compile_reference_wrapper(receiver, name, type_annotations)
@@ -8246,6 +8279,10 @@ class Parser
   end
 
   def consume_block_start()
+    if @current.kind() == :equal
+      self.fail("an assignment in a condition needs parentheses: `while (x = value)`; to compare, write `==`")
+      return false
+    end
     if @current.kind() != :newline
       self.fail("expected newline before block body")
       return false
@@ -9550,8 +9587,10 @@ class Parser
     destination
   end
 
+  # `(name = expr)` is an expression whose value is the assigned value (see
+  # parse_grouping in src/compiler_expressions.c).
   def parse_grouping()
-    result = self.parse_expression()
+    result = self.assignment_ahead?() ? self.compile_assignment() : self.parse_expression()
     if @current.kind() != :right_paren
       self.fail("expected ')' after expression")
       return result

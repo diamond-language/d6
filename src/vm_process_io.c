@@ -1686,8 +1686,13 @@ DiamondVmStatus file_invoke_helper(DiamondVm *vm,
         memcmp(method_name->chars,"shutdown_write",14)==0;
     const bool peer_address_method=method_name->length==12&&
         memcmp(method_name->chars,"peer_address",12)==0;
+    const bool pos_method=method_name->length==3&&
+        memcmp(method_name->chars,"pos",3)==0;
+    const bool seek_method=method_name->length==4&&
+        memcmp(method_name->chars,"seek",4)==0;
     if(!read_method&&!gets_method&&!write_method&&!close_method&&
-       !flush_method&&!shutdown_write_method&&!peer_address_method) {
+       !flush_method&&!shutdown_write_method&&!peer_address_method&&
+       !pos_method&&!seek_method) {
         snprintf(vm->error,sizeof vm->error,"undefined method '%.*s' for %s",
             (int)method_name->length,method_name->chars,"File");
         return DIAMOND_VM_TYPE_ERROR;
@@ -1742,6 +1747,46 @@ DiamondVmStatus file_invoke_helper(DiamondVm *vm,
         }
         registers[dest]=registers[recv];return DIAMOND_VM_OK;
     }
+    /* The byte offset reads and writes continue from, and moving it: what a
+     * reader that follows a growing file, or skips a header, needs. A pipe or
+     * socket has no offset (IOError). */
+    if(pos_method) {
+        if(argc!=0)return DIAMOND_VM_ARITY_ERROR;
+        if(target_file->write_pending)(void)fflush(writer);
+        errno=0;
+        const long offset=ftell(target_file->stream);
+        if(offset<0) {
+            snprintf(vm->error,sizeof vm->error,"pos failed: %s",strerror(errno));
+            return DIAMOND_VM_IO_ERROR;
+        }
+        registers[dest]=DIAMOND_INT((int64_t)offset);return DIAMOND_VM_OK;
+    }
+    if(seek_method) {
+        if(argc!=1)return DIAMOND_VM_ARITY_ERROR;
+        if(registers[base].kind!=DIAMOND_VALUE_INT||registers[base].as.integer<0) {
+            snprintf(vm->error,sizeof vm->error,"File#seek offset must be a non-negative Int");
+            return DIAMOND_VM_TYPE_ERROR;
+        }
+        if(target_file->write_pending) {
+            target_file->write_pending=false;
+            (void)fflush(writer);
+        }
+        errno=0;
+        if(fseeko(target_file->stream,(off_t)registers[base].as.integer,SEEK_SET)!=0) {
+            snprintf(vm->error,sizeof vm->error,"seek failed: %s",strerror(errno));
+            return DIAMOND_VM_IO_ERROR;
+        }
+        registers[dest]=registers[recv];return DIAMOND_VM_OK;
+    }
+    /* A regular file that was read to its end may have grown since (a log
+     * being followed), so reading again tries rather than answering from the
+     * sticky end-of-file flag. A pipe or socket's end stays final. */
+    if((read_method||gets_method)&&feof(target_file->stream)) {
+        struct stat file_status;
+        if(fstat(fileno(target_file->stream),&file_status)==0&&S_ISREG(file_status.st_mode))
+            clearerr(target_file->stream);
+    }
+
     if((read_method||gets_method)&&target_file->write_pending) {
         target_file->write_pending=false;
         errno=0;

@@ -24,11 +24,25 @@ record. From 1.0.0, releases follow the [1.x compatibility policy](docs/compatib
   `d6 ~/tools/app/main.d6` runs from any directory.
 - Compile warnings. The first: a line that only calls `concat`, `sort`, `reverse`, `uniq`,
   `compact`, `take` or `drop` on an Array, with more code after it, does nothing (these return a
-  new Array; Ruby's `concat` appends in place). The program still compiles and runs; the warning
+  new Array; Ruby's `concat` appends in place). That includes such a line at the end of a loop body,
+  or of an `if`, `unless` or `case` body when more code follows the whole statement. The program still compiles and runs; the warning
   is printed when it compiles, and the LSP shows it as a warning.
 - Compound assignment through an attribute: `counter.count += 1`, `job.label ||= "x"`. The
   receiver is evaluated once; the reader and writer are ordinary method calls.
 - An endless def can assign: `def reset() = @count = 0`, `def bump(n: Int) -> Int = @count += n`.
+- `x.is_a?(T)` narrows `x` the way `x is T` does, so `return x if x.is_a?(String)` leaves
+  the rest of the union below it.
+- `Callable#call(args...)`: `block.call(x)` makes the same call as `block(x)`, as Ruby's `Proc#call`
+  does. It used to fail with "undefined method 'call' for Callable".
+- `File#pos` and `File#seek(offset)`. `read` and `gets` on a regular file that reached its end try
+  again, so a program can follow a log as another process appends to it (they kept returning
+  `nil` once the end was reached).
+- `Array#map_with_index() do |x, i| ... end`, for what Ruby writes `each_with_index.map`.
+- An assignment in parentheses is an expression: `while (line = file.gets()) != nil`. Without the
+  parentheses, `if x = value` is an error that says to add them or write `==`.
+- A warning when a method reference (`box.label` without parentheses) is compared with `nil`, used
+  as a condition or interpolated: a reference is never `nil`, always true and prints as
+  `#<Closure>`, so each is almost certainly a missing `()`.
 
 ### Fixed
 
@@ -44,6 +58,16 @@ record. From 1.0.0, releases follow the [1.x compatibility policy](docs/compatib
   from calling them ("undefined module singleton function").
 - docs/sandbox.md lists every function the sandbox denies; `File.read`, `File.write`, `File.size` and
   others were missing.
+- A loop holding a trailing modifier (`return "x" if n > 5`) no longer marks every local in the
+  function as captured when another `def` follows it. That dropped narrowing after it (a
+  `return problem if problem != nil` failed its return type) and made the loop's locals slower.
+- `box.items[key]` (a Ruby reader call without parentheses) says that `items` is a method reference
+  and to write `items()[...]`, instead of "unknown type annotation".
+- Returning an Array or Hash that already carries the declared element type no longer re-checks every
+  element, so pushing through a reader typed `Array[Float]` is no longer quadratic (200,000 pushes
+  took minutes).
+- `insert` or `unshift` that an Array's element type rejects leaves the Array as it was; it used to
+  empty everything after the insertion point.
 
 ## 1.3.1 — 2026-11-20
 

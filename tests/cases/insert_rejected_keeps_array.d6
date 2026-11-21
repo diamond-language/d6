@@ -1,0 +1,24 @@
+# An insert or unshift that the array's type contract rejects leaves the array
+# as it was. The prelude's insert used to move the tail out first and lose it
+# when pushing the new item raised.
+class Samples
+  attr_reader values: Array[Float]
+  def initialize()
+    @values = [1.0, 2.0, 3.0]
+  end
+end
+
+samples = Samples.new()
+outcomes = []
+begin
+  samples.values().insert(1, "x")
+rescue error: TypeError
+  outcomes.push("insert rejected")
+end
+begin
+  samples.values().unshift("x")
+rescue error: TypeError
+  outcomes.push("unshift rejected")
+end
+samples.values().insert(1, 1.5)
+[outcomes, samples.values()]
