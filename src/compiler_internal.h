@@ -1116,6 +1116,9 @@ DIAMOND_INTERNAL void publish_indexed_result_type(Compiler *compiler,uint16_t de
         uint16_t receiver);
 DIAMOND_INTERNAL bool statement_may_capture(const Compiler *compiler,uint64_t *mask);
 DIAMOND_INTERNAL void mark_locals_captured_in(Compiler *compiler,const uint64_t *mask);
+/* Whether a token of this kind can end an expression, so an if/unless/while/until
+ * right after it is a trailing modifier with no `end` of its own. */
+DIAMOND_INTERNAL bool token_ends_value(DiamondTokenKind kind);
 DIAMOND_INTERNAL void prepare_reentered_body_captures(Compiler *compiler);
 DIAMOND_INTERNAL bool loop_local_captured(const Compiler *compiler,size_t index);
 DIAMOND_INTERNAL uint16_t parse_while(Compiler *compiler,bool inverted);

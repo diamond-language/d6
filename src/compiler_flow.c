@@ -407,8 +407,20 @@ static bool loop_body_may_capture(const Compiler *compiler,uint64_t *mask) {
     DiamondToken token=compiler->current;
     size_t depth=0;
     bool found=false;
+    /* The scan starts at the loop's condition, just after while/until. */
+    DiamondTokenKind previous=DIAMOND_TOKEN_WHILE;
     for(size_t word=0;word<4;word++)mask[word]=0;
     while(token.kind!=DIAMOND_TOKEN_EOF) {
+        /* A trailing modifier (`return x if done`) has no `end`; counting it
+         * would carry the scan past the loop's own `end`. */
+        const bool modifier=token_ends_value(previous)&&
+            (token.kind==DIAMOND_TOKEN_IF||token.kind==DIAMOND_TOKEN_UNLESS||
+             token.kind==DIAMOND_TOKEN_WHILE||token.kind==DIAMOND_TOKEN_UNTIL);
+        previous=token.kind;
+        if(modifier) {
+            token=diamond_lexer_next(&lookahead);
+            continue;
+        }
         /* A def or closure captures every local; a struct body ends with an
          * `end` this scan does not pair up. */
         if(token.kind==DIAMOND_TOKEN_DEF||token.kind==DIAMOND_TOKEN_CLOSURE||
@@ -466,8 +478,14 @@ void prepare_reentered_body_captures(Compiler *compiler) {
  * (statement_may_capture). False at end of input. */
 static bool skip_block_body(DiamondLexer *lookahead) {
     size_t depth=0;
+    DiamondTokenKind previous=DIAMOND_TOKEN_DO;
     for(DiamondToken token=diamond_lexer_next(lookahead);token.kind!=DIAMOND_TOKEN_EOF;
         token=diamond_lexer_next(lookahead)) {
+        const bool modifier=token_ends_value(previous)&&
+            (token.kind==DIAMOND_TOKEN_IF||token.kind==DIAMOND_TOKEN_UNLESS||
+             token.kind==DIAMOND_TOKEN_WHILE||token.kind==DIAMOND_TOKEN_UNTIL);
+        previous=token.kind;
+        if(modifier)continue;
         if(token.kind==DIAMOND_TOKEN_IF||token.kind==DIAMOND_TOKEN_UNLESS||
            token.kind==DIAMOND_TOKEN_WHILE||token.kind==DIAMOND_TOKEN_UNTIL||
            token.kind==DIAMOND_TOKEN_LOOP||token.kind==DIAMOND_TOKEN_CASE||

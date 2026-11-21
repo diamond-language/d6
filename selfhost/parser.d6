@@ -1434,6 +1434,13 @@ class Parser
     end
   end
 
+  # Tokens that can end an expression: an if/unless/while/until right after
+  # one is a trailing modifier with no `end`. Mirrors token_ends_value in
+  # src/compiler_classes.c.
+  TOKENS_ENDING_VALUES = [:identifier, :integer, :float, :string, :heredoc, :heredoc_raw, :symbol,
+                          :right_paren, :right_bracket, :right_brace, :true, :false, :nil, :self, :end,
+                          :instance_variable, :class_variable, :return, :break, :next, :regex, :redo, :retry]
+
   # Does the loop body starting at the current token contain a def or `do`
   # before its own `end`? A local read by the condition (or early in the
   # body) and captured later in the body must be box-aware from the start,
@@ -1445,10 +1452,19 @@ class Parser
     token = @current
     kind = token.kind()
     depth = 0
+    # The scan starts at the loop's condition, just after while/until.
+    previous = :while
     while kind != :eof
       return true if kind == :def || kind == :closure || kind == :do
       return true if self.string_may_hold_block?(token)
-      if kind == :if || kind == :unless || kind == :while || kind == :until ||
+      # A trailing modifier (`return x if done`) has no `end`; counting it
+      # would carry the scan past the loop's own `end`.
+      modifier = TOKENS_ENDING_VALUES.include?(previous) &&
+        (kind == :if || kind == :unless || kind == :while || kind == :until)
+      previous = kind
+      if modifier
+        # nothing to pair up
+      elsif kind == :if || kind == :unless || kind == :while || kind == :until ||
           kind == :loop || kind == :case || kind == :begin || kind == :class ||
           kind == :module || kind == :interface
         depth = depth + 1
