@@ -19,6 +19,9 @@ record. From 1.0.0, releases follow the [1.x compatibility policy](docs/compatib
 - `Process.spawn(argv, {"process_group": true})` starts the child in its own process group, and
   that handle's `terminate`/`kill` stop the whole group, so stopping a `sh -c` child no longer
   leaves the commands it started running.
+- `require_cut` falls back to the `cuts/` of the entry file's project (the nearest directory
+  above it with a `Cutfile`) when the working directory has no cut of that name, so
+  `d6 ~/tools/app/main.d6` runs from any directory.
 
 ### Fixed
 

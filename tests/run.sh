@@ -1036,6 +1036,38 @@ fi
 grep -q "require_cut path must be a bare cut name" "$slash_error"
 rm -rf "$pkg_dir" "$pkg_missing_error" "$slash_error"
 
+# A program run from another directory finds the cuts of its own project (the
+# nearest directory above the entry file with a Cutfile) when the working
+# directory has none of that name; the working directory's cuts/ still wins.
+project_dir="$(mktemp -d)"
+elsewhere_dir="$(mktemp -d)"
+mkdir -p "$project_dir/bin" "$project_dir/cuts/greeter/lib"
+printf '{"name": "tool", "version": "0.1.0"}\n' >"$project_dir/Cutfile"
+printf '{"name": "greeter", "version": "0.1.0"}\n' >"$project_dir/cuts/greeter/Cutfile"
+printf 'def greet(name)\n  "project: " + name\nend\n' >"$project_dir/cuts/greeter/lib/greeter.d6"
+printf 'require_cut "greeter"\nputs(greet("world"))\n' >"$project_dir/bin/main.d6"
+actual="$(cd "$elsewhere_dir" && "$diamond_abs" "$project_dir/bin/main.d6")"
+[[ "$actual" == "project: world" ]]
+mkdir -p "$elsewhere_dir/cuts/greeter/lib"
+printf 'def greet(name)\n  "working directory: " + name\nend\n' >"$elsewhere_dir/cuts/greeter/lib/greeter.d6"
+actual="$(cd "$elsewhere_dir" && "$diamond_abs" "$project_dir/bin/main.d6")"
+[[ "$actual" == "working directory: world" ]]
+project_error="$(mktemp)"
+printf 'require_cut "absent"\n' >"$project_dir/bin/absent.d6"
+if (cd "$elsewhere_dir" && "$diamond_abs" "$project_dir/bin/absent.d6") >/dev/null 2>"$project_error"; then
+    echo "a cut missing from both places unexpectedly resolved" >&2
+    exit 1
+fi
+grep -q "no cuts/absent/lib/absent.d6 here or in $(realpath "$project_dir")/ (run facet install there)" "$project_error"
+rm -rf "$elsewhere_dir/cuts"
+printf '{"name": "not_greeter"}\n' >"$project_dir/cuts/greeter/Cutfile"
+if (cd "$elsewhere_dir" && "$diamond_abs" "$project_dir/bin/main.d6") >/dev/null 2>"$project_error"; then
+    echo "a mismatched project cut manifest unexpectedly passed" >&2
+    exit 1
+fi
+grep -q "declares name 'not_greeter', expected 'greeter'" "$project_error"
+rm -rf "$project_dir" "$elsewhere_dir" "$project_error"
+
 manifest_dir="$(mktemp -d)"
 mkdir -p "$manifest_dir/cuts/greeter/lib"
 printf 'def greet(name)\n  "hi, " + name\nend\n' >"$manifest_dir/cuts/greeter/lib/greeter.d6"

@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <stdckdint.h>
 #include <string.h>
+#include <unistd.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -26,6 +27,10 @@ typedef struct Loader {
     size_t error_capacity;
     DiamondSourceOverride override;
     void *override_data;
+    /* The entry file's project directory (the nearest ancestor holding a Cutfile),
+     * with a trailing slash, or "" when there is none. require_cut looks in
+     * cuts/ under the working directory first, then under this. */
+    char project_root[DIAMOND_MAX_SOURCE_PATH];
 } Loader;
 
 static bool append(Loader *loader,const char *text,size_t length) {
@@ -71,11 +76,11 @@ static char *read_source(const char *path) {
 }
 
 /* Manifest metadata is parsed without compiling or running Diamond code. */
-static bool validate_cut_manifest(Loader *loader,const char *name,
+static bool validate_cut_manifest(Loader *loader,const char *base,const char *name,
         size_t name_length,const char *including_path,size_t including_line) {
     char directory[DIAMOND_MAX_SOURCE_PATH];
     char manifest_path[DIAMOND_MAX_SOURCE_PATH];
-    const int written=snprintf(directory,sizeof directory,"cuts/%.*s",(int)name_length,name);
+    const int written=snprintf(directory,sizeof directory,"%scuts/%.*s",base,(int)name_length,name);
     if(written<=0||(size_t)written>=sizeof directory)return true;
     const DiamondCutManifestLookup lookup=
         diamond_cut_manifest_find(directory,manifest_path,sizeof manifest_path);
@@ -490,24 +495,33 @@ static bool expand_source(Loader *loader,const char *path,const char *source,
                         path,line,requested);
                     return false;
                 }
-                const char *entries[]={"cuts/%.*s/lib/%.*s.d6","cuts/%.*s/%.*s.d6",
-                    "cuts/%.*s/lib/%.*s.di","cuts/%.*s/%.*s.di"};
+                const char *entries[]={"%scuts/%.*s/lib/%.*s.d6","%scuts/%.*s/%.*s.d6",
+                    "%scuts/%.*s/lib/%.*s.di","%scuts/%.*s/%.*s.di"};
+                /* The working directory's cuts/ first, then the entry file's project's. */
+                const char *bases[]={"",loader->project_root};
+                const size_t base_count=loader->project_root[0]=='\0'?1:2;
+                const char *base="";
                 bool resolved=false;
-                for(size_t index=0;index<sizeof entries/sizeof entries[0]&&!resolved;index++) {
-                    const int written=snprintf(cut_path,DIAMOND_MAX_SOURCE_PATH,
-                        entries[index],(int)request_length,requested,(int)request_length,requested);
-                    resolved=written>0&&(size_t)written<DIAMOND_MAX_SOURCE_PATH&&
-                        realpath(cut_path,canonical)!=nullptr;
+                for(size_t which=0;which<base_count&&!resolved;which++) {
+                    base=bases[which];
+                    for(size_t index=0;index<sizeof entries/sizeof entries[0]&&!resolved;index++) {
+                        const int written=snprintf(cut_path,DIAMOND_MAX_SOURCE_PATH,entries[index],
+                            base,(int)request_length,requested,(int)request_length,requested);
+                        resolved=written>0&&(size_t)written<DIAMOND_MAX_SOURCE_PATH&&
+                            realpath(cut_path,canonical)!=nullptr;
+                    }
                 }
                 free(cut_path);
                 if(!resolved) {
                     (void)snprintf(loader->error,loader->error_capacity,
-                        "%s:%zu: cannot require_cut '%s': no cuts/%.*s/lib/%.*s.d6",
+                        "%s:%zu: cannot require_cut '%s': no cuts/%.*s/lib/%.*s.d6%s%s%s",
                         path,line,requested,
-                        (int)request_length,requested,(int)request_length,requested);
+                        (int)request_length,requested,(int)request_length,requested,
+                        base_count==2?" here or in ":"",base_count==2?loader->project_root:"",
+                        base_count==2?" (run facet install there)":"");
                     return false;
                 }
-                if(!validate_cut_manifest(loader,requested,request_length,path,line))
+                if(!validate_cut_manifest(loader,base,requested,request_length,path,line))
                     return false;
             } else {
                 const bool implicit_extension=request_length<3||
@@ -599,6 +613,35 @@ static bool expand(Loader *loader,const char *path,const char *source,
     return ok;
 }
 
+/* The directory of the nearest ancestor of `entry` (a file path) that holds a
+ * Cutfile, with a trailing slash, or "" when none does or `entry` is not a
+ * real file (`-e`, stdin). */
+static void find_project_root(const char *entry,char *root,size_t capacity) {
+    root[0]='\0';
+    char directory[DIAMOND_MAX_SOURCE_PATH];
+    if(entry[0]!='/'||access(entry,F_OK)!=0)return;
+    const int copied=snprintf(directory,sizeof directory,"%s",entry);
+    if(copied<=0||(size_t)copied>=sizeof directory)return;
+    char *slash=strrchr(directory,'/');
+    while(slash!=nullptr) {
+        slash[1]='\0';
+        char manifest[DIAMOND_MAX_SOURCE_PATH];
+        const int written=snprintf(manifest,sizeof manifest,"%s" DIAMOND_CUT_MANIFEST,directory);
+        if(written>0&&(size_t)written<sizeof manifest&&access(manifest,F_OK)==0) {
+            /* The usual case, the working directory itself, needs no fallback. */
+            char working[DIAMOND_MAX_SOURCE_PATH];
+            const bool here=getcwd(working,sizeof working)!=nullptr&&
+                strlen(working)+1==strlen(directory)&&
+                strncmp(working,directory,strlen(working))==0;
+            if(!here)(void)snprintf(root,capacity,"%s",directory);
+            return;
+        }
+        if(slash==directory)return;
+        slash[0]='\0';
+        slash=strrchr(directory,'/');
+    }
+}
+
 bool diamond_load_program_with_override(const char *name,const char *source,
                           DiamondSourceOverride override,void *user_data,
                           DiamondSourceBundle *bundle,char *error,
@@ -643,6 +686,7 @@ bool diamond_load_program_with_override(const char *name,const char *source,
             free(loader);free(segments);*bundle=(DiamondSourceBundle){};return false;
         }
     }
+    find_project_root(path,loader->project_root,sizeof loader->project_root);
     if(!expand(loader,path,source,nullptr,0)) {
         if(error[0]=='\0')snprintf(error,error_capacity,"unable to expand program sources");
         free(loader->buffer);free(loader);free(segments);*bundle=(DiamondSourceBundle){};

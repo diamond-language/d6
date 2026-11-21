@@ -57,13 +57,14 @@ greet("world")
 
 `require_cut` is a require form of its own, distinct from plain `require`
 — parsed the same textual way (`src/loader.c`'s `expand()`), but resolved
-completely differently: `require_cut "name"` always resolves to
-`cuts/name/lib/name.d6`, anchored to the *process's own current working
-directory* (not the requiring file's own directory — cuts are
-project-level, so they're anchored the same way the top-level entry file
-itself is). If `cuts/name/lib/name.d6` doesn't exist, the loader falls
-back to the flat `cuts/name/name.d6` location, then the corresponding legacy
-`.di` paths. If none
+completely differently: `require_cut "name"` looks first for
+`cuts/name/lib/name.d6` in the working directory, not the requiring
+file's directory: cuts belong to the project, not to one file. When the
+working directory has no cut of that name, the loader tries the `cuts/` of the
+entry file's project (the nearest directory above the entry file holding a
+`Cutfile`), so `d6 ~/tools/report/main.d6` works from anywhere once
+`facet install` has run in `~/tools/report`. In each place it also accepts
+the flat `cuts/name/name.d6` layout and the legacy `.di` paths. If nothing
 resolves, `require_cut` fails with a clear "cannot require_cut" error
 rather than silently doing nothing.
 
