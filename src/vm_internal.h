@@ -1903,6 +1903,12 @@ DIAMOND_INTERNAL DiamondVmStatus merge_native_keyword_arguments(DiamondVm *vm,
         const uint16_t *keyword_registers,size_t keyword_count,
         const DiamondValue *registers,DiamondValue **merged,size_t *merged_count);
 
+/* A private method may only be called on an implicit self receiver; a
+ * protected one only from inside its declaring class's hierarchy. */
+DIAMOND_INTERNAL DiamondVmStatus check_instance_method_visibility(DiamondVm *vm,
+        const DiamondChunk *chunk,const DiamondChunk *owner,
+        const DiamondInstance *instance,const DiamondMethod *method,
+        const DiamondStringConstant *method_name,DiamondValue *registers,uint16_t recv);
 DIAMOND_INTERNAL DiamondVmStatus merge_keyword_arguments(DiamondVm *vm,
         const DiamondChunk *caller,const DiamondFunction *function,
         const DiamondArray *positional,const uint16_t *keyword_names,

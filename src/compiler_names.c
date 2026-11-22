@@ -111,6 +111,7 @@ builtin_math_calls[]={
     {"cos",DIAMOND_MATH_COS,false},{"tan",DIAMOND_MATH_TAN,false},
     {"pow",DIAMOND_MATH_POW,true},{"exp",DIAMOND_MATH_EXP,false},
     {"log",DIAMOND_MATH_LOG,false},{"tanh",DIAMOND_MATH_TANH,false},
+    {"log10",DIAMOND_MATH_LOG10,false},{"log2",DIAMOND_MATH_LOG2,false},
 };
 
 static BuiltinCallParser builtin_namespace_parser(const Compiler *compiler,
@@ -3020,11 +3021,21 @@ static uint16_t parse_invoke_named_impl(Compiler *compiler, uint16_t receiver,
         return parse_invoke_spread_call(compiler,&site,writer_name,type_arguments,
             type_argument_count);
     uint16_t args[DIAMOND_MAX_ARGUMENTS]; size_t count = 0;
+    bool forwarded_block=false;
     while (compiler->current.kind != DIAMOND_TOKEN_RIGHT_PAREN && !compiler->failed) {
         if (count == DIAMOND_MAX_ARGUMENTS) { fail(compiler, compiler->current.span, "too many arguments"); break; }
+        const bool forwarding=compiler->current.kind==DIAMOND_TOKEN_AMPERSAND;
         args[count]=parse_expected_argument(compiler,contextual_target,count);
         count++;
         skip_newlines(compiler);
+        if(forwarding) {
+            forwarded_block=true;
+            if(compiler->current.kind!=DIAMOND_TOKEN_RIGHT_PAREN) {
+                fail(compiler,compiler->current.span,
+                    "a forwarded block argument must be last");return 0;
+            }
+            break;
+        }
         if (compiler->current.kind != DIAMOND_TOKEN_COMMA) break;
         advance_token(compiler);
         skip_newlines(compiler);
@@ -3045,8 +3056,29 @@ static uint16_t parse_invoke_named_impl(Compiler *compiler, uint16_t receiver,
     /* `recv.method(args) do |x| ... end` -- the block becomes one more
      * (always last) positional argument, exactly as if it had been
      * written as a named closure and passed explicitly. See compile_
-     * block's own comment for the full design. */
-    if(compiler->current.kind==DIAMOND_TOKEN_DO) {
+     * block's own comment for the full design. When fewer arguments come
+     * before it than the method's block slot, or the receiver's type is
+     * unknown, the call says which argument is the block instead
+     * (INVOKE_KEYWORDS' block flag), so defaulted parameters in between
+     * keep their defaults rather than receiving it. `recv.method(args,
+     * &block)` forwards a block the same way. */
+    const bool untyped_receiver=contextual_target==nullptr&&
+        compiler->known_types[receiver]==DIAMOND_TYPE_NONE;
+    if(forwarded_block) {
+        const uint16_t block=args[--count];
+        const size_t block_slot=
+            contextual_target==nullptr||contextual_target->arity<=1?0:
+                (size_t)contextual_target->arity-2;
+        if(untyped_receiver||(contextual_target!=nullptr&&count<block_slot)) {
+            const uint16_t positional=emit_argument_array(compiler,args,count);
+            const uint16_t result=emit_invoke_keywords(compiler,receiver,name,positional,
+                nullptr,nullptr,0,type_arguments,type_argument_count,true,block);
+            publish_instance_return_type(compiler,result,receiver,receiver_set_index,
+                name,return_target,resolved_arguments,resolved_count);
+            return result;
+        }
+        args[count++]=block;
+    } else if(compiler->current.kind==DIAMOND_TOKEN_DO) {
         if(count==DIAMOND_MAX_ARGUMENTS) {
             fail(compiler,compiler->current.span,"too many arguments");return 0;
         }
@@ -3077,7 +3109,7 @@ static uint16_t parse_invoke_named_impl(Compiler *compiler, uint16_t receiver,
         const size_t block_slot=
             contextual_target==nullptr||contextual_target->arity<=1?0:
                 (size_t)contextual_target->arity-2;
-        if(contextual_target!=nullptr&&count<block_slot) {
+        if(untyped_receiver||(contextual_target!=nullptr&&count<block_slot)) {
             const uint16_t positional=emit_argument_array(compiler,args,count);
             const uint16_t result=emit_invoke_keywords(compiler,receiver,name,positional,
                 nullptr,nullptr,0,type_arguments,type_argument_count,true,block);

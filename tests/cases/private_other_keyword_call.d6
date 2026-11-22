@@ -1,0 +1,7 @@
+# A keyword call on another instance can't reach a private method either.
+class Walker
+  def poke(other: Walker) = other.step(1, by: 2)
+  private
+  def step(n: Int, by: Int = 1) = n + by
+end
+Walker.new().poke(Walker.new())

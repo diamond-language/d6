@@ -1337,7 +1337,7 @@ static DiamondVmStatus jit_instance_method_missing(DiamondVm *vm,const DiamondCh
 /* A private method may only be called on an implicit self receiver; a
  * protected one only from inside its declaring class's hierarchy. */
 __attribute__((noinline))
-static DiamondVmStatus check_instance_method_visibility(DiamondVm *vm,const DiamondChunk *chunk,
+DiamondVmStatus check_instance_method_visibility(DiamondVm *vm,const DiamondChunk *chunk,
         const DiamondChunk *owner,const DiamondInstance *instance,const DiamondMethod *method,
         const DiamondStringConstant *method_name,DiamondValue *registers,uint16_t recv) {
     if(method->is_private&&!(chunk->parameter_offset==1&&recv==0)) {
@@ -2394,7 +2394,10 @@ DiamondVmStatus public_send_helper(DiamondVm *vm,
     uint8_t code[12]={DIAMOND_OP_INVOKE_SPREAD,
         0,2,0,0,0,0,0,1,DIAMOND_OP_RETURN,0,2};
     uint32_t locations[12]={0};
-    DiamondChunk synthetic=*chunk;synthetic.class_type_variable=false;
+    /* The copy keeps the caller's constants and types but runs its own code, so
+     * the caller's entry_check (which skips the caller's leading parameter
+     * checks) must not apply: it would start this code mid-instruction. */
+    DiamondChunk synthetic=*chunk;synthetic.class_type_variable=false;synthetic.entry_check=nullptr;
     synthetic.name="<public_send>";
     synthetic.code=code;synthetic.lines=locations;synthetic.columns=locations;
     synthetic.code_count=sizeof code;synthetic.register_count=3;
