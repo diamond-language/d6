@@ -1,0 +1,22 @@
+# JSON.each walks a stream of whitespace-separated JSON values; values before
+# invalid text reach the block first. Nesting deeper than the call-depth
+# budget raises JSONError, not a stack overflow.
+JSON.each("1 [2,\n3]\n{\"a\": 4} \"five\"  ") do |value| p(value) end
+p(JSON.parse_all("true null 2.5 \"héllo\""))
+p(JSON.parse_all("   "))
+begin
+  JSON.each("1 2 {bad") do |value| p(value) end
+rescue error: JSONError
+  puts("error: #{error.message()}")
+end
+
+def nested_in_fiber()
+  begin
+    JSON.parse("[" * 500 + "]" * 500)
+    "parsed"
+  rescue error: JSONError
+    error.message().start_with?("JSON nested more than") ? "too deep" : error.message()
+  end
+end
+p(Fiber.new(nested_in_fiber).resume())
+p(JSON.parse("[" * 100 + "]" * 100).length())

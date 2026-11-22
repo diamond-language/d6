@@ -1,0 +1,36 @@
+sealed class Shape
+end
+class S1 < Shape
+end
+class S2 < Shape
+end
+class S3 < Shape
+end
+class S4 < Shape
+end
+class S5 < Shape
+end
+class S6 < Shape
+end
+class S7 < Shape
+end
+class S8 < Shape
+end
+class S9 < Shape
+end
+class S10 < Shape
+end
+def name(shape: Shape) -> String
+  case shape
+  when S1 then "1"
+  when S2 then "2"
+  when S3 then "3"
+  when S4 then "4"
+  when S5 then "5"
+  when S6 then "6"
+  when S7 then "7"
+  when S8 then "8"
+  when S9 then "9"
+  end
+end
+puts(name(S10.new()))

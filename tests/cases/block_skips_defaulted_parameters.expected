@@ -1,0 +1,14 @@
+[0, nil]
+[1, nil]
+[1, ["given"]]
+[1, nil]
+[2, 0]
+[5, nil]
+["later returned", nil]
+["do", [1, nil]]
+[2, nil]
+["untyped do", [3, nil]]
+[4, nil]
+7
+8
+[7, 8]

@@ -587,11 +587,17 @@ uint16_t load_current_block(Compiler *compiler) {
     return block;
 }
 
+/* The type set of any Callable at all. A set that also names a return type
+ * or parameter types (a block literal's inferred signature) is narrower and
+ * must not be reused: a `yield` checking its block against `Callable ->
+ * Array` rejected every block that wasn't known to return an Array. */
 uint16_t callable_type_set_index(Compiler *compiler) {
     for(size_t index=0;index<compiler->function->type_set_count;index++) {
         const DiamondTypeSet *set=&compiler->function->type_sets[index];
         if(set->count==1&&set->members[0].id==DIAMOND_TYPE_CALLABLE&&
-           set->members[0].callable_arity==UINT8_MAX)
+           set->members[0].callable_arity==UINT8_MAX&&
+           set->members[0].callable_return_set==DIAMOND_NO_TYPE_SET&&
+           !set->members[0].callable_parameters_typed)
             return (uint16_t)index;
     }
     if(!reserve_type_sets(compiler,1))return 0;
@@ -1467,15 +1473,28 @@ static bool parse_call_slot_arguments(Compiler *compiler, const DiamondFunction 
                     fail(compiler,compiler->current.span,"too many call arguments");
                     return false;
                 }
-                slot=next_positional_slot++;
+                /* `f(x, &block)` binds the callee's &block parameter, not
+                 * the next positional one: defaulted parameters between
+                 * keep their defaults. */
+                if(compiler->current.kind==DIAMOND_TOKEN_AMPERSAND&&
+                   function->has_block_parameter&&function->arity>0&&
+                   next_positional_slot<function->arity)
+                    slot=function->arity-1;
+                else slot=next_positional_slot++;
             }
             if(slot_filled[slot]) {
                 fail(compiler,name,"multiple values for the same argument");
                 return false;
             }
+            const bool forwarding=!is_keyword&&
+                compiler->current.kind==DIAMOND_TOKEN_AMPERSAND;
             slot_registers[slot]=parse_expected_argument(compiler,function,slot);
             slot_filled[slot]=true;
             skip_newlines(compiler);
+            if(forwarding&&compiler->current.kind!=DIAMOND_TOKEN_RIGHT_PAREN) {
+                fail(compiler,compiler->current.span,
+                    "a forwarded block argument must be last");return false;
+            }
             if (compiler->current.kind != DIAMOND_TOKEN_COMMA) break;
             advance_token(compiler);
             skip_newlines(compiler);
@@ -2310,14 +2329,24 @@ static uint16_t parse_singleton_call_body(Compiler *compiler,
     if(call_arguments_have_spread(compiler))
         return parse_singleton_spread_call(compiler,method,function,receiver_class_index,type_arguments,type_argument_count);
     uint16_t arguments[DIAMOND_MAX_ARGUMENTS];size_t argument_count=0;
+    bool forwarded_block=false;
     while(compiler->current.kind!=DIAMOND_TOKEN_RIGHT_PAREN&&!compiler->failed) {
         if(argument_count==DIAMOND_MAX_ARGUMENTS) {
             fail(compiler,compiler->current.span,"too many call arguments");return 0;
         }
+        const bool forwarding=compiler->current.kind==DIAMOND_TOKEN_AMPERSAND;
         arguments[argument_count]=parse_expected_argument(compiler,function,
             argument_count);
         argument_count++;
         skip_newlines(compiler);
+        if(forwarding) {
+            forwarded_block=true;
+            if(compiler->current.kind!=DIAMOND_TOKEN_RIGHT_PAREN) {
+                fail(compiler,compiler->current.span,
+                    "a forwarded block argument must be last");return 0;
+            }
+            break;
+        }
         if(compiler->current.kind!=DIAMOND_TOKEN_COMMA)break;
         advance_token(compiler);
         skip_newlines(compiler);
@@ -2373,6 +2402,20 @@ static uint16_t parse_singleton_call_body(Compiler *compiler,
             return destination;
         }
         arguments[argument_count++]=block;
+    } else if(forwarded_block&&argument_count-1<(size_t)(method->arity==0?0:method->arity-1)) {
+        /* `Namespace.method(args, &block)`: as with a do block, defaulted
+         * parameters before the block slot keep their defaults. */
+        const uint16_t block=arguments[--argument_count];
+        const uint16_t positional=
+            emit_argument_array(compiler,arguments,argument_count);
+        const uint16_t destination=emit_singleton_call_head(compiler,type_argument_count==0?
+            DIAMOND_OP_CALL_SINGLETON_KEYWORDS:DIAMOND_OP_CALL_TYPED_SINGLETON_KEYWORDS,
+            method,positional,receiver_class_index);
+        emit_byte(compiler,0x80u);emit_register(compiler,block);
+        emit_type_argument_trailer(compiler,type_arguments,type_argument_count);
+        publish_call_return_type(compiler,destination,function,
+            resolved_arguments,resolved_count);
+        return destination;
     }
     if(argument_count<method->required_arity||
        (argument_count>method->arity && !method->has_variadic)) {

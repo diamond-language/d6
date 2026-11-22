@@ -661,7 +661,7 @@ keyword, never the other way around.
   over that class's own direct subclasses, the same way an explicit
   `Circle | Square` union already is -- see that section for exactly
   which `when` forms count as coverage, and for the two conditions
-  (zero or more than 8 direct subclasses) that leave a sealed hierarchy
+  (zero or more than 256 direct subclasses) that leave a sealed hierarchy
   unchecked instead of erroring.
 
 **Deliberately not a module/file-boundary enforcement mechanism, unlike
@@ -823,8 +823,10 @@ field list the rest of the struct relies on.
   `struct Point3D(z: Int) < Point`. The parent's fields come first, then
   the struct's own, and the generated `initialize` (`Point3D.new(1, 2, 3)`),
   `==` and `to_s` cover all of them; the parent's readers and methods carry
-  over. A field repeating one of the parent's is a compile error, and a
-  plain class is not accepted as a parent. (An ordinary `class` can still
+  over. A field repeating one of the parent's is a compile error. A plain
+  class is accepted as a parent only when it has no fields and no
+  `initialize`, as with a `sealed class Shape` whose variants are structs:
+  `struct Circle(radius: Float) < Shape`. (An ordinary `class` can still
   subclass a struct's class the normal way.)
 - **No reopening.** A second `struct Point(...)` for an already-declared
   name is a compile error, unlike a plain `class`. Regenerating

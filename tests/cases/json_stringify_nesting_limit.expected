@@ -1,8 +1,9 @@
 102
 300
-150 levels: SystemStackError
-200 levels: SystemStackError
-array containing itself: SystemStackError
-hash containing itself: SystemStackError
+300
+150 levels in a fiber: JSONError
+200 levels in a fiber: JSONError
+array containing itself: JSONError
+hash containing itself: JSONError
 [1,{"a":[2]}]
 nil

@@ -12,4 +12,25 @@ module JSON
   end
   # Native (String#parse_json, src/vm.c) -- see its own comment for why.
   def parse(source: String) = source.parse_json()
+
+  # Calls the block with each value of a stream of JSON values separated by
+  # whitespace (JSON Lines, or several documents in one file). Values before
+  # invalid text reach the block before JSONError is raised.
+  def each(source: String, &visit) -> Nil
+    offset = 0
+    loop do
+      step = source.parse_json_at(offset)
+      return nil if step == nil
+      yield(step[0])
+      offset = step[1]
+    end
+    nil
+  end
+
+  # Every value of such a stream, in an Array.
+  def parse_all(source: String) -> Array
+    values = []
+    JSON.each(source) do |value| values.push(value) end
+    values
+  end
 end

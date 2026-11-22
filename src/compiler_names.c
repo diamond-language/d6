@@ -111,6 +111,7 @@ builtin_math_calls[]={
     {"cos",DIAMOND_MATH_COS,false},{"tan",DIAMOND_MATH_TAN,false},
     {"pow",DIAMOND_MATH_POW,true},{"exp",DIAMOND_MATH_EXP,false},
     {"log",DIAMOND_MATH_LOG,false},{"tanh",DIAMOND_MATH_TANH,false},
+    {"log10",DIAMOND_MATH_LOG10,false},{"log2",DIAMOND_MATH_LOG2,false},
 };
 
 static BuiltinCallParser builtin_namespace_parser(const Compiler *compiler,
@@ -2900,6 +2901,35 @@ static uint16_t compile_setter_compound_assignment(Compiler *compiler,
 /* parse_invoke after `.name` has been consumed -- also reached from
  * parse_call for a bare `name(...)` inside a method, with self as the
  * receiver. */
+/* Whether a Callable value answers `name`: the methods every value has, plus
+ * arity and call. */
+static bool callable_answers(const Compiler *compiler,DiamondSpan name) {
+    static const char *const members[]={"arity","call","class","deep_freeze",
+        "dup","equal?","freeze","frozen?","inspect","is_a?","nil?",
+        "respond_to?","tap","to_s"};
+    for(size_t index=0;index<sizeof members/sizeof members[0];index++)
+        if(name_equals(compiler,members[index],name,false))return true;
+    return false;
+}
+
+/* What an instance call's result is known to be, for the compiler and the
+ * editor; `arguments` ends with the block, if the call has one. */
+static void publish_invoke_result_types(Compiler *compiler,uint16_t result,
+        uint16_t receiver,uint16_t mutation_receiver,int32_t receiver_set_index,
+        DiamondSpan name,const DiamondFunction *return_target,
+        const uint16_t *resolved_arguments,size_t resolved_count,
+        const uint16_t *arguments,size_t count) {
+    publish_instance_return_type(compiler,result,receiver,receiver_set_index,name,
+        return_target,resolved_arguments,resolved_count);
+    publish_native_scalar_method_return_type(compiler,result,receiver,
+        receiver_set_index,name,(uint8_t)count);
+    publish_collection_argument_return_type(compiler,result,receiver_set_index,
+        name,arguments,count);
+    publish_array_map_tooling_type(compiler,result,receiver,name,arguments,count);
+    publish_array_push_return_type(compiler,result,mutation_receiver,name,
+        arguments,count);
+}
+
 static uint16_t parse_invoke_named_impl(Compiler *compiler, uint16_t receiver,
         uint16_t mutation_receiver, int32_t receiver_set_index, DiamondSpan name) {
     const DiamondFunction *contextual_target=
@@ -3003,6 +3033,19 @@ static uint16_t parse_invoke_named_impl(Compiler *compiler, uint16_t receiver,
                 snprintf(consequence,sizeof consequence,"which has no '%s'",operator);
                 warn_method_reference_use(compiler,reference,consequence);
             }
+            /* `obj.files.push(x)`: a method a Callable doesn't have, so the
+             * reader call was meant. */
+            if(compiler->current.kind==DIAMOND_TOKEN_DOT) {
+                DiamondLexer lookahead=compiler->lexer;
+                const DiamondToken member=diamond_lexer_next(&lookahead);
+                if(member.kind==DIAMOND_TOKEN_IDENTIFIER&&
+                   !callable_answers(compiler,member.span)) {
+                    char consequence[DIAMOND_MAX_FUNCTION_NAME+32];
+                    snprintf(consequence,sizeof consequence,"which has no '%.*s'",
+                        (int)member.span.length,compiler->source+member.span.start);
+                    warn_method_reference_use(compiler,reference,consequence);
+                }
+            }
             return reference;
         }
         fail(compiler,compiler->current.span,
@@ -3020,11 +3063,21 @@ static uint16_t parse_invoke_named_impl(Compiler *compiler, uint16_t receiver,
         return parse_invoke_spread_call(compiler,&site,writer_name,type_arguments,
             type_argument_count);
     uint16_t args[DIAMOND_MAX_ARGUMENTS]; size_t count = 0;
+    bool forwarded_block=false;
     while (compiler->current.kind != DIAMOND_TOKEN_RIGHT_PAREN && !compiler->failed) {
         if (count == DIAMOND_MAX_ARGUMENTS) { fail(compiler, compiler->current.span, "too many arguments"); break; }
+        const bool forwarding=compiler->current.kind==DIAMOND_TOKEN_AMPERSAND;
         args[count]=parse_expected_argument(compiler,contextual_target,count);
         count++;
         skip_newlines(compiler);
+        if(forwarding) {
+            forwarded_block=true;
+            if(compiler->current.kind!=DIAMOND_TOKEN_RIGHT_PAREN) {
+                fail(compiler,compiler->current.span,
+                    "a forwarded block argument must be last");return 0;
+            }
+            break;
+        }
         if (compiler->current.kind != DIAMOND_TOKEN_COMMA) break;
         advance_token(compiler);
         skip_newlines(compiler);
@@ -3045,8 +3098,37 @@ static uint16_t parse_invoke_named_impl(Compiler *compiler, uint16_t receiver,
     /* `recv.method(args) do |x| ... end` -- the block becomes one more
      * (always last) positional argument, exactly as if it had been
      * written as a named closure and passed explicitly. See compile_
-     * block's own comment for the full design. */
-    if(compiler->current.kind==DIAMOND_TOKEN_DO) {
+     * block's own comment for the full design. When fewer arguments come
+     * before it than the method's block slot, or the receiver's type is
+     * unknown, the call says which argument is the block instead
+     * (INVOKE_KEYWORDS' block flag), so defaulted parameters in between
+     * keep their defaults rather than receiving it. `recv.method(args,
+     * &block)` forwards a block the same way. */
+    /* No signature yet: the receiver's type is unknown, or it is an instance
+     * whose method is defined later in the program. */
+    const uint16_t receiver_type=compiler->known_types[receiver];
+    const bool untyped_receiver=contextual_target==nullptr&&
+        (receiver_type==DIAMOND_TYPE_NONE||
+         (receiver_type>=DIAMOND_TYPE_CLASS_BASE&&
+          receiver_type<DIAMOND_TYPE_CLASS_BASE+DIAMOND_MAX_CLASSES));
+    if(forwarded_block) {
+        const uint16_t block=args[--count];
+        const size_t block_slot=
+            contextual_target==nullptr||contextual_target->arity<=1?0:
+                (size_t)contextual_target->arity-2;
+        if(untyped_receiver||(contextual_target!=nullptr&&count<block_slot)) {
+            const uint16_t positional=emit_argument_array(compiler,args,count);
+            const uint16_t result=emit_invoke_keywords(compiler,receiver,name,positional,
+                nullptr,nullptr,0,type_arguments,type_argument_count,true,block);
+            /* The same facts as a positional call with the block last. */
+            args[count++]=block;
+            publish_invoke_result_types(compiler,result,receiver,mutation_receiver,
+                receiver_set_index,name,return_target,resolved_arguments,
+                resolved_count,args,count);
+            return result;
+        }
+        args[count++]=block;
+    } else if(compiler->current.kind==DIAMOND_TOKEN_DO) {
         if(count==DIAMOND_MAX_ARGUMENTS) {
             fail(compiler,compiler->current.span,"too many arguments");return 0;
         }
@@ -3077,27 +3159,24 @@ static uint16_t parse_invoke_named_impl(Compiler *compiler, uint16_t receiver,
         const size_t block_slot=
             contextual_target==nullptr||contextual_target->arity<=1?0:
                 (size_t)contextual_target->arity-2;
-        if(contextual_target!=nullptr&&count<block_slot) {
+        if(untyped_receiver||(contextual_target!=nullptr&&count<block_slot)) {
             const uint16_t positional=emit_argument_array(compiler,args,count);
             const uint16_t result=emit_invoke_keywords(compiler,receiver,name,positional,
                 nullptr,nullptr,0,type_arguments,type_argument_count,true,block);
-            publish_instance_return_type(compiler,result,receiver,receiver_set_index,
-                name,return_target,resolved_arguments,resolved_count);
+            /* The same facts as a positional call with the block last. */
+            args[count++]=block;
+            publish_invoke_result_types(compiler,result,receiver,mutation_receiver,
+                receiver_set_index,name,return_target,resolved_arguments,
+                resolved_count,args,count);
             return result;
         }
         args[count++]=block;
     }
     const uint16_t result=emit_invoke_call(compiler,receiver,name,writer_name,
         type_arguments,type_argument_count,args,count);
-    publish_instance_return_type(compiler,result,receiver,receiver_set_index,name,
-        return_target,resolved_arguments,resolved_count);
-    publish_native_scalar_method_return_type(compiler,result,receiver,
-        receiver_set_index,name,(uint8_t)count);
-    publish_collection_argument_return_type(compiler,result,receiver_set_index,
-        name,args,count);
-    publish_array_map_tooling_type(compiler,result,receiver,name,args,count);
-    publish_array_push_return_type(compiler,result,mutation_receiver,name,args,
-        count);
+    publish_invoke_result_types(compiler,result,receiver,mutation_receiver,
+        receiver_set_index,name,return_target,resolved_arguments,resolved_count,
+        args,count);
     return result;
 }
 

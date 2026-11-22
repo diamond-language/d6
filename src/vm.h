@@ -791,6 +791,8 @@ typedef enum DiamondMathFunction : uint8_t {
     DIAMOND_MATH_EXP,
     DIAMOND_MATH_LOG,
     DIAMOND_MATH_TANH,
+    DIAMOND_MATH_LOG10,
+    DIAMOND_MATH_LOG2,
 } DiamondMathFunction;
 
 /* The class operand of DIAMOND_OP_DEFINE_METHOD/REDEFINE_METHOD/
@@ -2465,6 +2467,12 @@ struct DiamondVm {
  * DIAMOND_MAX_CALL_DEPTH). Affects only the calling thread; fibers and
  * threads the VM creates keep their own 8 MiB stacks and the default limit. */
 void diamond_set_thread_stack_size(size_t stack_bytes);
+
+/* Runs body(argc, argv) on a thread with a large native stack (512 MiB of
+ * address space, or DIAMOND_MAIN_STACK_MB) and returns its result, so programs
+ * recurse as deep as that stack allows. The `d6` CLI and every `d6 build`
+ * binary start this way. */
+int diamond_run_on_large_stack(int (*body)(int, char **), int argc, char **argv);
 
 void diamond_vm_init(DiamondVm *vm);
 /* Apply the same opt-in JIT environment settings to interpreted and

@@ -15,16 +15,46 @@ come only in minor releases, marked **Breaking** here.
 - `Zlib.deflate(data)` and `Zlib.inflate(data, max_size)`: compression in zlib's wrapping,
   which git objects, PNG and HTTP's `deflate` use. `Gzip.compress` wrote only gzip.
 - `Dir.pwd()`, the working directory.
+- `JSON.each(source) do |value| ... end` and `JSON.parse_all(source)` read a stream of JSON
+  values separated by whitespace, such as JSON Lines. `JSON.parse` still takes exactly one.
+- A struct can extend a class with no fields and no `initialize`, such as a `sealed class`
+  naming the kind, so each variant of a sealed hierarchy can be a one-line struct.
 - `Dir.glob(pattern, hidden: true)` also matches names that start with `.` and enters hidden
   directories, so `**/*` can list `.gitignore` and `.github/`.
+- Int has Float's rounding methods: `floor`, `ceil`, `round` and `truncate` (a negative
+  `digits` rounds to tens, hundreds, ...), and `finite?`, `nan?` and `infinite?`. Code given
+  either kind of number can round it without checking which it got.
 
 ### Fixed
+
+- A `break` in a block passed to a method on a receiver of unknown type resumes
+  after the call.
 
 - The warning about a discarded `concat`/`sort`/... copy now also covers the last line of an
   `each()`, `each_with_index()`, `times()` or other iterator block, whose value is ignored.
 - docs/api/crypto.md no longer says Strings are byte buffers.
 - Writing `obj.count < 1` or `obj.size - 1` without the call's parentheses now warns at compile
   time that a method reference has no `<` or `-`, as conditions and nil comparisons already did.
+  Calling a method on one, `box.items.push(x)`, warns the same way unless a Callable has that
+  method (`arity`, `call`, `inspect`, ...).
+- Binaries from `d6 build` run on the same large stack as `d6` itself. They stopped at 149 levels
+  of recursion; now they reach the ~9,600 that interpreted programs do.
+- A method that passes a block literal returning an Array, String or Hash (or one that only
+  raises) no longer fails its own `yield` with "expected Callable, got Callable[1]".
+- A block forwarded with `f(x, &block)` binds the callee's `&block` parameter instead of the
+  next positional one, so defaulted parameters before it keep their defaults. This works for
+  functions, instance and singleton methods. A `do` block on a receiver whose type isn't known
+  binds the same way.
+- A `do` block on a method call that skipped a defaulted parameter failed with "invalid
+  bytecode" when the caller's first parameter was an instance.
+- `f(x, &block, y)` is a compile error: a forwarded block must come last.
+- JSON nesting may go as deep as the program can recurse (about 9,600 levels in the main
+  program) instead of 150, and going past it raises `JSONError` rather than a stack overflow.
+- A `case` over a sealed class with more than 8 direct subclasses is checked for exhaustiveness
+  (up to 256); it was silently left unchecked.
+- A keyword call on another instance, `other.step(1, by: 2)`, could reach a private method.
+- `Math.log10` and `Math.log2` use C's `log10` and `log2`; they divided natural logarithms and
+  could be one unit in the last place off.
 
 ## 1.4.0 — 2026-11-22
 

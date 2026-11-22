@@ -2787,6 +2787,9 @@ DiamondVmStatus outlined_invoke_keywords(DiamondVm *vm,const DiamondChunk *chunk
             VM_RETURN(DIAMOND_VM_INVALID_BYTECODE);
         for(size_t index=0;index<type_count;index++)READ_SHORT(type_arguments[index]);
     }
+    /* A block break can resume this frame after the call even when the
+     * helper returns a nonlocal exit instead of reaching HELPER_DONE. */
+    *ip_ref=ip;
     if(registers[positional_register].kind!=DIAMOND_VALUE_OBJECT||
        registers[positional_register].as.object->kind!=DIAMOND_OBJECT_ARRAY)
         VM_RETURN(DIAMOND_VM_TYPE_ERROR);
@@ -2795,23 +2798,37 @@ DiamondVmStatus outlined_invoke_keywords(DiamondVm *vm,const DiamondChunk *chunk
         const DiamondStringConstant *native_name=
             &chunk->strings[method_name_index];
         if(type_count!=0)VM_REJECT_TYPE_ARGUMENTS(native_name);
-        if(has_block) {
-            snprintf(vm->error,sizeof vm->error,
-                "native keyword method cannot take a block");
-            VM_RETURN(DIAMOND_VM_ARITY_ERROR);
-        }
-        const NativeKeywordSignature *signature=
-            native_keyword_signature(native_name);
-        if(signature==nullptr) {snprintf(vm->error,sizeof vm->error,
-            "no parameter with this name");
-            VM_RETURN(DIAMOND_VM_ARITY_ERROR);}
         DiamondValue *native_merged=nullptr;size_t native_count=0;
-        const DiamondVmStatus native_merge=merge_native_keyword_arguments(vm,
-            chunk,signature,(const DiamondArray *)
-            registers[positional_register].as.object,keyword_names,
-            keyword_registers,keyword_count,registers,&native_merged,
-            &native_count);
-        VM_PROPAGATE(native_merge);
+        if(has_block) {
+            if(keyword_count>0) {
+                snprintf(vm->error,sizeof vm->error,
+                    "native keyword method cannot take a block");
+                VM_RETURN(DIAMOND_VM_ARITY_ERROR);
+            }
+            /* A block call on a receiver of unknown type compiles to this
+             * opcode in case the method is user-defined. A native method
+             * takes the block as its last positional argument. */
+            const DiamondArray *positional=(const DiamondArray *)
+                registers[positional_register].as.object;
+            native_count=positional->count+1;
+            native_merged=malloc(native_count*sizeof *native_merged);
+            if(native_merged==nullptr)VM_RETURN(DIAMOND_VM_OUT_OF_MEMORY);
+            for(size_t index=0;index<positional->count;index++)
+                native_merged[index]=positional->values[index];
+            native_merged[positional->count]=registers[block_register];
+        } else {
+            const NativeKeywordSignature *signature=
+                native_keyword_signature(native_name);
+            if(signature==nullptr) {snprintf(vm->error,sizeof vm->error,
+                "no parameter with this name");
+                VM_RETURN(DIAMOND_VM_ARITY_ERROR);}
+            const DiamondVmStatus native_merge=merge_native_keyword_arguments(vm,
+                chunk,signature,(const DiamondArray *)
+                registers[positional_register].as.object,keyword_names,
+                keyword_registers,keyword_count,registers,&native_merged,
+                &native_count);
+            VM_PROPAGATE(native_merge);
+        }
         DiamondArray *native_array=allocate_array(vm,native_merged,native_count);
         free(native_merged);if(native_array==nullptr)
             VM_RETURN(DIAMOND_VM_OUT_OF_MEMORY);
@@ -2824,6 +2841,7 @@ DiamondVmStatus outlined_invoke_keywords(DiamondVm *vm,const DiamondChunk *chunk
             DIAMOND_OP_RETURN,0,2};
         uint32_t native_locations[12]={0};
         DiamondChunk native_chunk=*chunk;native_chunk.class_type_variable=false;
+        native_chunk.entry_check=nullptr; /* see outlined_invoke_keywords below */
         native_chunk.name="<native keyword invoke>";
         native_chunk.code=native_code;
         native_chunk.lines=native_locations;
@@ -2857,6 +2875,13 @@ DiamondVmStatus outlined_invoke_keywords(DiamondVm *vm,const DiamondChunk *chunk
             instance->class,method_name->chars,method_name->length);
         VM_RETURN(DIAMOND_VM_NO_METHOD_ERROR);
     }
+    /* Checked here, against this call's own receiver register: the
+     * synthetic call below holds the receiver in register 0, which inside a
+     * method reads as an implicit self and would let a private method
+     * through. */
+    const DiamondVmStatus visibility=check_instance_method_visibility(vm,chunk,owner,
+        instance,method,method_name,registers,recv);
+    VM_PROPAGATE(visibility);
     const DiamondChunk *function_chunk=method->source_chunk!=nullptr?
         method->source_chunk:owner;
     const DiamondFunction *fn=
@@ -2887,7 +2912,11 @@ DiamondVmStatus outlined_invoke_keywords(DiamondVm *vm,const DiamondChunk *chunk
     code[code_count++]=DIAMOND_OP_RETURN;KEYWORD_SHORT(2);
 #undef KEYWORD_SHORT
     uint32_t locations[32]={0};
+    /* The copy keeps the caller's constants and types but runs its own code, so
+     * the caller's entry_check (which skips the caller's leading parameter
+     * checks) must not apply: it would start this code mid-instruction. */
     DiamondChunk synthetic=*chunk;synthetic.class_type_variable=false;synthetic.name="<keyword invoke>";
+    synthetic.entry_check=nullptr;
     synthetic.code=code;synthetic.lines=locations;
     synthetic.columns=locations;synthetic.code_count=code_count;
     synthetic.register_count=3;
@@ -3950,6 +3979,7 @@ DiamondVmStatus outlined_new_keywords(DiamondVm *vm,const DiamondChunk *chunk,Di
         (uint8_t)(class_index>>8),(uint8_t)(class_index&UINT8_MAX),0,0,
         DIAMOND_OP_RETURN,0,1};uint32_t locations[10]={0};
     DiamondChunk synthetic=*chunk;synthetic.class_type_variable=false;synthetic.name="<keyword new>";
+    synthetic.entry_check=nullptr; /* as in outlined_invoke_keywords */
     synthetic.code=code;synthetic.lines=locations;
     synthetic.columns=locations;synthetic.code_count=10;
     synthetic.register_count=2;

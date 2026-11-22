@@ -1,0 +1,6 @@
+def f(a: Int, b: Int = 0, &blk)
+  yield(a + b)
+end
+def g(&blk)
+  f(1, &blk, 2)
+end

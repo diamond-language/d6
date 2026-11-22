@@ -1,6 +1,6 @@
-# Nesting is bounded like JSON.parse's: 149 levels encode, deeper (and any
-# self-containing collection) raises SystemStackError instead of
-# recursing until the C stack overflows.
+# Nesting is bounded like JSON.parse's: in a fiber, 150 levels encode, deeper
+# (and any self-containing collection) raises JSONError instead of recursing
+# until the C stack overflows. (The main program allows far more: tests/run.sh.)
 def nest(levels)
   value = []
   levels.times() do |step|
@@ -21,11 +21,17 @@ def attempt(label, &block)
   end
 end
 
-attempt("150 levels") do
-  JSON.stringify(nest(150))
+def in_fiber(levels: Int) -> String
+  def encode() = JSON.stringify(nest(levels))
+  Fiber.new(encode).resume()
 end
-attempt("200 levels") do
-  JSON.stringify(nest(200))
+
+puts(in_fiber(149).length())
+attempt("150 levels in a fiber") do
+  in_fiber(150)
+end
+attempt("200 levels in a fiber") do
+  in_fiber(200)
 end
 
 cyclic_array = []

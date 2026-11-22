@@ -1784,8 +1784,21 @@ static bool parse_struct_fields(Compiler *compiler, DiamondClass *class,
     return true;
 }
 
+/* Whether `class` or an ancestor defines initialize. */
+static bool class_declares_initialize(const Compiler *compiler,const DiamondClass *class) {
+    for(size_t hops=0;class!=nullptr&&hops<=DIAMOND_MAX_CLASSES;hops++) {
+        for(size_t method=0;method<class->method_count;method++)
+            if(strcmp(class->methods[method].name,"initialize")==0)return true;
+        class=class->superclass==DIAMOND_NO_CLASS?nullptr:
+            compiler->program->classes[class->superclass];
+    }
+    return false;
+}
+
 /* Parses `< Parent` after the field list: the parent must be an earlier
- * struct, and its fields take the first slots. */
+ * struct, whose fields take the first slots, or an earlier class with no
+ * fields and no initialize (a `sealed class Node` that only names the kind,
+ * so each variant can be a struct). */
 static bool parse_struct_superclass(Compiler *compiler, DiamondClass *class,
         int index, const DiamondSpan *field_name_spans, size_t own_field_count,
         size_t *inherited_count_out, const DiamondFunction **inherited_init_out) {
@@ -1806,9 +1819,15 @@ static bool parse_struct_superclass(Compiler *compiler, DiamondClass *class,
         fail(compiler,superclass_span,"undefined superclass");return false;
     }
     const DiamondClass *parent_class=compiler->program->classes[(size_t)parent];
+    if(parent!=index&&!parent_class->generated_struct&&
+       parent_class->field_count==0&&!class_declares_initialize(compiler,parent_class)) {
+        class->superclass=(uint16_t)parent;
+        *inherited_count_out=0;
+        *inherited_init_out=nullptr;
+        return true;
+    }
     if(parent==index||!parent_class->generated_struct) {
-        fail(compiler,superclass_span,
-             "a struct's superclass must be a struct declared earlier");
+        fail(compiler,superclass_span,"a struct's superclass must be a struct, or a class with no fields and no initialize, declared earlier");
         return false;
     }
     if(!parse_generic_parent_arguments(compiler,class,parent_class,superclass_span))return false;
@@ -1819,8 +1838,7 @@ static bool parse_struct_superclass(Compiler *compiler, DiamondClass *class,
             inherited_init=compiler->program->functions[
                 parent_class->methods[method].function_index];
     if(inherited_init==nullptr) {
-        fail(compiler,superclass_span,
-             "a struct's superclass must be a struct declared earlier");
+        fail(compiler,superclass_span,"a struct's superclass must be a struct, or a class with no fields and no initialize, declared earlier");
         return false;
     }
     inherited_count=parent_class->field_count;

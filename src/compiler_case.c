@@ -24,7 +24,7 @@ static void fail_non_exhaustive_case(Compiler *compiler,
     size_t used=(size_t)snprintf(message,sizeof message,
         "case is not exhaustive over its subject's known closed type; missing: ");
     bool first=true;
-    for(uint8_t member=0;member<exhaustiveness->required_count;member++) {
+    for(size_t member=0;member<exhaustiveness->required_count;member++) {
         if(exhaustiveness->covered[member])continue;
         const char *name=closed_type_name(compiler,
             exhaustiveness->required_ids[member]);
@@ -711,7 +711,7 @@ static uint16_t compile_case_end(Compiler *compiler,uint16_t destination,CaseFlo
         CaseExhaustiveness *exhaustiveness) {
     if(exhaustiveness->active) {
         bool all_covered=true;
-        for(uint8_t member=0;member<exhaustiveness->required_count;member++)
+        for(size_t member=0;member<exhaustiveness->required_count;member++)
             if(!exhaustiveness->covered[member]){all_covered=false;break;}
         if(!all_covered) {
             fail_non_exhaustive_case(compiler,exhaustiveness);
@@ -883,7 +883,7 @@ static void mark_case_coverage(Compiler *compiler,CaseExhaustiveness *exhaustive
      * runtime, so `when Shape` leaves nothing of `Circle < Shape` unmatched. */
     if(exhaustiveness->active)
         for(size_t covered_index=0;covered_index<covered_id_count;covered_index++)
-            for(uint8_t member=0;member<exhaustiveness->required_count;member++) {
+            for(size_t member=0;member<exhaustiveness->required_count;member++) {
                 size_t walk=exhaustiveness->required_ids[member];
                 if(walk==covered_ids[covered_index])
                     exhaustiveness->covered[member]=true;
@@ -1077,24 +1077,24 @@ uint16_t parse_case(Compiler *compiler) {
          * reaches here. Sound specifically because a sealed class can't
          * be instantiated directly (see the `.new`-dispatch site) -- no
          * stray direct-Shape instance could ever fall through uncovered. */
-        uint16_t required_ids[DIAMOND_MAX_UNION_TYPES];
+        uint16_t required_ids[DIAMOND_MAX_CASE_MEMBERS];
         size_t direct_subclass_count=0;
         for(size_t candidate=0;candidate<compiler->program->class_count;candidate++) {
             if(compiler->program->classes[candidate]->superclass!=
                     compiler->known_types[subject]-DIAMOND_TYPE_CLASS_BASE)
                 continue;
             /* Counted unconditionally, past DIAMOND_MAX_UNION_TYPES too --
-             * a >8-direct-subclass hierarchy must be detected as such and
-             * left unchecked, not silently truncated to its first 8
-             * (which would be unsound: the check would then believe
-             * exactly those 8 were the whole set). */
-            if(direct_subclass_count<DIAMOND_MAX_UNION_TYPES)
+             * a hierarchy past DIAMOND_MAX_CASE_MEMBERS must be detected as
+             * such and left unchecked, not silently truncated (which would
+             * be unsound: the check would then believe the first ones were
+             * the whole set). */
+            if(direct_subclass_count<DIAMOND_MAX_CASE_MEMBERS)
                 required_ids[direct_subclass_count]=(uint16_t)(DIAMOND_TYPE_CLASS_BASE+candidate);
             direct_subclass_count++;
         }
-        if(direct_subclass_count>0&&direct_subclass_count<=DIAMOND_MAX_UNION_TYPES) {
+        if(direct_subclass_count>0&&direct_subclass_count<=DIAMOND_MAX_CASE_MEMBERS) {
             exhaustiveness.active=true;
-            exhaustiveness.required_count=(uint8_t)direct_subclass_count;
+            exhaustiveness.required_count=(uint16_t)direct_subclass_count;
             for(size_t member=0;member<direct_subclass_count;member++)
                 exhaustiveness.required_ids[member]=required_ids[member];
             exhaustiveness.case_span=case_span;

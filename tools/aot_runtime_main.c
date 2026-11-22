@@ -13,7 +13,9 @@
  * `--version` alone prints the identity `d6 build` recorded instead.
  * Like a script run, it prints the final top-level value only when
  * DIAMOND_PRINT_RESULT is set. DIAMOND_JIT and
- * DIAMOND_TRACE_JIT share the interpreter's opt-in behavior. */
+ * DIAMOND_TRACE_JIT share the interpreter's opt-in behavior. Like the CLI, it
+ * runs on a large stack (diamond_run_on_large_stack), so built programs
+ * recurse as deep as interpreted ones. */
 #define _DEFAULT_SOURCE
 #define _XOPEN_SOURCE 700
 #define __BSD_VISIBLE 1
@@ -34,7 +36,7 @@ const char *diamond_aot_app_name(void);
 const char *diamond_aot_app_version(void);
 const char *diamond_aot_d6_version(void);
 
-int main(int argc, char **argv) {
+static int run_program(int argc, char **argv) {
     /* `--version` as the only argument names the binary instead of running it:
      * "NAME VERSION (d6 D6_VERSION)", as recorded by `d6 build`. Any other
      * arguments, including `--version` among others, go to the program. */
@@ -92,4 +94,8 @@ int main(int argc, char **argv) {
     diamond_program_free(program);
     free(program);
     return 0;
+}
+
+int main(int argc, char **argv) {
+    return diamond_run_on_large_stack(run_program, argc, argv);
 }

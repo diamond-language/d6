@@ -51,6 +51,17 @@ Whether the receiver is between `min` and `max`, both included.
 5.between?(1, 10)   # => true
 ```
 
+### `ceil(digits = 0) -> Int`
+
+The receiver, which is already whole. A negative `digits` rounds up to tens,
+hundreds and so on. Int has Float's rounding methods so that code given
+either kind of number can round it.
+
+```ruby
+7.ceil()         # => 7
+1234.ceil(-2)    # => 1300
+```
+
 ### `chr() -> String`
 
 The one-byte `String` with this code, from `0` to `255`; anything else raises
@@ -132,6 +143,19 @@ Division as Floats.
 7.fdiv(2)   # => 3.5
 ```
 
+### `finite?() -> Bool`
+
+Always `true`, as for a finite Float.
+
+### `floor(digits = 0) -> Int`
+
+The receiver; a negative `digits` rounds down to tens, hundreds and so on.
+
+```ruby
+1234.floor(-2)    # => 1200
+-1234.floor(-2)   # => -1300
+```
+
 ### `freeze() -> Int`
 
 The receiver.
@@ -162,6 +186,10 @@ The receiver as a number of hours, in seconds.
 2.hours()   # => 7200
 ```
 
+### `infinite?() -> Bool`
+
+Always `false`.
+
 ### `inspect() -> String`
 
 The same as `to_s()`.
@@ -183,6 +211,10 @@ The receiver as a number of minutes, in seconds.
 ```ruby
 5.minutes()   # => 300
 ```
+
+### `nan?() -> Bool`
+
+Always `false`.
 
 ### `negative?() -> Bool`
 
@@ -227,6 +259,16 @@ The receiver minus one.
 
 ```ruby
 5.pred()   # => 4
+```
+
+### `round(digits = 0) -> Int`
+
+The receiver; a negative `digits` rounds to tens, hundreds and so on, halves
+away from zero.
+
+```ruby
+1250.round(-2)    # => 1300
+-1250.round(-2)   # => -1300
 ```
 
 ### `second() -> Int`
@@ -293,6 +335,15 @@ The receiver in `base`.
 255.to_s()     # => "255"
 255.to_s(16)   # => "ff"
 5.to_s(2)      # => "101"
+```
+
+### `truncate(digits = 0) -> Int`
+
+The receiver; a negative `digits` rounds toward zero to tens, hundreds and so
+on.
+
+```ruby
+-1234.truncate(-2)   # => -1200
 ```
 
 ### `upto(limit) do |i| ... end -> Int`

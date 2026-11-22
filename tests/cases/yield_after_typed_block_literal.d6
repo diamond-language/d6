@@ -1,0 +1,20 @@
+# A method's own `yield` checks its block is a Callable. A block literal
+# passed elsewhere in the method, whose result type the compiler knows (an
+# Array, String or Hash literal, or a raise), must not narrow that check.
+def transform(x: Int, &compute)
+  begin
+    yield(x)
+  rescue error: ArgumentError
+    "rescued"
+  end
+end
+
+def run(x: Int, &emit)
+  pair = transform(x) do |value| [value, value * 2] end
+  text = transform(x) do |value| "n=#{value}" end
+  table = transform(x) do |value| {"v" => value} end
+  failed = transform(x) do |value| raise ArgumentError.new("no") end
+  yield([pair, text, table, failed])
+end
+
+run(3) do |result| puts(result.inspect()) end

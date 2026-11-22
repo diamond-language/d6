@@ -341,11 +341,10 @@ own specific shape of subject:
   shape; when Circle ... end` for `shape: Shape` when `Shape` is an
   ordinary (non-sealed) class, both stay exactly as unchecked as they've
   always been.
-- **A `sealed` class with zero, or more than 8, direct subclasses is left
+- **A `sealed` class with zero, or more than 256, direct subclasses is left
   unchecked too**, not an error either way — zero is more likely "this
   hierarchy isn't built out yet" than an intentional 0-variant type, and
-  more than 8 exceeds the same fixed member-count ceiling every union in
-  d6 already has (`DIAMOND_MAX_UNION_TYPES`). A `case` with no
+  256 is the most members the check tracks. A `case` with no
   `else` over either of these compiles exactly as if `Shape` weren't
   sealed at all.
 - **A union containing any native scalar/container type (`Int`,

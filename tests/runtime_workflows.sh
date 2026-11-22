@@ -78,6 +78,23 @@ if [[ ${1:-} == --aot ]]; then
             count=$((count + 1))
         done
     done
+    # A built binary runs on the same large stack as the CLI, so it recurses
+    # far past a thread's 150-frame budget (it once stopped at 149). The
+    # struct extending a field-less class must pass the embedded program's
+    # validation (it once read as corrupt).
+    printf 'sealed class Node\nend\nstruct Leaf(n: Int) < Node\nend\ndef depth(n: Int) -> Int = n == 0 ? Leaf.new(0).n() : 1 + depth(n - 1)\nputs(depth(3000))\n' \
+        > "$work/deep.d6"
+    if ! "$diamond" build "$work/deep.d6" -o "$work/deep" > "$work/build.log" 2>&1; then
+        echo "FAIL standalone build deep recursion" >&2
+        cat "$work/build.log" >&2
+        exit 1
+    fi
+    deep_output=$(timeout 30 "$work/deep" 2>&1) || true
+    if [[ $deep_output != 3000 ]]; then
+        echo "FAIL standalone deep recursion: $deep_output" >&2
+        exit 1
+    fi
+    count=$((count + 1))
     echo "runtime workflows: standalone binaries passed"
 fi
 echo "$count runtime workflow executions passed"

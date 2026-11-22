@@ -1,1 +1,1 @@
-a struct's superclass must be a struct declared earlier
+a struct's superclass must be a struct, or a class with no fields and no initialize, declared earlier

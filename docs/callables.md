@@ -49,7 +49,8 @@ constructor argument inference provide no contextual hint at this stage.
 
 Each d6 function call is an ordinary recursive call in the native
 implementation, so ordinary recursion is bounded by a call-depth limit: about
-9,600 levels in the main program (which runs on a 512 MiB stack;
+9,600 levels in the main program, run by `d6` or built with `d6 build` (it
+runs on a 512 MiB stack;
 `DIAMOND_MAIN_STACK_MB` changes it), and 150 inside a fiber or a thread, which
 have 8 MiB stacks. Going past it is a clean `call stack overflow` error:
 

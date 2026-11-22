@@ -1,4 +1,9 @@
 class Base
+  attr_reader x: Int
+
+  def initialize()
+    @x = 1
+  end
 end
 struct Bad(x: Int) < Base
 end

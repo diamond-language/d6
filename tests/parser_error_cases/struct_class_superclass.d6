@@ -1,5 +1,10 @@
 class Base
+  attr_reader x: Int
+
+  def initialize()
+    @x = 1
+  end
 end
 
-struct Point(x: Int) < Base
+struct Point(y: Int) < Base
 end

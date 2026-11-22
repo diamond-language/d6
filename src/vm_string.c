@@ -1098,10 +1098,24 @@ DiamondVmStatus string_invoke_helper(DiamondVm *vm,const DiamondChunk *chunk,siz
         const size_t protect_mark=vm->gc_protected_count;
         DiamondValue parsed=DIAMOND_NIL;
         const DiamondVmStatus parse_status=json_parse_document(
-            vm,source->chars,source->length,&parsed);
+            vm,source->chars,source->length,depth,&parsed);
         gc_unprotect(vm,protect_mark);
         if(parse_status!=DIAMOND_VM_OK)return parse_status;
         registers[dest]=parsed;return DIAMOND_VM_OK;
+    }
+    /* parse_json_at(byte_offset): JSON.each's step through a stream. */
+    if(method_name->length==13&&memcmp(method_name->chars,"parse_json_at",13)==0) {
+        if(argc!=1)return DIAMOND_VM_ARITY_ERROR;
+        const DiamondValue offset=registers[base];
+        if(offset.kind!=DIAMOND_VALUE_INT||offset.as.integer<0||
+           (size_t)offset.as.integer>source->length)return DIAMOND_VM_TYPE_ERROR;
+        const size_t protect_mark=vm->gc_protected_count;
+        DiamondValue step=DIAMOND_NIL;
+        const DiamondVmStatus parse_status=json_parse_next(vm,source->chars,
+            source->length,(size_t)offset.as.integer,depth,&step);
+        gc_unprotect(vm,protect_mark);
+        if(parse_status!=DIAMOND_VM_OK)return parse_status;
+        registers[dest]=step;return DIAMOND_VM_OK;
     }
     if(gsub_method||sub_method)
         return string_substitute_method(vm,chunk,depth,registers,base,argc,dest,source,gsub_method);

@@ -1,3 +1,5 @@
+# 257 direct subclasses, one past the 256 the exhaustiveness check tracks:
+# the case is left unchecked rather than checked against a truncated list.
 sealed class Shape
 end
 class S0 < Shape
@@ -17,6 +19,502 @@ end
 class S7 < Shape
 end
 class S8 < Shape
+end
+class S9 < Shape
+end
+class S10 < Shape
+end
+class S11 < Shape
+end
+class S12 < Shape
+end
+class S13 < Shape
+end
+class S14 < Shape
+end
+class S15 < Shape
+end
+class S16 < Shape
+end
+class S17 < Shape
+end
+class S18 < Shape
+end
+class S19 < Shape
+end
+class S20 < Shape
+end
+class S21 < Shape
+end
+class S22 < Shape
+end
+class S23 < Shape
+end
+class S24 < Shape
+end
+class S25 < Shape
+end
+class S26 < Shape
+end
+class S27 < Shape
+end
+class S28 < Shape
+end
+class S29 < Shape
+end
+class S30 < Shape
+end
+class S31 < Shape
+end
+class S32 < Shape
+end
+class S33 < Shape
+end
+class S34 < Shape
+end
+class S35 < Shape
+end
+class S36 < Shape
+end
+class S37 < Shape
+end
+class S38 < Shape
+end
+class S39 < Shape
+end
+class S40 < Shape
+end
+class S41 < Shape
+end
+class S42 < Shape
+end
+class S43 < Shape
+end
+class S44 < Shape
+end
+class S45 < Shape
+end
+class S46 < Shape
+end
+class S47 < Shape
+end
+class S48 < Shape
+end
+class S49 < Shape
+end
+class S50 < Shape
+end
+class S51 < Shape
+end
+class S52 < Shape
+end
+class S53 < Shape
+end
+class S54 < Shape
+end
+class S55 < Shape
+end
+class S56 < Shape
+end
+class S57 < Shape
+end
+class S58 < Shape
+end
+class S59 < Shape
+end
+class S60 < Shape
+end
+class S61 < Shape
+end
+class S62 < Shape
+end
+class S63 < Shape
+end
+class S64 < Shape
+end
+class S65 < Shape
+end
+class S66 < Shape
+end
+class S67 < Shape
+end
+class S68 < Shape
+end
+class S69 < Shape
+end
+class S70 < Shape
+end
+class S71 < Shape
+end
+class S72 < Shape
+end
+class S73 < Shape
+end
+class S74 < Shape
+end
+class S75 < Shape
+end
+class S76 < Shape
+end
+class S77 < Shape
+end
+class S78 < Shape
+end
+class S79 < Shape
+end
+class S80 < Shape
+end
+class S81 < Shape
+end
+class S82 < Shape
+end
+class S83 < Shape
+end
+class S84 < Shape
+end
+class S85 < Shape
+end
+class S86 < Shape
+end
+class S87 < Shape
+end
+class S88 < Shape
+end
+class S89 < Shape
+end
+class S90 < Shape
+end
+class S91 < Shape
+end
+class S92 < Shape
+end
+class S93 < Shape
+end
+class S94 < Shape
+end
+class S95 < Shape
+end
+class S96 < Shape
+end
+class S97 < Shape
+end
+class S98 < Shape
+end
+class S99 < Shape
+end
+class S100 < Shape
+end
+class S101 < Shape
+end
+class S102 < Shape
+end
+class S103 < Shape
+end
+class S104 < Shape
+end
+class S105 < Shape
+end
+class S106 < Shape
+end
+class S107 < Shape
+end
+class S108 < Shape
+end
+class S109 < Shape
+end
+class S110 < Shape
+end
+class S111 < Shape
+end
+class S112 < Shape
+end
+class S113 < Shape
+end
+class S114 < Shape
+end
+class S115 < Shape
+end
+class S116 < Shape
+end
+class S117 < Shape
+end
+class S118 < Shape
+end
+class S119 < Shape
+end
+class S120 < Shape
+end
+class S121 < Shape
+end
+class S122 < Shape
+end
+class S123 < Shape
+end
+class S124 < Shape
+end
+class S125 < Shape
+end
+class S126 < Shape
+end
+class S127 < Shape
+end
+class S128 < Shape
+end
+class S129 < Shape
+end
+class S130 < Shape
+end
+class S131 < Shape
+end
+class S132 < Shape
+end
+class S133 < Shape
+end
+class S134 < Shape
+end
+class S135 < Shape
+end
+class S136 < Shape
+end
+class S137 < Shape
+end
+class S138 < Shape
+end
+class S139 < Shape
+end
+class S140 < Shape
+end
+class S141 < Shape
+end
+class S142 < Shape
+end
+class S143 < Shape
+end
+class S144 < Shape
+end
+class S145 < Shape
+end
+class S146 < Shape
+end
+class S147 < Shape
+end
+class S148 < Shape
+end
+class S149 < Shape
+end
+class S150 < Shape
+end
+class S151 < Shape
+end
+class S152 < Shape
+end
+class S153 < Shape
+end
+class S154 < Shape
+end
+class S155 < Shape
+end
+class S156 < Shape
+end
+class S157 < Shape
+end
+class S158 < Shape
+end
+class S159 < Shape
+end
+class S160 < Shape
+end
+class S161 < Shape
+end
+class S162 < Shape
+end
+class S163 < Shape
+end
+class S164 < Shape
+end
+class S165 < Shape
+end
+class S166 < Shape
+end
+class S167 < Shape
+end
+class S168 < Shape
+end
+class S169 < Shape
+end
+class S170 < Shape
+end
+class S171 < Shape
+end
+class S172 < Shape
+end
+class S173 < Shape
+end
+class S174 < Shape
+end
+class S175 < Shape
+end
+class S176 < Shape
+end
+class S177 < Shape
+end
+class S178 < Shape
+end
+class S179 < Shape
+end
+class S180 < Shape
+end
+class S181 < Shape
+end
+class S182 < Shape
+end
+class S183 < Shape
+end
+class S184 < Shape
+end
+class S185 < Shape
+end
+class S186 < Shape
+end
+class S187 < Shape
+end
+class S188 < Shape
+end
+class S189 < Shape
+end
+class S190 < Shape
+end
+class S191 < Shape
+end
+class S192 < Shape
+end
+class S193 < Shape
+end
+class S194 < Shape
+end
+class S195 < Shape
+end
+class S196 < Shape
+end
+class S197 < Shape
+end
+class S198 < Shape
+end
+class S199 < Shape
+end
+class S200 < Shape
+end
+class S201 < Shape
+end
+class S202 < Shape
+end
+class S203 < Shape
+end
+class S204 < Shape
+end
+class S205 < Shape
+end
+class S206 < Shape
+end
+class S207 < Shape
+end
+class S208 < Shape
+end
+class S209 < Shape
+end
+class S210 < Shape
+end
+class S211 < Shape
+end
+class S212 < Shape
+end
+class S213 < Shape
+end
+class S214 < Shape
+end
+class S215 < Shape
+end
+class S216 < Shape
+end
+class S217 < Shape
+end
+class S218 < Shape
+end
+class S219 < Shape
+end
+class S220 < Shape
+end
+class S221 < Shape
+end
+class S222 < Shape
+end
+class S223 < Shape
+end
+class S224 < Shape
+end
+class S225 < Shape
+end
+class S226 < Shape
+end
+class S227 < Shape
+end
+class S228 < Shape
+end
+class S229 < Shape
+end
+class S230 < Shape
+end
+class S231 < Shape
+end
+class S232 < Shape
+end
+class S233 < Shape
+end
+class S234 < Shape
+end
+class S235 < Shape
+end
+class S236 < Shape
+end
+class S237 < Shape
+end
+class S238 < Shape
+end
+class S239 < Shape
+end
+class S240 < Shape
+end
+class S241 < Shape
+end
+class S242 < Shape
+end
+class S243 < Shape
+end
+class S244 < Shape
+end
+class S245 < Shape
+end
+class S246 < Shape
+end
+class S247 < Shape
+end
+class S248 < Shape
+end
+class S249 < Shape
+end
+class S250 < Shape
+end
+class S251 < Shape
+end
+class S252 < Shape
+end
+class S253 < Shape
+end
+class S254 < Shape
+end
+class S255 < Shape
+end
+class S256 < Shape
 end
 def f(shape: Shape)
   case shape

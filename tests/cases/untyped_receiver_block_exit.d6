@@ -1,0 +1,27 @@
+class BlockIterator
+  def each(&block)
+    yield(1)
+    yield(2)
+    yield(3)
+  end
+end
+
+def stop_at_two(items)
+  stopped = items.each() do |item|
+    break item * 10 if item == 2
+  end
+  "stopped at #{stopped}"
+end
+
+def find_two(items)
+  items.each() do |item|
+    return item * 10 if item == 2
+  end
+  nil
+end
+
+puts(stop_at_two([1, 2, 3]))
+puts(stop_at_two(BlockIterator.new()))
+puts(find_two([1, 2, 3]))
+puts(find_two(BlockIterator.new()))
+nil

@@ -2315,6 +2315,35 @@ def diamond_integer_digits(value: Int, base: Int = 10) -> Array[Int]
   result
 end
 
+# Int has Float's rounding methods, so code handed either number can round
+# without checking which it got. A whole number is already rounded; a
+# negative `digits` rounds to tens, hundreds, ..., as in Ruby.
+def diamond_integer_floor(value: Int, digits: Int = 0) -> Int
+  return value if digits >= 0
+  step = 10 ** -digits
+  value - value % step
+end
+
+def diamond_integer_ceil(value: Int, digits: Int = 0) -> Int
+  -diamond_integer_floor(-value, digits)
+end
+
+# Halves round away from zero.
+def diamond_integer_round(value: Int, digits: Int = 0) -> Int
+  return value if digits >= 0
+  step = 10 ** -digits
+  magnitude = diamond_integer_floor(value.abs() + step / 2, digits)
+  value < 0 ? -magnitude : magnitude
+end
+
+def diamond_integer_truncate(value: Int, digits: Int = 0) -> Int
+  value < 0 ? diamond_integer_ceil(value, digits) : diamond_integer_floor(value, digits)
+end
+
+def diamond_integer_finite(value: Int) -> Bool = true
+def diamond_integer_nan(value: Int) -> Bool = false
+def diamond_integer_infinite(value: Int) -> Bool = false
+
 def diamond_float_truncate(value: Float) -> Int = value.to_i()
 def diamond_float_nan(value: Float) -> Bool = value != value
 def diamond_float_infinite(value: Float) -> Bool = value == value && (value - value) != 0.0
@@ -2331,13 +2360,9 @@ def diamond_math_exp(x) = exp(x)
 def diamond_math_log(x) = log(x)
 def diamond_math_tanh(x) = tanh(x)
 def diamond_math_pow(x, y) = pow(x, y)
-
-# A logarithm that is a whole number when x is an exact power of the base (log(1000) / log(10) is 2.9999999999999996).
-def diamond_math_exact_log(quotient, base, x) -> Float
-  return quotient if quotient != quotient || quotient - quotient != 0.0
-  nearest = quotient.round().to_f()
-  diamond_math_pow(base, nearest) == x.to_f() ? nearest : quotient
-end
+# Outside Math: inside it, a bare log10 would name Math.log10 itself.
+def diamond_math_log10(x) = log10(x)
+def diamond_math_log2(x) = log2(x)
 
 module Math
   def self.sqrt(x) -> Float = diamond_math_sqrt(x)
@@ -2352,8 +2377,8 @@ module Math
   def self.tan(x) -> Float = diamond_math_tan(x)
   def self.exp(x) -> Float = diamond_math_exp(x)
   def self.log(x) -> Float = diamond_math_log(x)
-  def self.log2(x) -> Float = diamond_math_exact_log(diamond_math_log(x) / diamond_math_log(2.0), 2.0, x)
-  def self.log10(x) -> Float = diamond_math_exact_log(diamond_math_log(x) / diamond_math_log(10.0), 10.0, x)
+  def self.log2(x) -> Float = diamond_math_log2(x)
+  def self.log10(x) -> Float = diamond_math_log10(x)
   def self.tanh(x) -> Float = diamond_math_tanh(x)
   def self.hypot(x, y) -> Float = diamond_math_sqrt(x * x + y * y)
   def self.pi() -> Float = 3.141592653589793

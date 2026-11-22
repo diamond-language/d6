@@ -183,6 +183,24 @@ end
 # => call 0
 ```
 
+In a function with a `&` parameter, `yield(x)` calls the block too, and
+`&action` passes it on to another function, which receives it as its own
+block. Parameters with defaults before the block keep them:
+
+```ruby
+def each_pair(items, start = 1, &visit)
+  items.each_with_index() do |item, i| yield([start + i, item]) end
+end
+
+def show(items, &visit)
+  each_pair(items, &visit)      # start stays 1
+end
+
+show(["a", "b"]) do |pair| p(pair) end
+# => [1, "a"]
+# => [2, "b"]
+```
+
 `return` inside a block returns from the *function the block was written
 in*, not just from the block, which makes early exits from a loop
 natural:
@@ -200,9 +218,10 @@ p(first_negative([3, -1, -5]))   # => -1
 
 ## Coming from another language
 
-- **Ruby**: there is no `yield` for blocks (in d6, `yield` suspends a
-  [fiber](concurrency.md#fibers)). Take the block as `&block` and call
-  `block(x)`. There is no `.call`: a callable is called with parentheses.
+- **Ruby**: a block is never implicit. Take it as `&block`, then call
+  `block(x)` or `yield(x)`; in a function without a `&` parameter, `yield`
+  pauses a [fiber](concurrency.md#fibers) instead. A callable is called with
+  parentheses, `block(x)`, though `block.call(x)` works too.
   There are no `lambda`/`proc` literals; a nested `def` is the closure.
 - **Python**: there are no `lambda` expressions. Use a nested `def`, which,
   unlike Python's, can assign to the variables it captures without

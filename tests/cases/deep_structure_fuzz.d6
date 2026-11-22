@@ -1,6 +1,6 @@
 # A deterministic fuzzer for very deep and self-containing data. It builds
 # chains of nested Arrays, Hashes and Box instances at depths chosen around
-# every bound the runtime has (149 for JSON, 256, 4096 for cross-thread copies,
+# every bound the runtime has (JSON's call-depth budget, 256, 4096 for cross-thread copies,
 # then far beyond), some of them closed into a cycle, and pushes each through
 # the operations that walk a structure: to_s, ==, hashing, dup, freeze,
 # deep_freeze, JSON.stringify, flatten, sort, uniq, and a Thread/Channel round
@@ -96,7 +96,10 @@ def run_op(name, value)
   elsif name == "deep_freeze"
     value.deep_freeze()
   elsif name == "json"
-    JSON.stringify(value)
+    # In a fiber: its budget (150 frames) is the same under every harness,
+    # while the main thread's grows with its stack.
+    def stringify_in_fiber() = JSON.stringify(value)
+    Fiber.new(stringify_in_fiber).resume()
   elsif name == "flatten"
     value.flatten()
   elsif name == "sort"

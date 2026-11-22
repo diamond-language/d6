@@ -413,6 +413,8 @@ static inline bool diamond_math_apply(uint8_t function_id,double left,double rig
         case DIAMOND_MATH_EXP: *result=exp(left); return true;
         case DIAMOND_MATH_LOG: *result=log(left); return true;
         case DIAMOND_MATH_TANH: *result=tanh(left); return true;
+        case DIAMOND_MATH_LOG10: *result=log10(left); return true;
+        case DIAMOND_MATH_LOG2: *result=log2(left); return true;
         case DIAMOND_MATH_POW: *result=pow(left,right); return true;
     }
     return false;
@@ -453,7 +455,8 @@ DIAMOND_INTERNAL DiamondVmStatus stringify_value(DiamondVm *vm,const DiamondChun
 
 /* vm_json.c: entry points called from run_chunk and the rest of vm.c */
 [[nodiscard]] DIAMOND_INTERNAL bool debug_json_append_escaped_string(GrowBuffer *buffer, const char *chars,size_t length);
-DIAMOND_INTERNAL DiamondVmStatus json_parse_document(DiamondVm *vm,const char *source, size_t length,DiamondValue *out);
+DIAMOND_INTERNAL DiamondVmStatus json_parse_document(DiamondVm *vm,const char *source, size_t length,size_t call_depth,DiamondValue *out);
+DIAMOND_INTERNAL DiamondVmStatus json_parse_next(DiamondVm *vm,const char *source,size_t length,size_t offset,size_t call_depth,DiamondValue *out);
 DIAMOND_INTERNAL DiamondVmStatus json_stringify_document(DiamondVm *vm,const DiamondChunk *chunk, size_t depth,DiamondValue value,DiamondValue options,DiamondValue *result);
 
 /* Shared primitives that stay in vm.c (needed by vm_json.c) */
@@ -1903,6 +1906,12 @@ DIAMOND_INTERNAL DiamondVmStatus merge_native_keyword_arguments(DiamondVm *vm,
         const uint16_t *keyword_registers,size_t keyword_count,
         const DiamondValue *registers,DiamondValue **merged,size_t *merged_count);
 
+/* A private method may only be called on an implicit self receiver; a
+ * protected one only from inside its declaring class's hierarchy. */
+DIAMOND_INTERNAL DiamondVmStatus check_instance_method_visibility(DiamondVm *vm,
+        const DiamondChunk *chunk,const DiamondChunk *owner,
+        const DiamondInstance *instance,const DiamondMethod *method,
+        const DiamondStringConstant *method_name,DiamondValue *registers,uint16_t recv);
 DIAMOND_INTERNAL DiamondVmStatus merge_keyword_arguments(DiamondVm *vm,
         const DiamondChunk *caller,const DiamondFunction *function,
         const DiamondArray *positional,const uint16_t *keyword_names,

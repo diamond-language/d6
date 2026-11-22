@@ -689,6 +689,8 @@ def math_unary_id(name)
   return 5 if name == "exp"
   return 6 if name == "log"
   return 7 if name == "tanh"
+  return 8 if name == "log10"
+  return 9 if name == "log2"
   3
 end
 
@@ -3261,8 +3263,13 @@ class Parser
         return 0
       end
       inherited = self.struct_fields_of(parent_entry[1])
+      # A class with no fields and no initialize (a sealed marker) works too.
+      if inherited == nil && self.class_all_fields(parent_entry[1]).empty?() &&
+         self.case_pattern_reader(parent_entry[1], "initialize") == nil
+        inherited = []
+      end
       if inherited == nil
-        self.fail("a struct's superclass must be a struct declared earlier")
+        self.fail("a struct's superclass must be a struct, or a class with no fields and no initialize, declared earlier")
         return 0
       end
       index = 0
@@ -8493,7 +8500,7 @@ class Parser
       required.push(Type::CLASS_BASE + @classes[index][1]) if @classes[index][2] == fact - Type::CLASS_BASE
       index = index + 1
     end
-    return nil if required.length() == 0 || required.length() > 8
+    return nil if required.length() == 0 || required.length() > 256
     [required, required.map() do |_| false end, case_token]
   end
 
@@ -11116,6 +11123,8 @@ class Parser
     return true if name == "exp"
     return true if name == "log"
     return true if name == "tanh"
+    return true if name == "log10"
+    return true if name == "log2"
     name == "tan"
   end
 
