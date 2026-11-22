@@ -141,6 +141,19 @@ copied or renamed incorrectly during a manual install). An optional
 nothing reads its value (see "What's deliberately out of scope so far"
 for why).
 
+An optional `d6` key gives the range of d6 versions the cut works with, in
+the same syntax as a dependency range:
+
+```ruby
+{"name": "greeter", "version": "0.2.0", "d6": ">=1.4.0"}
+```
+
+`facet` won't install a cut whose range leaves out the d6 it came with; the
+error names both versions. A development build counts as the release it leads
+up to, so 1.4.0-dev installs a cut that needs 1.4.0. When the registry is asked
+for versions, it leaves out the ones the asking d6 can't use, so an older d6
+keeps getting the cut's last release that works for it.
+
 A manifest must contain a single data-only Hash literal. The loader and
 `facet` parse it without compiling or running d6 code. Expressions,
 calls, interpolation, duplicate keys, and trailing code are rejected.

@@ -80,6 +80,8 @@ typedef struct FacetWorkQueue {
 
 static bool run_curl_download(const char *url, const char *output, uint64_t max_size,
                               char *error, size_t error_size);
+/* curl's exit status from the last run_curl_download; 22 is an HTTP error. */
+static int curl_exit_status = 0;
 static bool resolve_manifest_dependencies(const FacetManifest *manifest,
     const char *required_by, FacetResolution *resolution, FacetPendingTable *pending,
     FacetWorkQueue *queue, const char *scratch_root, FacetConstraintHistory *history,
@@ -473,7 +475,17 @@ static bool only_keys(const DiamondManifestValue *hash, const char *const keys[]
 static DiamondManifestValue *fetch_registry_hash(const char *url, const char *path,
         char *error, size_t error_size) {
     (void)remove(path);
-    if (!run_curl_download(url, path, 1024 * 1024, error, error_size)) return NULL;
+    if (!run_curl_download(url, path, 1024 * 1024, error, error_size)) {
+        /* Registries older than the `d6` field answer any query with an HTTP error.
+         * Ask again without it: such a registry holds no cut with a d6 range, and
+         * facet still checks the range of every manifest it reads. */
+        const char *query = strstr(url, "?d6=");
+        if (curl_exit_status != 22 || query == NULL) return NULL;
+        char plain[FACET_MAX_PATH];
+        (void)snprintf(plain, sizeof plain, "%.*s", (int)(query - url), url);
+        (void)remove(path);
+        if (!run_curl_download(plain, path, 1024 * 1024, error, error_size)) return NULL;
+    }
     struct stat info;
     if (stat(path, &info) != 0 || !S_ISREG(info.st_mode) || info.st_size <= 0 ||
         info.st_size > 1024 * 1024) {
@@ -490,8 +502,11 @@ static bool registry_best_version(const FacetPendingSemver *entry,
         const char *scratch_root, char *out, size_t out_size,
         char *error, size_t error_size) {
     char url[FACET_MAX_PATH], path[FACET_MAX_PATH];
-    if (snprintf(url, sizeof url, "%s/v1/cuts/%s/versions", entry->registry,
-                 entry->name) >= (int)sizeof url ||
+    /* ?d6= says which d6 this is, so the registry lists only versions that work with
+     * it. A request without it is from a facet that predates the `d6` field and
+     * cannot read archives that have one, so the registry hides those. */
+    if (snprintf(url, sizeof url, "%s/v1/cuts/%s/versions?d6=%s", entry->registry,
+                 entry->name, facet_d6_version()) >= (int)sizeof url ||
         snprintf(path, sizeof path, "%s/.index-%s.json", scratch_root,
                  entry->name) >= (int)sizeof path) {
         (void)snprintf(error, error_size, "registry metadata path is too long");
@@ -583,8 +598,8 @@ static bool registry_release(const FacetPendingSemver *entry, const char *versio
         const char *scratch_root, FacetResolved *resolved, FacetManifest *nested,
         char *error, size_t error_size) {
     char url[FACET_MAX_PATH], path[FACET_MAX_PATH];
-    if (snprintf(url, sizeof url, "%s/v1/cuts/%s/versions/%s", entry->registry,
-                 entry->name, version) >= (int)sizeof url ||
+    if (snprintf(url, sizeof url, "%s/v1/cuts/%s/versions/%s?d6=%s", entry->registry,
+                 entry->name, version, facet_d6_version()) >= (int)sizeof url ||
         snprintf(path, sizeof path, "%s/.release-%s.json", scratch_root,
                  entry->name) >= (int)sizeof path) {
         (void)snprintf(error, error_size, "registry release path is too long");
@@ -593,13 +608,13 @@ static bool registry_release(const FacetPendingSemver *entry, const char *versio
     DiamondManifestValue *root = fetch_registry_hash(url, path, error, error_size);
     if (root == NULL) return false;
     const char *root_keys[] = {"protocol", "name", "version", "dependencies",
-                               "yanked", "archive"};
+                               "yanked", "archive", "d6"};
     uint64_t protocol = 0;
     char name[FACET_MAX_NAME], returned_version[FACET_MAX_REF];
     bool yanked = true;
     const DiamondManifestValue *dependencies = diamond_manifest_get(root, "dependencies");
     const DiamondManifestValue *archive = diamond_manifest_get(root, "archive");
-    bool ok = only_keys(root, root_keys, 6, error, error_size) &&
+    bool ok = only_keys(root, root_keys, 7, error, error_size) &&
         diamond_manifest_get_u64(root, "protocol", &protocol) && protocol == 1 &&
         diamond_manifest_get_string(root, "name", name, sizeof name) &&
         diamond_manifest_get_string(root, "version", returned_version,
@@ -608,6 +623,21 @@ static bool registry_release(const FacetPendingSemver *entry, const char *versio
         strcmp(name, entry->name) == 0 && strcmp(returned_version, version) == 0 &&
         dependencies != NULL && dependencies->kind == DIAMOND_MANIFEST_HASH &&
         archive != NULL && archive->kind == DIAMOND_MANIFEST_HASH;
+    /* The registry already left out versions this d6 can't use; checked again in
+     * case it is one that doesn't. */
+    const DiamondManifestValue *d6 = diamond_manifest_get(root, "d6");
+    if (ok && d6 != NULL) {
+        if (d6->kind != DIAMOND_MANIFEST_STRING) {
+            (void)snprintf(error, error_size, "registry returned an invalid d6 range for '%s'",
+                           entry->name);
+            diamond_manifest_free(root);
+            return false;
+        }
+        if (!facet_d6_satisfies(entry->name, d6->string, error, error_size)) {
+            diamond_manifest_free(root);
+            return false;
+        }
+    }
     const char *archive_keys[] = {"path", "sha256", "size"};
     char archive_path[FACET_MAX_PATH];
     if (ok) {
@@ -870,8 +900,9 @@ static bool run_curl_download(const char *url, const char *output, uint64_t max_
         _exit(127);
     }
     int status = 0;
-    if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) ||
-        WEXITSTATUS(status) != 0) {
+    const bool waited = waitpid(pid, &status, 0) >= 0 && WIFEXITED(status);
+    curl_exit_status = waited ? WEXITSTATUS(status) : -1;
+    if (curl_exit_status != 0) {
         (void)snprintf(error, error_size, "cannot download '%s'", url);
         return false;
     }

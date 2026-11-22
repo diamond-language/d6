@@ -27,7 +27,7 @@ static bool regular_file(const char *path) {
  * manifests; both validators share this list so they cannot drift. */
 static const char *const MANIFEST_KEYS[] = {
     "name", "version", "summary", "license", "dependencies", "maintainers",
-    "homepage", "source", "documentation", "issues"};
+    "homepage", "source", "documentation", "issues", "d6"};
 
 enum { FACET_MAX_MAINTAINERS = 8, FACET_MAX_MAINTAINER_NAME = 80,
        FACET_MAX_CONTACT = 200 };
@@ -101,6 +101,14 @@ static bool contact_https_url(const char *text) {
     for (size_t i = 0; i < host_length; i++)
         if (host[i] == '@') return false;
     return true;
+}
+
+/* `d6`, when present: a SemVer range String of the d6 versions the cut works with. */
+static bool valid_d6_range(const DiamondManifestValue *manifest) {
+    const DiamondManifestValue *d6 = diamond_manifest_get(manifest, "d6");
+    SemverConstraint range;
+    return d6 == NULL || (d6->kind == DIAMOND_MANIFEST_STRING &&
+                          semver_constraint_parse(d6->string, &range));
 }
 
 /* `maintainers` is public display metadata: 1-8 {name, contact} Hashes with
@@ -970,6 +978,10 @@ static bool validate_archive_manifest(const DiamondManifestValue *manifest,
             }
         }
     }
+    if (ok && !valid_d6_range(manifest)) {
+        (void)snprintf(error, error_size, "archive manifest 'd6' must be a SemVer range String");
+        ok = false;
+    }
     if (ok) {
         char detail[256];
         if (!validate_maintainers(manifest, false, detail, sizeof detail)) {
@@ -1011,6 +1023,11 @@ static void print_verify_json(const DiamondManifestValue *manifest,
         if (display == NULL) continue;
         printf(",\"%s\":", display_keys[i]);
         print_json_string(display->string);
+    }
+    const DiamondManifestValue *d6 = diamond_manifest_get(manifest, "d6");
+    if (d6 != NULL) {
+        fputs(",\"d6\":", stdout);
+        print_json_string(d6->string);
     }
     fputs(",\"dependencies\":{", stdout);
     const DiamondManifestValue *dependencies = diamond_manifest_get(manifest, "dependencies");
@@ -1264,6 +1281,10 @@ int cmd_check(int argc, char **argv) {
             fprintf(stderr, "facet: '%s' must be a String\n", display_keys[i]);
             goto done;
         }
+    }
+    if (!valid_d6_range(manifest)) {
+        fputs("facet: 'd6' must be a SemVer range String, such as \">=1.4.0\"\n", stderr);
+        goto done;
     }
     if (!validate_maintainers(manifest, true, error, sizeof error)) {
         fprintf(stderr, "facet: %s\n", error);

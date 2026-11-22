@@ -644,9 +644,9 @@ FACET_SOURCES := tools/facet.c tools/facet_resolve.c tools/facet_package.c tools
 # facet_new.c #embeds these.
 FACET_TEMPLATES := $(wildcard tools/new_templates/*/*)
 
-$(BUILD_DIR)/facet: $(FACET_SOURCES) $(FACET_TEMPLATES) tools/facet_internal.h $(API_DBG_OBJECTS) $(REGINOLD_LIB) | $(PRELUDE_BIN)
+$(BUILD_DIR)/facet: $(FACET_SOURCES) $(FACET_TEMPLATES) tools/facet_internal.h src/main.c $(API_DBG_OBJECTS) $(REGINOLD_LIB) | $(PRELUDE_BIN)
 	@mkdir -p $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) $(API_DBG_OBJECTS) $(FACET_SOURCES) $(LDLIBS) -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS_COMMON) $(CFLAGS_DEBUG) -DFACET_D6_VERSION='"$(DIAMOND_VERSION)"' $(API_DBG_OBJECTS) $(FACET_SOURCES) $(LDLIBS) -o $@
 
 facet: $(BUILD_DIR)/facet
 

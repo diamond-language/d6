@@ -492,6 +492,38 @@ bool parse_dependencies(const DiamondManifestValue *dependencies,
     return true;
 }
 
+/* The d6 version this facet installs cuts for: the release it was built with
+ * (FACET_D6_VERSION, from src/main.c via the Makefile), or $FACET_D6_VERSION, which
+ * the tests use to play an older or newer d6. */
+const char *facet_d6_version(void) {
+    const char *override = getenv("FACET_D6_VERSION");
+    if (override != NULL && override[0] != '\0') return override;
+    return FACET_D6_VERSION;
+}
+
+/* Whether this d6 satisfies a cut's `d6` range. A prerelease build counts as the
+ * release it leads up to (1.4.0-dev as 1.4.0), so a development build installs cuts
+ * that need the features it is about to ship. On false, `error` says why. */
+bool facet_d6_satisfies(const char *cut, const char *range, char *error, size_t error_size) {
+    SemverConstraint constraint;
+    if (!semver_constraint_parse(range, &constraint)) {
+        (void)snprintf(error, error_size, "'%s' has an invalid d6 range '%s'", cut, range);
+        return false;
+    }
+    Semver running;
+    if (!semver_parse(facet_d6_version(), &running)) {
+        (void)snprintf(error, error_size, "this facet's d6 version '%s' is not a version",
+                       facet_d6_version());
+        return false;
+    }
+    running.prerelease[0] = '\0';
+    running.build[0] = '\0';
+    if (semver_satisfies(&running, &constraint)) return true;
+    (void)snprintf(error, error_size, "'%s' needs d6 %s; this is d6 %s", cut, range,
+                   facet_d6_version());
+    return false;
+}
+
 bool parse_manifest(const char *path, FacetManifest *manifest,
                            char *error, size_t error_size) {
     memset(manifest, 0, sizeof *manifest);
@@ -508,6 +540,16 @@ bool parse_manifest(const char *path, FacetManifest *manifest,
     if (ok)
         manifest->has_version = diamond_manifest_get_string(hash, "version",
             manifest->version, sizeof manifest->version);
+    /* `d6`: the range of d6 versions the cut works with. */
+    const DiamondManifestValue *d6 = diamond_manifest_get(hash, "d6");
+    if (ok && d6 != NULL) {
+        if (d6->kind != DIAMOND_MANIFEST_STRING) {
+            (void)snprintf(error, error_size, "'%s' key 'd6' must be a String range", path);
+            ok = false;
+        } else {
+            ok = facet_d6_satisfies(manifest->name, d6->string, error, error_size);
+        }
+    }
     const DiamondManifestValue *dependencies = diamond_manifest_get(hash, "dependencies");
     if (ok && dependencies != NULL) {
         if (dependencies->kind != DIAMOND_MANIFEST_HASH) {

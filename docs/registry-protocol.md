@@ -82,6 +82,16 @@ release lookup must still work for a locked release unless an exceptional
 takedown occurred. The client treats array order as presentation only and
 selects deterministically itself.
 
+facet adds `?d6=<version>`, the d6 it installs cuts for, to this request and the
+release request below. The registry then lists only releases whose `d6` range
+includes that version (a prerelease counts as its release), and answers 404 for a
+release that leaves it out. A request without `?d6=` comes from a facet that
+predates the field, so it sees only releases without a range. Any other query, or
+a `d6` value that isn't a version, is a 400. A registry older than the field
+answers the query with an error, so when the query gets an HTTP error facet asks
+again without it. Such a registry holds no cut with a range, and facet checks the
+range of every manifest it reads anyway.
+
 ### `GET /v1/cuts/<name>/versions/<version>`
 
 Returns a release record:
@@ -101,7 +111,7 @@ Returns a release record:
 }
 ```
 
-The record's name and version must match the request. Dependency names and ranges use the same validation as `Cutfile`. The archive path stays under the configured registry base; redirects to another origin are rejected. The digest is 64 lowercase hexadecimal characters. The size is a positive integer within the archive limit. Optional display metadata is separate from resolution fields and never supplies a download URL.
+A release whose manifest has a `d6` range also has `"d6": "<range>"`, and facet checks it again before installing. The record's name and version must match the request. Dependency names and ranges use the same validation as `Cutfile`. The archive path stays under the configured registry base; redirects to another origin are rejected. The digest is 64 lowercase hexadecimal characters. The size is a positive integer within the archive limit. Optional display metadata is separate from resolution fields and never supplies a download URL.
 
 ### `GET /v1/blobs/sha256/<digest>`
 

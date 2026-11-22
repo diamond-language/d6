@@ -650,7 +650,15 @@ while (($#)); do
         *) shift ;;
     esac
 done
-case "$url" in
+# Metadata requests say which d6 is asking, so the registry can leave out versions it can't use.
+route="${url%%\?*}"
+if [[ -n "${FACET_TEST_OLD_REGISTRY:-}" ]]; then
+    # A registry from before the d6 field 404s any query.
+    [[ "$url" == "$route" ]] || exit 22
+elif [[ "$route" == */v1/cuts/* && "$url" != *"?d6="* ]]; then
+    echo "registry metadata request without ?d6=: $url" >&2; exit 22
+fi
+case "$route" in
     */v1/cuts/greeter/versions) cp "$FACET_TEST_METADATA/greeter-index" "$output" ;;
     */v1/cuts/greeter/versions/1.2.3) cp "$FACET_TEST_METADATA/greeter-release" "$output" ;;
     */v1/cuts/greeter/versions/1.3.0) cp "$FACET_TEST_METADATA/greeter-release-new" "$output" ;;
@@ -672,6 +680,8 @@ export FACET_TEST_LOGGER_ARCHIVE="$work/registry_logger.tar"
 export FACET_TEST_GREETER13_DIGEST="$greeter13_digest"
 export FACET_TEST_GREETER13_ARCHIVE="$work/registry_greeter13.tar"
 (cd project21_registry && "$facet" update >/dev/null)
+# A registry older than the d6 field rejects the query; facet asks again without it.
+(cd project21_registry && FACET_TEST_OLD_REGISTRY=1 "$facet" update >/dev/null)
 grep -q '"greeter": {"source": "registry"' project21_registry/Cutfile.lock
 grep -q '"logger": {"source": "registry"' project21_registry/Cutfile.lock
 # The lockfile is JSON (and a d6 Hash literal): no trailing comma, so JSON.parse reads it.
@@ -1339,5 +1349,39 @@ if tar --version 2>/dev/null | grep -q GNU; then
     fi
     grep -q 'more than one manifest' "$error_file"
 fi
+
+# --- d6: the range of d6 versions a cut works with ---
+
+# A dependency whose Cutfile asks for a newer d6 is refused; FACET_D6_VERSION
+# plays the d6 this facet installs for, and a prerelease counts as its release.
+mkdir future_repo
+printf 'def future() = 1\n' > future_repo/future.d6
+echo '{"name": "future", "version": "0.1.0", "d6": ">=9.0.0"}' > future_repo/Cutfile
+commit_repo future_repo
+(cd future_repo && git tag v0.1.0)
+mkdir project_d6
+echo "{\"name\": \"myapp\", \"dependencies\": {\"future\": {\"git\": \"$work/future_repo\", \"tag\": \"v0.1.0\"}}}" > project_d6/Cutfile
+if d6_output="$(cd project_d6 && FACET_D6_VERSION=1.4.0 "$facet" install 2>&1)"; then
+    echo "facet installed a cut that needs a newer d6" >&2
+    exit 1
+fi
+grep -q "'future' needs d6 >=9.0.0; this is d6 1.4.0" <<<"$d6_output"
+[[ ! -e project_d6/cuts/future ]]
+(cd project_d6 && FACET_D6_VERSION=9.0.0-dev "$facet" install >/dev/null)
+[[ -f project_d6/cuts/future/future.d6 ]]
+
+# Pack keeps a valid range in the archive and verify reports it; an invalid one
+# is refused before anything is written.
+mkdir d6pack && cp -r registry_source/logger d6pack/logger
+sed -i 's/"license": "MIT"/"license": "MIT", "d6": ">=1.4.0"/' d6pack/logger/Cutfile
+"$facet" pack d6pack/logger d6cut.tar >/dev/null
+[[ "$("$facet" verify d6cut.tar --json)" == *'"d6":">=1.4.0"'* ]]
+sed -i 's/">=1.4.0"/"soon"/' d6pack/logger/Cutfile
+if d6_output="$("$facet" pack d6pack/logger d6cut_bad.tar 2>&1)"; then
+    echo "facet packed an invalid d6 range" >&2
+    exit 1
+fi
+grep -q "'d6' must be a SemVer range String" <<<"$d6_output"
+[[ ! -e d6cut_bad.tar ]]
 
 echo "all facet tests passed"

@@ -100,8 +100,8 @@ module Registry
         @store.put(digest, bytes)
       end
       if created
-        @db.execute("INSERT INTO releases (cut_id, version, dependencies, maintainers, sha256, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          [cut.id(), version, JSON.stringify(archive.dependencies()), JSON.stringify(archive.maintainers()), digest, bytes.bytesize(), now])
+        @db.execute("INSERT INTO releases (cut_id, version, dependencies, maintainers, sha256, size, created_at, d6) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [cut.id(), version, JSON.stringify(archive.dependencies()), JSON.stringify(archive.maintainers()), digest, bytes.bytesize(), now, archive.d6()])
         @records.record_details(@db.last_insert_row_id(), archive)
         @records.audit({"subject": credential.subject(), "action": "publish", "cut_name": name, "version": version,
           "sha256": digest, "created_at": now}.merge(@records.credential_fields(credential)))

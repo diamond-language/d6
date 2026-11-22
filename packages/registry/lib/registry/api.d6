@@ -39,19 +39,34 @@ module Registry
       response
     end
 
-    def index(name)
+    # The d6 version a facet sent as `?d6=`, or nil when the query has none.
+    def client_d6(query: String) -> String | Nil
+      return nil if query == ""
+      values = query.split("=")
+      unless values.length() == 2 && values[0] == "d6" && SemVer.valid?(values[1])
+        raise InvalidRequest.new()
+      end
+      values[1]
+    end
+
+    # Only the versions the asking facet's d6 can install, so the newest of them wins.
+    def index(name, client: String | Nil = nil)
       cut = @records.cut(name)
       if cut == nil then return self.error(404, "not_found") end
-      releases = @records.served_releases(cut.id()).sort() do |a, b| SemVer.compare(a.version(), b.version()) end
+      served = @records.served_releases(cut.id()).select() do |release| release.usable_by?(client) end
+      releases = served.sort() do |a, b| SemVer.compare(a.version(), b.version()) end
       versions = releases.map() do |release| {"version": release.version(), "yanked": release.yanked?()} end
       self.json(200, {"protocol": 1, "versions": versions})
     end
 
-    def release(name, version)
+    def release(name, version, client: String | Nil = nil)
       found = @records.served_release(name, version)
-      if found == nil then return self.error(404, "not_found") end
-      self.json(200, {"protocol": 1, "name": name, "version": version, "dependencies": JSON.parse(found.dependencies()), "yanked": found.yanked?(),
-        "archive": {"path": "/v1/blobs/sha256/#{found.sha256()}", "sha256": found.sha256(), "size": found.size()}})
+      if found == nil || !found.usable_by?(client) then return self.error(404, "not_found") end
+      body = {"protocol": 1, "name": name, "version": version, "dependencies": JSON.parse(found.dependencies()), "yanked": found.yanked?(),
+        "archive": {"path": "/v1/blobs/sha256/#{found.sha256()}", "sha256": found.sha256(), "size": found.size()}}
+      range = found.d6()
+      if range != nil then body["d6"] = range end
+      self.json(200, body)
     end
 
     def details(release_id: Int) -> Hash = @records.details(release_id)
@@ -164,7 +179,13 @@ module Registry
         if method == "GET" && (path == "/v1/audit" || path.start_with?("/v1/audit?"))
           return self.audit_request(path, request)
         end
-        parts = path.split("/")
+        # Only the version index and release documents take a query (`?d6=`).
+        pieces = path.split("?")
+        if pieces.length() > 2 then raise InvalidRequest.new() end
+        query = pieces.length() == 2 ? pieces[1] : ""
+        parts = pieces[0].split("/")
+        takes_query = method == "GET" && parts.length() >= 5 && parts.length() <= 6 && parts[2] == "cuts" && parts[4] == "versions"
+        if query != "" && !takes_query then return self.error(404, "not_found") end
         if parts.length() >= 5 && parts[1] == "v1" && parts[2] == "cuts" && parts[4] == "owners"
           if parts.length() == 5 && method == "GET" then return self.owner_request(parts[3], "list", request) end
           if parts.length() == 6 && method == "POST" && ["add", "remove"].include?(parts[5])
@@ -176,12 +197,12 @@ module Registry
         end
         if parts.length() >= 5 && parts[1] == "v1" && parts[2] == "cuts" && parts[4] == "versions"
           if parts.length() == 5
-            if method == "GET" then return self.index(parts[3]) end
+            if method == "GET" then return self.index(parts[3], self.client_d6(query)) end
             if method == "POST" then return self.upload(parts[3], request) end
           elsif parts.length() == 7 && method == "POST" && ["yank", "unyank", "takedown"].include?(parts[6])
             return self.manage(parts[3], parts[5], parts[6], request)
           elsif parts.length() == 6 && method == "GET"
-            return self.release(parts[3], parts[5])
+            return self.release(parts[3], parts[5], self.client_d6(query))
           end
         end
         self.error(404, "not_found")

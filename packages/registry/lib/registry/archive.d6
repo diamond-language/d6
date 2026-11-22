@@ -1,7 +1,7 @@
 module Registry
   # What the trusted verifier reports about one archive. Never executes package code.
   class Archive
-    attr_reader version, dependencies, maintainers, details
+    attr_reader version, dependencies, maintainers, details, d6
 
     # Raises InvalidArchive unless the archive verifies as `name` at this digest and size.
     def initialize(verifier: String, path: String, name: String, digest: String, size: Int)
@@ -14,6 +14,8 @@ module Registry
       @version = metadata["version"]
       @dependencies = metadata["dependencies"]
       @maintainers = metadata["maintainers"]
+      # The d6 versions the cut works with, as a SemVer range; nil when it doesn't say.
+      @d6 = metadata["d6"] is String ? metadata["d6"] : nil
       @details = {}
       ["summary", "license", "homepage", "source", "documentation", "issues"].each() do |key|
         if metadata[key] is String then @details[key] = metadata[key] end

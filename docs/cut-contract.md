@@ -125,8 +125,12 @@ specified. Runtime dependencies are name-to-range mappings; no floating Git
 branch, arbitrary URL, or local path is allowed in a published cut's runtime
 graph. Optional homepage, source, documentation, and issue links are display
 metadata only and must never determine where `facet` fetches package bytes.
-Compatibility fields for supported d6 versions and external system
-libraries need a schema before packages that require them are published.
+`d6`, optional, is a SemVer range String of the d6 versions the cut works with,
+in the same syntax as a dependency range: `"d6": ">=1.4.0"`. facet refuses to
+install a cut whose range leaves out the d6 it belongs to, naming both, and a
+prerelease d6 counts as the release it leads up to (1.4.0-dev as 1.4.0). Leave
+it out when the cut works with every d6 1.x. A field for external system
+libraries needs a schema before packages that require them are published.
 
 The manifest declares runtime dependencies only. Development dependencies
 belong in a project-local development manifest or test configuration, not in
@@ -150,6 +154,12 @@ retry of a release published earlier stays idempotent, and existing release
 bytes are never rewritten. To add maintainers to a published cut, publish a new
 version. The version 1 metadata API is unchanged, because facet 0.7.0 rejects
 unknown metadata keys; maintainers appear in the catalog.
+
+### d6 ranges and older facets
+
+facet before 1.4.0 rejects a manifest with a `d6` key. Those facets also send no
+`?d6=` on metadata requests, so the registry leaves releases that have a range
+out of what they see: they keep resolving to the last release without one.
 
 ## Request publishing access
 

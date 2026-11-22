@@ -128,6 +128,8 @@ DiamondManifestValue *facet_read_hash(const char *path, char *error,
 bool parse_dependencies(const DiamondManifestValue *dependencies,
                                FacetManifest *manifest, char *error,
                                size_t error_size);
+const char *facet_d6_version(void);
+bool facet_d6_satisfies(const char *cut, const char *range, char *error, size_t error_size);
 bool parse_manifest(const char *path, FacetManifest *manifest,
                            char *error, size_t error_size);
 bool parse_dev_manifest(const char *path, FacetManifest *manifest,
