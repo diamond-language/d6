@@ -41,6 +41,8 @@ come only in minor releases, marked **Breaking** here.
 - A `do` block on a method call that skipped a defaulted parameter failed with "invalid
   bytecode" when the caller's first parameter was an instance.
 - `f(x, &block, y)` is a compile error: a forwarded block must come last.
+- A `case` over a sealed class with more than 8 direct subclasses is checked for exhaustiveness
+  (up to 256); it was silently left unchecked.
 - A keyword call on another instance, `other.step(1, by: 2)`, could reach a private method.
 - `Math.log10` and `Math.log2` use C's `log10` and `log2`; they divided natural logarithms and
   could be one unit in the last place off.

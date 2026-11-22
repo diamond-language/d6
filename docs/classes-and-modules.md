@@ -661,7 +661,7 @@ keyword, never the other way around.
   over that class's own direct subclasses, the same way an explicit
   `Circle | Square` union already is -- see that section for exactly
   which `when` forms count as coverage, and for the two conditions
-  (zero or more than 8 direct subclasses) that leave a sealed hierarchy
+  (zero or more than 256 direct subclasses) that leave a sealed hierarchy
   unchecked instead of erroring.
 
 **Deliberately not a module/file-boundary enforcement mechanism, unlike

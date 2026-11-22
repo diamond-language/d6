@@ -643,11 +643,14 @@ typedef struct CaseFlowJoin {
  * never an Array/Hash/Object structural pattern (even an empty `Class{}`
  * class-only guard) and never a guarded `when ... if` clause -- see
  * parse_case_branches' own comment at the point this is populated. */
+/* The most members a case can be checked against: a sealed class with more
+ * direct subclasses is left unchecked. */
+enum { DIAMOND_MAX_CASE_MEMBERS = 256 };
 typedef struct CaseExhaustiveness {
     bool active;
-    uint16_t required_ids[DIAMOND_MAX_UNION_TYPES];
-    uint8_t required_count;
-    bool covered[DIAMOND_MAX_UNION_TYPES];
+    uint16_t required_ids[DIAMOND_MAX_CASE_MEMBERS];
+    uint16_t required_count;
+    bool covered[DIAMOND_MAX_CASE_MEMBERS];
     DiamondSpan case_span;
 } CaseExhaustiveness;
 

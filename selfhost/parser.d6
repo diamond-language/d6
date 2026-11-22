@@ -8495,7 +8495,7 @@ class Parser
       required.push(Type::CLASS_BASE + @classes[index][1]) if @classes[index][2] == fact - Type::CLASS_BASE
       index = index + 1
     end
-    return nil if required.length() == 0 || required.length() > 8
+    return nil if required.length() == 0 || required.length() > 256
     [required, required.map() do |_| false end, case_token]
   end
 

@@ -2402,7 +2402,7 @@ static uint16_t parse_singleton_call_body(Compiler *compiler,
             return destination;
         }
         arguments[argument_count++]=block;
-    } else if(forwarded_block&&argument_count-1<(method->arity==0?0:method->arity-1)) {
+    } else if(forwarded_block&&argument_count-1<(size_t)(method->arity==0?0:method->arity-1)) {
         /* `Namespace.method(args, &block)`: as with a do block, defaulted
          * parameters before the block slot keep their defaults. */
         const uint16_t block=arguments[--argument_count];
