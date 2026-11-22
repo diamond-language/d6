@@ -785,9 +785,12 @@ static bool fixed_binding_node_valid(const DiamondProgram *program,const Diamond
 }
 
 static bool fixed_class_bindings_valid(const DiamondProgram *program,const DiamondClass *class) {
+    /* A struct's parent is a struct, or a class with no fields (the compiler
+     * also requires it to have no initialize). */
     if(class->generated_struct&&class->superclass!=DIAMOND_NO_CLASS&&
        (class->superclass>=program->class_count||class->superclass==class->index||
-        !program->classes[class->superclass]->generated_struct))return false;
+        (!program->classes[class->superclass]->generated_struct&&
+         program->classes[class->superclass]->field_count!=0)))return false;
     if(class->transforms_parent_arguments) {
         const size_t variables=DIAMOND_CLASS_TYPE_PARAMETER_COUNT(class);
         if(class->fixed_type_arguments||class->swaps_parent_arguments||variables==0||

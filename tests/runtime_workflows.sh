@@ -79,8 +79,10 @@ if [[ ${1:-} == --aot ]]; then
         done
     done
     # A built binary runs on the same large stack as the CLI, so it recurses
-    # far past a thread's 150-frame budget (it once stopped at 149).
-    printf 'def depth(n: Int) -> Int = n == 0 ? 0 : 1 + depth(n - 1)\nputs(depth(3000))\n' \
+    # far past a thread's 150-frame budget (it once stopped at 149). The
+    # struct extending a field-less class must pass the embedded program's
+    # validation (it once read as corrupt).
+    printf 'sealed class Node\nend\nstruct Leaf(n: Int) < Node\nend\ndef depth(n: Int) -> Int = n == 0 ? Leaf.new(0).n() : 1 + depth(n - 1)\nputs(depth(3000))\n' \
         > "$work/deep.d6"
     if ! "$diamond" build "$work/deep.d6" -o "$work/deep" > "$work/build.log" 2>&1; then
         echo "FAIL standalone build deep recursion" >&2
