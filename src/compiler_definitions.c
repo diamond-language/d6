@@ -611,6 +611,8 @@ uint16_t compile_block(Compiler *compiler) {
     compiler->has_contextual_block_types=false;
     compiler->contextual_block_arity=0;
     compiler->contextual_block_return_set=-1;
+    const size_t block_start=compiler->current.span.start;
+    const size_t pending_before=compiler->pending_copy_count;
     advance_token(compiler);
     if (compiler->program->function_count == DIAMOND_MAX_FUNCTIONS) {
         fail(compiler, compiler->current.span, "too many functions");
@@ -696,6 +698,7 @@ uint16_t compile_block(Compiler *compiler) {
     compiler->in_block=true;
     bool wrapped=false;
     const uint16_t body_result=compiler->failed?0:compile_body(compiler,&wrapped);
+    settle_block_copies(compiler,block_start,pending_before);
     if(!compiler->failed&&declared_return_set==DIAMOND_NO_TYPE_SET&&
        compiler->return_flow_seen) {
         /* An early `return`/`next` can hand back a different type than the

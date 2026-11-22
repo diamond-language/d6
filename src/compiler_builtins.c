@@ -637,8 +637,9 @@ static uint16_t parse_file_delete_arguments(Compiler *compiler) {
     return dest;
 }
 
-/* `Dir.glob(pattern)` or `Dir.glob(pattern, base: dir)`: FILE_PATH with the base
- * (or a NIL) as the second operand. */
+/* `Dir.glob(pattern, base: dir, hidden: true)`: FILE_PATH with the base (or a NIL)
+ * as the second operand. `hidden:` takes a literal true or false and picks the
+ * selector: with true, `*` and `**` also match names that start with ".". */
 static uint16_t parse_dir_glob_call(Compiler *compiler) {
     if(compiler->current.kind!=DIAMOND_TOKEN_LEFT_PAREN) {
         fail(compiler,compiler->current.span,"expected '(' after 'Dir.glob'");
@@ -648,25 +649,43 @@ static uint16_t parse_dir_glob_call(Compiler *compiler) {
     skip_newlines(compiler);
     const uint16_t pattern_register=parse_expression(compiler);
     skip_newlines(compiler);
-    uint16_t base_register;
-    if(compiler->current.kind==DIAMOND_TOKEN_COMMA) {
+    bool has_base=false,has_hidden=false,hidden=false;
+    uint16_t base_register=0;
+    while(!compiler->failed&&compiler->current.kind==DIAMOND_TOKEN_COMMA) {
         advance_token(compiler);
         skip_newlines(compiler);
-        if(compiler->current.kind!=DIAMOND_TOKEN_IDENTIFIER||
-           !name_equals(compiler,"base",compiler->current.span,false)) {
-            fail(compiler,compiler->current.span,"expected 'base:' after the Dir.glob pattern");
+        const bool is_base=compiler->current.kind==DIAMOND_TOKEN_IDENTIFIER&&
+            name_equals(compiler,"base",compiler->current.span,false);
+        const bool is_hidden=compiler->current.kind==DIAMOND_TOKEN_IDENTIFIER&&
+            name_equals(compiler,"hidden",compiler->current.span,false);
+        if((!is_base&&!is_hidden)||(is_base&&has_base)||(is_hidden&&has_hidden)) {
+            fail(compiler,compiler->current.span,"expected 'base:' or 'hidden:' after the Dir.glob pattern");
             return 0;
         }
         advance_token(compiler);
         if(compiler->current.kind!=DIAMOND_TOKEN_COLON) {
-            fail(compiler,compiler->current.span,"expected ':' after 'base' in Dir.glob");
+            fail(compiler,compiler->current.span,is_base?"expected ':' after 'base' in Dir.glob":
+                "expected ':' after 'hidden' in Dir.glob");
             return 0;
         }
         advance_token(compiler);
         skip_newlines(compiler);
-        base_register=parse_expression(compiler);
+        if(is_base) {
+            has_base=true;
+            base_register=parse_expression(compiler);
+        } else {
+            if(compiler->current.kind!=DIAMOND_TOKEN_TRUE&&compiler->current.kind!=DIAMOND_TOKEN_FALSE) {
+                fail(compiler,compiler->current.span,"Dir.glob's hidden: takes true or false");
+                return 0;
+            }
+            has_hidden=true;
+            hidden=compiler->current.kind==DIAMOND_TOKEN_TRUE;
+            advance_token(compiler);
+        }
         skip_newlines(compiler);
-    } else {
+    }
+    if(compiler->failed)return 0;
+    if(!has_base) {
         base_register=allocate_register(compiler);
         emit_instruction(compiler,DIAMOND_OP_NIL,base_register,0,0,1);
     }
@@ -678,8 +697,32 @@ static uint16_t parse_dir_glob_call(Compiler *compiler) {
     const uint16_t dest=allocate_register(compiler);
     emit_opcode(compiler,DIAMOND_OP_FILE_PATH);
     emit_register(compiler,dest);emit_register(compiler,pattern_register);
-    emit_register(compiler,base_register);emit_byte(compiler,(uint8_t)DIAMOND_FILE_PATH_GLOB);
+    emit_register(compiler,base_register);
+    emit_byte(compiler,(uint8_t)(hidden?DIAMOND_FILE_PATH_GLOB_HIDDEN:DIAMOND_FILE_PATH_GLOB));
     compiler->known_types[dest]=DIAMOND_TYPE_ARRAY;
+    return dest;
+}
+
+/* `Dir.pwd()`: the working directory, as FILE_PATH with two NIL operands. */
+static uint16_t parse_dir_pwd_call(Compiler *compiler) {
+    if(compiler->current.kind!=DIAMOND_TOKEN_LEFT_PAREN) {
+        fail(compiler,compiler->current.span,"expected '(' after 'Dir.pwd'");
+        return 0;
+    }
+    advance_token(compiler);
+    skip_newlines(compiler);
+    if(compiler->current.kind!=DIAMOND_TOKEN_RIGHT_PAREN) {
+        fail(compiler,compiler->current.span,"Dir.pwd takes no arguments");
+        return 0;
+    }
+    advance_token(compiler);
+    const uint16_t none=allocate_register(compiler);
+    emit_instruction(compiler,DIAMOND_OP_NIL,none,0,0,1);
+    const uint16_t dest=allocate_register(compiler);
+    emit_opcode(compiler,DIAMOND_OP_FILE_PATH);
+    emit_register(compiler,dest);emit_register(compiler,none);
+    emit_register(compiler,none);emit_byte(compiler,(uint8_t)DIAMOND_FILE_PATH_PWD);
+    compiler->known_types[dest]=DIAMOND_TYPE_STRING;
     return dest;
 }
 
@@ -751,10 +794,14 @@ uint16_t parse_dir_entries_call(Compiler *compiler) {
             advance_token(compiler);
             return parse_dir_glob_call(compiler);
         }
+        if(name_equals(compiler,"pwd",method,false)) {
+            advance_token(compiler);
+            return parse_dir_pwd_call(compiler);
+        }
     }
     if(compiler->current.kind!=DIAMOND_TOKEN_IDENTIFIER||
        !name_equals(compiler,"entries",compiler->current.span,false)) {
-        fail(compiler,compiler->current.span,"expected 'entries', 'glob', 'mkdir', 'mkdir_p', 'mktmpdir', 'delete', 'delete_tree' or 'sync' after 'Dir'");
+        fail(compiler,compiler->current.span,"expected 'entries', 'glob', 'mkdir', 'mkdir_p', 'mktmpdir', 'pwd', 'delete', 'delete_tree' or 'sync' after 'Dir'");
         return 0;
     }
     advance_token(compiler); /* consume 'entries' */
@@ -2671,16 +2718,21 @@ static uint16_t parse_cipher_decrypt_call(Compiler *compiler) {
     return dest;
 }
 
-static uint16_t parse_gzip_compress_call(Compiler *compiler) {
+/* Gzip.compress(data) and Zlib.deflate(data): one opcode, with a trailing byte
+ * naming the wrapping (0 gzip, 1 zlib). */
+static uint16_t parse_gzip_compress_call(Compiler *compiler,const char *call,uint8_t format) {
+    char message[96];
     if(compiler->current.kind!=DIAMOND_TOKEN_LEFT_PAREN) {
-        fail(compiler,compiler->current.span,"expected '(' after 'Gzip.compress'");
+        snprintf(message,sizeof message,"expected '(' after '%s'",call);
+        fail(compiler,compiler->current.span,message);
         return 0;
     }
     advance_token(compiler);skip_newlines(compiler);
     const uint16_t data_register=parse_expression(compiler);
     skip_newlines(compiler);
     if(compiler->current.kind!=DIAMOND_TOKEN_RIGHT_PAREN) {
-        fail(compiler,compiler->current.span,"expected ')' after Gzip.compress arguments");
+        snprintf(message,sizeof message,"expected ')' after %s arguments",call);
+        fail(compiler,compiler->current.span,message);
         return 0;
     }
     advance_token(compiler);
@@ -2688,27 +2740,32 @@ static uint16_t parse_gzip_compress_call(Compiler *compiler) {
     emit_opcode(compiler,DIAMOND_OP_GZIP_COMPRESS);
     emit_register(compiler,dest);
     emit_register(compiler,data_register);
+    emit_byte(compiler,format);
     compiler->known_types[dest]=DIAMOND_TYPE_STRING;
     return dest;
 }
 
-static uint16_t parse_gzip_decompress_call(Compiler *compiler) {
+static uint16_t parse_gzip_decompress_call(Compiler *compiler,const char *call) {
+    char message[96];
     if(compiler->current.kind!=DIAMOND_TOKEN_LEFT_PAREN) {
-        fail(compiler,compiler->current.span,"expected '(' after 'Gzip.decompress'");
+        snprintf(message,sizeof message,"expected '(' after '%s'",call);
+        fail(compiler,compiler->current.span,message);
         return 0;
     }
     advance_token(compiler);skip_newlines(compiler);
     const uint16_t data_register=parse_expression(compiler);
     skip_newlines(compiler);
     if(compiler->current.kind!=DIAMOND_TOKEN_COMMA) {
-        fail(compiler,compiler->current.span,"expected ',' after Gzip.decompress data");
+        snprintf(message,sizeof message,"expected ',' after %s data",call);
+        fail(compiler,compiler->current.span,message);
         return 0;
     }
     advance_token(compiler);skip_newlines(compiler);
     const uint16_t max_size_register=parse_expression(compiler);
     skip_newlines(compiler);
     if(compiler->current.kind!=DIAMOND_TOKEN_RIGHT_PAREN) {
-        fail(compiler,compiler->current.span,"expected ')' after Gzip.decompress arguments");
+        snprintf(message,sizeof message,"expected ')' after %s arguments",call);
+        fail(compiler,compiler->current.span,message);
         return 0;
     }
     advance_token(compiler);
@@ -2730,13 +2787,33 @@ uint16_t parse_gzip_call(Compiler *compiler) {
     const DiamondSpan method=compiler->current.span;
     if(name_equals(compiler,"compress",method,false)) {
         advance_token(compiler);
-        return parse_gzip_compress_call(compiler);
+        return parse_gzip_compress_call(compiler,"Gzip.compress",0);
     }
     if(name_equals(compiler,"decompress",method,false)) {
         advance_token(compiler);
-        return parse_gzip_decompress_call(compiler);
+        return parse_gzip_decompress_call(compiler,"Gzip.decompress");
     }
     fail(compiler,method,"expected 'compress' or 'decompress' after 'Gzip'");
+    return 0;
+}
+
+/* Zlib.deflate(data) and Zlib.inflate(data, max_size): git's object format and
+ * HTTP's "deflate" use the zlib wrapping, not gzip's. Inflate shares
+ * Gzip.decompress's opcode, which reads either wrapping. */
+uint16_t parse_zlib_call(Compiler *compiler) {
+    advance_token(compiler); /* consume '.' */
+    if(compiler->current.kind==DIAMOND_TOKEN_IDENTIFIER) {
+        const DiamondSpan method=compiler->current.span;
+        if(name_equals(compiler,"deflate",method,false)) {
+            advance_token(compiler);
+            return parse_gzip_compress_call(compiler,"Zlib.deflate",1);
+        }
+        if(name_equals(compiler,"inflate",method,false)) {
+            advance_token(compiler);
+            return parse_gzip_decompress_call(compiler,"Zlib.inflate");
+        }
+    }
+    fail(compiler,compiler->current.span,"expected 'deflate' or 'inflate' after 'Zlib'");
     return 0;
 }
 

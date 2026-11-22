@@ -4,8 +4,8 @@
  * character, `{a,b}` is alternation (nested too), a segment that is exactly `**`
  * matches any number of directories, and `\` escapes the next character.
  * Names starting with "." match only a segment that starts with a literal ".",
- * and `**` never descends into hidden directories or through a symlink to a
- * directory (so a link cycle cannot loop). The result is sorted bytewise
+ * and `**` never descends into hidden directories (unless `hidden: true` asks
+ * for both) or through a symlink to a directory (so a link cycle cannot loop). The result is sorted bytewise
  * without duplicates. Paths are written as the pattern wrote them; with
  * `base`, the pattern is relative to that directory and so are the results.
  * A directory that cannot be read is skipped, as Ruby's Dir.glob does. */
@@ -33,6 +33,7 @@ typedef struct {
     DiamondVm *vm;
     GlobList *matches;
     const char *base;      /* nullptr, or the directory paths are relative to */
+    bool hidden;           /* names starting with "." match `*` and `**` too */
     bool out_of_memory;
 } GlobWalk;
 
@@ -177,7 +178,8 @@ static void glob_match(GlobWalk *walk,const char *shown,const char *rest,size_t 
         free(fs);
         if(directory==nullptr)return;
         for(struct dirent *entry=readdir(directory);entry!=nullptr;entry=readdir(directory)) {
-            if(entry->d_name[0]=='.')continue;
+            if(strcmp(entry->d_name,".")==0||strcmp(entry->d_name,"..")==0)continue;
+            if(entry->d_name[0]=='.'&&!walk->hidden)continue;
             char *child=glob_child(shown,entry->d_name);
             if(child==nullptr){walk->out_of_memory=true;break;}
             if(glob_is_directory(walk,child,false))glob_match(walk,child,rest,depth+1);
@@ -212,7 +214,7 @@ static void glob_match(GlobWalk *walk,const char *shown,const char *rest,size_t 
     if(segment==nullptr){walk->out_of_memory=true;return;}
     memcpy(segment,rest,length);segment[length]='\0';
     /* A lone "**" at the end matches like "*". */
-    const bool dot_allowed=segment[0]=='.';
+    const bool dot_allowed=segment[0]=='.'||walk->hidden;
     char *fs=glob_fs_path(walk,shown);
     DIR *directory=fs==nullptr?nullptr:opendir(fs);
     if(fs==nullptr)walk->out_of_memory=true;
@@ -252,7 +254,7 @@ static int glob_compare(const void *a,const void *b) {
 }
 
 DiamondVmStatus dir_glob_helper(DiamondVm *vm,const DiamondString *pattern,
-        const DiamondString *base,DiamondValue *result) {
+        const DiamondString *base,bool hidden,DiamondValue *result) {
     if(memchr(pattern->chars,'\0',pattern->length)!=nullptr||
        (base!=nullptr&&memchr(base->chars,'\0',base->length)!=nullptr)) {
         snprintf(vm->error,sizeof vm->error,"Dir.glob pattern and base must not contain a NUL byte");
@@ -272,7 +274,7 @@ DiamondVmStatus dir_glob_helper(DiamondVm *vm,const DiamondString *pattern,
     }
     GlobList matches={};
     GlobWalk walk={.vm=vm,.matches=&matches,
-        .base=base==nullptr||base->length==0?nullptr:base->chars};
+        .base=base==nullptr||base->length==0?nullptr:base->chars,.hidden=hidden};
     for(size_t index=0;index<patterns.count&&!walk.out_of_memory;index++) {
         const char *text=patterns.items[index];
         if(text[0]=='/')glob_match(&walk,"/",text+1,0);

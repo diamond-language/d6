@@ -11752,7 +11752,8 @@ class Parser
     "UDPSocket" => [["open", 79, 0, 0, 0, nil, nil]],
     "Signal" => [["trap", 80, 2, 0, 0, nil, nil]],
     "Cipher" => [["encrypt", 121, 2, 0, 0, Type::STRING, nil], ["decrypt", 122, 2, 0, 0, nil, nil]],
-    "Gzip" => [["compress", 123, 1, 0, 0, Type::STRING, nil], ["decompress", 124, 2, 0, 0, Type::STRING, nil]],
+    "Gzip" => [["compress", 123, 1, 0, 0, Type::STRING, 0], ["decompress", 124, 2, 0, 0, Type::STRING, nil]],
+    "Zlib" => [["deflate", 123, 1, 0, 0, Type::STRING, 1], ["inflate", 124, 2, 0, 0, Type::STRING, nil]],
     "Tensor" => [["zeros", 166, 2, 0, 0, nil, nil], ["from_array", 167, 1, 0, 0, nil, nil],
                  ["random", 168, 3, 0, 0, nil, nil]],
     "Base64" => [["encode", 125, 1, 0, 0, Type::STRING, nil], ["decode", 126, 1, 0, 0, Type::STRING, nil]],
@@ -12207,6 +12208,10 @@ class Parser
       self.advance_token()
       return self.parse_dir_glob_call()
     end
+    if namespace == "Dir" && method == "pwd"
+      self.advance_token()
+      return self.parse_dir_pwd_call()
+    end
     table = if namespace == "File" then self.file_path_methods() else self.dir_path_methods() end
     index = 0
     while index < table.length()
@@ -12219,7 +12224,7 @@ class Parser
     end
     if namespace == "Dir"
       if method != "entries"
-        self.fail("expected 'entries', 'glob', 'mkdir', 'mkdir_p', 'mktmpdir', 'delete', 'delete_tree' or 'sync' after 'Dir'")
+        self.fail("expected 'entries', 'glob', 'mkdir', 'mkdir_p', 'mktmpdir', 'pwd', 'delete', 'delete_tree' or 'sync' after 'Dir'")
         return 0
       end
       self.advance_token()
@@ -12339,8 +12344,9 @@ class Parser
     destination
   end
 
-  # `Dir.glob(pattern)` or `Dir.glob(pattern, base: dir)`: FILE_PATH selector 28 with the
-  # base (or a NIL) as the second operand, like compiler_builtins.c's parse_dir_glob_call.
+  # `Dir.glob(pattern, base: dir, hidden: true)`: FILE_PATH selector 28 (33 with
+  # `hidden: true`) with the base (or a NIL) as the second operand, like
+  # compiler_builtins.c's parse_dir_glob_call.
   def parse_dir_glob_call()
     if @current.kind() != :left_paren
       self.fail("expected '(' after 'Dir.glob'")
@@ -12350,24 +12356,38 @@ class Parser
     self.skip_newlines()
     pattern_register = self.parse_expression()
     self.skip_newlines()
-    base_register = 0
-    if @current.kind() == :comma
+    base_register = nil
+    hidden = nil
+    while !@failed && @current.kind() == :comma
       self.advance_token()
       self.skip_newlines()
-      if @current.kind() != :identifier || self.token_text(@current) != "base"
-        self.fail("expected 'base:' after the Dir.glob pattern")
+      name = if @current.kind() == :identifier then self.token_text(@current) else "" end
+      if (name != "base" && name != "hidden") || (name == "base" && base_register != nil) ||
+         (name == "hidden" && hidden != nil)
+        self.fail("expected 'base:' or 'hidden:' after the Dir.glob pattern")
         return 0
       end
       self.advance_token()
       if @current.kind() != :colon
-        self.fail("expected ':' after 'base' in Dir.glob")
+        self.fail("expected ':' after '#{name}' in Dir.glob")
         return 0
       end
       self.advance_token()
       self.skip_newlines()
-      base_register = self.parse_expression()
+      if name == "base"
+        base_register = self.parse_expression()
+      else
+        if @current.kind() != :true && @current.kind() != :false
+          self.fail("Dir.glob's hidden: takes true or false")
+          return 0
+        end
+        hidden = @current.kind() == :true
+        self.advance_token()
+      end
       self.skip_newlines()
-    else
+    end
+    return 0 if @failed
+    if base_register == nil
       base_register = self.allocate_register()
       self.emit_instruction1(Opcode::NIL, base_register)
     end
@@ -12378,8 +12398,31 @@ class Parser
     self.advance_token()
     destination = self.allocate_register()
     self.emit_instruction3(Opcode::FILE_PATH, destination, pattern_register, base_register)
-    self.emit_byte(28)
+    self.emit_byte(hidden == true ? 33 : 28)
     self.set_type_fact(destination, Type::ARRAY)
+    destination
+  end
+
+  # `Dir.pwd()`: FILE_PATH selector 32 with two NIL operands, like
+  # compiler_builtins.c's parse_dir_pwd_call.
+  def parse_dir_pwd_call()
+    if @current.kind() != :left_paren
+      self.fail("expected '(' after 'Dir.pwd'")
+      return 0
+    end
+    self.advance_token()
+    self.skip_newlines()
+    if @current.kind() != :right_paren
+      self.fail("Dir.pwd takes no arguments")
+      return 0
+    end
+    self.advance_token()
+    none = self.allocate_register()
+    self.emit_instruction1(Opcode::NIL, none)
+    destination = self.allocate_register()
+    self.emit_instruction3(Opcode::FILE_PATH, destination, none, none)
+    self.emit_byte(32)
+    self.set_type_fact(destination, Type::STRING)
     destination
   end
 

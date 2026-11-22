@@ -1,0 +1,11 @@
+120
+true
+true
+true
+true
+both
+either
+"blob 6\x00hello\n"
+size cap raised
+Zlib.deflate data must be a String, got Int
+nil

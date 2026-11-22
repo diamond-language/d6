@@ -7,6 +7,20 @@ come only in minor releases, marked **Breaking** here.
 
 ## Unreleased
 
+### Added
+
+- `Zlib.deflate(data)` and `Zlib.inflate(data, max_size)`: compression in zlib's wrapping,
+  which git objects, PNG and HTTP's `deflate` use. `Gzip.compress` wrote only gzip.
+- `Dir.pwd()`, the working directory.
+- `Dir.glob(pattern, hidden: true)` also matches names that start with `.` and enters hidden
+  directories, so `**/*` can list `.gitignore` and `.github/`.
+
+### Fixed
+
+- The warning about a discarded `concat`/`sort`/... copy now also covers the last line of an
+  `each()`, `each_with_index()`, `times()` or other iterator block, whose value is ignored.
+- docs/api/crypto.md no longer says Strings are byte buffers.
+
 ## 1.4.0 — 2026-11-22
 
 What five dogfood applications ran short of: full-screen terminal programs, nonblocking TLS,

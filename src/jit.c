@@ -2734,7 +2734,7 @@ static bool builtin_operand_layout(DiamondOpCode opcode, bool *writes_dest, uint
             *shorts = 0; *bytes = 1; return true;
         case DIAMOND_OP_BASE64_DECODE: case DIAMOND_OP_BASE64_ENCODE: case DIAMOND_OP_CASE_HASH_SHAPE:
         case DIAMOND_OP_CHR: case DIAMOND_OP_DIGEST_SHA1: case DIAMOND_OP_DIGEST_SHA256:
-        case DIAMOND_OP_FIBER_NEW: case DIAMOND_OP_FILE_DELETE: case DIAMOND_OP_GZIP_COMPRESS:
+        case DIAMOND_OP_FIBER_NEW: case DIAMOND_OP_FILE_DELETE:
         case DIAMOND_OP_JSON_STRINGIFY: case DIAMOND_OP_PROCESS_RUN: case DIAMOND_OP_PROCESS_SPAWN:
         case DIAMOND_OP_SECURE_RANDOM_BYTES: case DIAMOND_OP_SECURE_RANDOM_HEX:
         case DIAMOND_OP_TENSOR_FROM_ARRAY: case DIAMOND_OP_TIME_AT: case DIAMOND_OP_TIME_PARSE:
@@ -2744,6 +2744,7 @@ static bool builtin_operand_layout(DiamondOpCode opcode, bool *writes_dest, uint
             *shorts = 1; return true;
         case DIAMOND_OP_FILE_JOIN:      /* dest, base, argc: reads base..base+argc-1 */
         case DIAMOND_OP_TIME_BUILD:     /* dest, base, mode */
+        case DIAMOND_OP_GZIP_COMPRESS:  /* dest, data, format */
             *shorts = 1; *bytes = 1; return true;
         case DIAMOND_OP_ARRAY_MIDDLE: case DIAMOND_OP_ARRAY_REST: case DIAMOND_OP_ARRAY_SUFFIX:
         case DIAMOND_OP_BCRYPT_HASH: case DIAMOND_OP_BCRYPT_VERIFY: case DIAMOND_OP_BITWISE_AND:

@@ -3482,6 +3482,41 @@ static void settle_pending_copies(Compiler *compiler,DiamondTokenKind statement_
     compiler->pending_copy_count=pending_before;
 }
 
+/* Does the `do` block at `block_start` belong to a call written `name() do`,
+ * where name is an iterator that never uses the block's value? A call with
+ * arguments, or without parentheses, is not recognised. */
+static bool block_owner_discards_value(const Compiler *compiler,size_t block_start) {
+    static const char *const discarding[]={"each","each_with_index","each_byte","each_char",
+        "each_line","each_key","each_value","each_pair","reverse_each","times"};
+    const char *source=compiler->source;
+    size_t end=block_start;
+    while(end>0&&(source[end-1]==' '||source[end-1]=='\t'))end--;
+    if(end<2||source[end-1]!=')'||source[end-2]!='(')return false;
+    end-=2;
+    size_t start=end;
+    while(start>0&&(isalnum((unsigned char)source[start-1])||source[start-1]=='_'))start--;
+    if(start==end||start==0||source[start-1]!='.')return false;
+    for(size_t index=0;index<sizeof discarding/sizeof discarding[0];index++) {
+        if(strlen(discarding[index])==end-start&&memcmp(discarding[index],source+start,end-start)==0)
+            return true;
+    }
+    return false;
+}
+
+/* Called when a block's body has been compiled: a discarded copy that was the
+ * body's last statement (recorded since `pending_before`) is reported when the
+ * block belongs to an iterator that ignores the block's value, as in
+ * `items.each() do |x| out.concat(x) end`. */
+void settle_block_copies(Compiler *compiler,size_t block_start,size_t pending_before) {
+    if(compiler->pending_copy_count<=pending_before)return;
+    if(!compiler->failed&&block_owner_discards_value(compiler,block_start)) {
+        for(size_t index=pending_before;index<compiler->pending_copy_count;index++)
+            report_discarded_copy(compiler,compiler->pending_copies[index].span,
+                compiler->pending_copies[index].method);
+        compiler->pending_copy_count=pending_before;
+    }
+}
+
 uint16_t compile_sequence(Compiler *compiler) {
     skip_newlines(compiler);
     uint16_t result = allocate_register(compiler);

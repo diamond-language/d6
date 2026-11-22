@@ -809,6 +809,18 @@ DiamondVmStatus outlined_file_path(DiamondVm *vm,const DiamondChunk *chunk,Diamo
         registers[dest]=DIAMOND_OBJECT(text);
         HELPER_DONE;
     }
+    if(selector==DIAMOND_FILE_PATH_PWD) {
+        VM_SANDBOX_GUARD("Dir.pwd", "filesystem");
+        char here[PATH_MAX];
+        if(getcwd(here,sizeof here)==nullptr) {
+            snprintf(vm->error,sizeof vm->error,"cannot read the working directory: %s",strerror(errno));
+            VM_RETURN(DIAMOND_VM_IO_ERROR);
+        }
+        DiamondString *text=allocate_string(vm,here,strlen(here));
+        if(text==nullptr)VM_RETURN(DIAMOND_VM_OUT_OF_MEMORY);
+        registers[dest]=DIAMOND_OBJECT(text);
+        HELPER_DONE;
+    }
     if(selector==DIAMOND_FILE_PATH_MKTMPDIR) {
         VM_SANDBOX_GUARD("Dir.mktmpdir", "filesystem");
         DiamondValue made=DIAMOND_NIL;
@@ -984,10 +996,11 @@ DiamondVmStatus outlined_file_path(DiamondVm *vm,const DiamondChunk *chunk,Diamo
             path_result=DIAMOND_BOOL(removed);
             break;
         }
-        case DIAMOND_FILE_PATH_GLOB:
+        case DIAMOND_FILE_PATH_GLOB: case DIAMOND_FILE_PATH_GLOB_HIDDEN:
             VM_SANDBOX_GUARD("Dir.glob", "filesystem");
             /* The Array is rooted in the destination register while it fills. */
-            path_status=dir_glob_helper(vm,path,second,&registers[dest]);
+            path_status=dir_glob_helper(vm,path,second,selector==DIAMOND_FILE_PATH_GLOB_HIDDEN,
+                &registers[dest]);
             if(path_status==DIAMOND_VM_OK)path_result=registers[dest];
             break;
         case DIAMOND_FILE_PATH_MTIME: {
@@ -4621,10 +4634,10 @@ __attribute__((noinline))
 DiamondVmStatus outlined_gzip_compress(DiamondVm *vm,const DiamondChunk *chunk,DiamondValue *registers,
         size_t depth,size_t *ip_ref) {
     size_t ip=*ip_ref;(void)depth;
-    uint16_t destination=0,data_register=0;
-    READ_SHORT(destination);READ_SHORT(data_register);
+    uint16_t destination=0,data_register=0;uint8_t format=0;
+    READ_SHORT(destination);READ_SHORT(data_register);READ_BYTE(format);
     const DiamondVmStatus compress_status=gzip_compress_helper(vm,
-        registers[data_register],&registers[destination]);
+        registers[data_register],format==1,&registers[destination]);
     VM_PROPAGATE(compress_status);HELPER_DONE;
 
 }

@@ -1589,25 +1589,25 @@ const DiamondMethod *lookup_method_cached(
 
 
 #ifndef DIAMOND_NO_ZLIB
-/* Gzip.compress(data) -- gzip-wrapped deflate via zlib (already linked
+/* Gzip.compress(data) and Zlib.deflate(data) (`zlib`) -- gzip- or zlib-wrapped deflate via zlib (already linked
  * for the outbound HTTP client's Accept-Encoding support), growing an
  * output buffer geometrically since a compressed size can't be predicted
  * exactly up front. `windowBits=15+16` requests a gzip (not raw
  * zlib-wrapped) header/trailer, matching what every real HTTP server
  * expects behind Content-Encoding: gzip. */
 DiamondVmStatus gzip_compress_helper(DiamondVm *vm,DiamondValue data_value,
-        DiamondValue *out_result) {
+        bool zlib,DiamondValue *out_result) {
     if(data_value.kind!=DIAMOND_VALUE_OBJECT||
        data_value.as.object->kind!=DIAMOND_OBJECT_STRING) {
         char actual[80];
         diamond_format_value_type(actual,sizeof actual,data_value);
         snprintf(vm->error,sizeof vm->error,
-            "Gzip.compress data must be a String, got %s",actual);
+            "%s data must be a String, got %s",zlib?"Zlib.deflate":"Gzip.compress",actual);
         return DIAMOND_VM_TYPE_ERROR;
     }
     const DiamondString *data=(const DiamondString *)data_value.as.object;
     z_stream stream={0};
-    if(deflateInit2(&stream,Z_DEFAULT_COMPRESSION,Z_DEFLATED,15+16,8,
+    if(deflateInit2(&stream,Z_DEFAULT_COMPRESSION,Z_DEFLATED,zlib?15:15+16,8,
             Z_DEFAULT_STRATEGY)!=Z_OK) {
         snprintf(vm->error,sizeof vm->error,"cannot initialize gzip compression");
         return DIAMOND_VM_PROGRAM_ERROR;
@@ -1742,8 +1742,8 @@ DiamondVmStatus gzip_decompress_helper(DiamondVm *vm,DiamondValue data_value,
 }
 #else
 DiamondVmStatus gzip_compress_helper(DiamondVm *vm,DiamondValue data_value,
-        DiamondValue *out) {
-    (void)data_value;(void)out;
+        bool zlib,DiamondValue *out) {
+    (void)data_value;(void)zlib;(void)out;
     snprintf(vm->error,sizeof vm->error,"Gzip is not compiled into this build");
     return DIAMOND_VM_TYPE_ERROR;
 }

@@ -3,9 +3,10 @@
 [API reference](index.md) · Previous: [Databases](database.md) · Next: [Tensor](tensor.md)
 
 Hashing, signing, encryption, random tokens, compression, Base64 and version
-strings. Strings are byte buffers, so binary input and output are plain
-Strings. The cryptography comes from OpenSSL, bcrypt from the system's
-libxcrypt and gzip from zlib.
+strings. Binary input and output are plain Strings: these functions read and
+write bytes, so use `bytesize()`, `byteslice()` and `getbyte()` on their
+results rather than the character methods. The cryptography comes from
+OpenSSL, bcrypt from the system's libxcrypt, and gzip and zlib from zlib.
 
 Checks that can fail on bad input in normal use (a wrong password, a forged
 signature, a tampered ciphertext) return `false` or `nil` instead of raising.
@@ -114,6 +115,24 @@ without bound.
 
 ```ruby
 Gzip.decompress(Gzip.compress("some text"), 1024)   # => "some text"
+```
+
+## Zlib
+
+The same compression with zlib's smaller wrapping, which git objects, PNG
+images and HTTP's `deflate` encoding use.
+
+### `Zlib.deflate(data) -> String`
+
+`data` compressed in zlib format.
+
+### `Zlib.inflate(data, max_size) -> String`
+
+Decompresses zlib or gzip data, with `Gzip.decompress`'s `max_size` limit.
+
+```ruby
+Zlib.deflate("some text").getbyte(0)                  # => 120
+Zlib.inflate(Zlib.deflate("some text"), 1024)       # => "some text"
 ```
 
 ## Base64

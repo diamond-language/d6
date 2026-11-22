@@ -25,4 +25,8 @@ p(relative(Dir.glob(File.join(root, "{a,a/b}/*.md")), start))
 p(Dir.glob("**/*.md", base: File.join(root, "a")))
 p(Dir.glob("*", base: File.join(root, "missing")))
 p(Dir.glob(File.join(root, "a/one.md")).length())
+
+p(Dir.glob("**/*.md", hidden: true, base: root).length())
+p(Dir.glob("x/*", base: root, hidden: false).length())
+p(Dir.pwd() == File.expand_path("."))
 Dir.delete_tree(root)

@@ -79,7 +79,7 @@ builtin_namespace_calls[]={
     {"PostgreSQL",parse_postgres_open_call},{"MySQL",parse_mysql_open_call},
     {"Time",parse_time_call},{"Process",parse_process_call},
     {"BCrypt",parse_bcrypt_call},{"Cipher",parse_cipher_call},
-    {"Gzip",parse_gzip_call},{"Base64",parse_base64_call},
+    {"Gzip",parse_gzip_call},{"Zlib",parse_zlib_call},{"Base64",parse_base64_call},
     {"SecureRandom",parse_secure_random_call},{"Digest",parse_digest_call},
     {"SemVer",parse_semver_call},
     {"HMAC",parse_hmac_call},{"ProgramBuilder",parse_program_builder_new_call},
