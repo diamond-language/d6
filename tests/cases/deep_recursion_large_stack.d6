@@ -1,0 +1,4 @@
+# Recursion far deeper than a thread's 150-frame budget: the CLI and every
+# `d6 build` binary run the program on a large stack.
+def depth(n: Int) -> Int = n == 0 ? 0 : 1 + depth(n - 1)
+puts(depth(3000))

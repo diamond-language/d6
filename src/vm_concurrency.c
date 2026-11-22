@@ -11,6 +11,7 @@
 #include <limits.h>
 #include <math.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -66,6 +67,67 @@ void diamond_set_thread_stack_size(size_t stack_bytes) {
         stack_bytes = DIAMOND_VM_THREAD_STACK_SIZE;
     diamond_thread_call_depth_limit = (size_t)DIAMOND_MAX_CALL_DEPTH *
         (stack_bytes / DIAMOND_VM_THREAD_STACK_SIZE);
+}
+
+/* diamond_run_on_large_stack: the interpreter recurses natively once per
+ * Diamond call, so how deep a program may recurse is bounded by its thread's
+ * stack, and a process's main thread has only the OS default (usually
+ * 8 MiB). `body` therefore runs on a thread with a much larger stack
+ * (address space only; pages are committed as recursion actually uses them),
+ * and the call-depth limit scales with it (diamond_set_thread_stack_size).
+ * DIAMOND_MAIN_STACK_MB overrides the size in MiB; 0 runs on the main thread.
+ * If the thread cannot be created, `body` runs on the main thread. */
+typedef struct LargeStackStart {
+    int (*body)(int, char **);
+    int argc;
+    char **argv;
+    size_t stack_bytes;
+    sigset_t signal_mask;
+    int result;
+} LargeStackStart;
+
+static void *large_stack_entry(void *argument) {
+    LargeStackStart *start = argument;
+    /* Signals the launching thread blocked so they would land here. */
+    pthread_sigmask(SIG_SETMASK, &start->signal_mask, nullptr);
+    diamond_set_thread_stack_size(start->stack_bytes);
+    start->result = start->body(start->argc, start->argv);
+    return nullptr;
+}
+
+int diamond_run_on_large_stack(int (*body)(int, char **), int argc, char **argv) {
+    size_t megabytes = 512;
+    const char *override = getenv("DIAMOND_MAIN_STACK_MB");
+    if (override != nullptr && override[0] != '\0') {
+        char *end = nullptr;
+        const unsigned long parsed = strtoul(override, &end, 10);
+        if (*end == '\0') megabytes = (size_t)parsed;
+    }
+    for (; megabytes > 8; megabytes /= 2) {
+        pthread_attr_t attributes;
+        if (pthread_attr_init(&attributes) != 0) break;
+        LargeStackStart start = {.body = body, .argc = argc, .argv = argv,
+            .stack_bytes = megabytes * 1024 * 1024};
+        pthread_t thread;
+        sigset_t all;
+        sigfillset(&all);
+        bool created = pthread_attr_setstacksize(&attributes, start.stack_bytes) == 0;
+        if (created) {
+            /* Blocked here, restored in the new thread: the new thread
+             * inherits this mask, and this one then keeps every signal
+             * blocked so process-directed ones are delivered to the thread
+             * running the program (and interrupt its blocking calls). */
+            pthread_sigmask(SIG_SETMASK, &all, &start.signal_mask);
+            created = pthread_create(&thread, &attributes, large_stack_entry, &start) == 0;
+            if (!created) pthread_sigmask(SIG_SETMASK, &start.signal_mask, nullptr);
+        }
+        pthread_attr_destroy(&attributes);
+        if (created) {
+            pthread_join(thread, nullptr);
+            return start.result;
+        }
+    }
+    return body(argc, argv);
 }
 
 int create_vm_thread(pthread_t *handle,

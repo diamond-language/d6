@@ -2466,6 +2466,12 @@ struct DiamondVm {
  * threads the VM creates keep their own 8 MiB stacks and the default limit. */
 void diamond_set_thread_stack_size(size_t stack_bytes);
 
+/* Runs body(argc, argv) on a thread with a large native stack (512 MiB of
+ * address space, or DIAMOND_MAIN_STACK_MB) and returns its result, so programs
+ * recurse as deep as that stack allows. The `d6` CLI and every `d6 build`
+ * binary start this way. */
+int diamond_run_on_large_stack(int (*body)(int, char **), int argc, char **argv);
+
 void diamond_vm_init(DiamondVm *vm);
 /* Apply the same opt-in JIT environment settings to interpreted and
  * standalone programs after diamond_vm_init. */

@@ -60,7 +60,7 @@ echo "runtime workflows: cold/hot bytecode passed"
 # Compiled entry points must preserve the same semantics and native services.
 # AOT is part of the integration target, rather than every ordinary unit run.
 if [[ ${1:-} == --aot ]]; then
-    for name in runtime_workflow_control runtime_workflow_json sqlite3_workflow_recovery; do
+    for name in runtime_workflow_control runtime_workflow_json sqlite3_workflow_recovery deep_recursion_large_stack; do
         if ! "$diamond" build "tests/cases/$name.d6" -o "$work/app" > "$work/build.log" 2>&1; then
             echo "FAIL standalone build $name" >&2
             cat "$work/build.log" >&2
