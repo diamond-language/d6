@@ -506,7 +506,7 @@ DIAMOND_INTERNAL DiamondVmStatus file_path_expand_helper(DiamondVm *vm,const Dia
 DIAMOND_INTERNAL DiamondVmStatus file_path_extname_helper(DiamondVm *vm,const DiamondString *path, DiamondValue *out);
 DIAMOND_INTERNAL DiamondVmStatus file_path_join_helper(DiamondVm *vm,const DiamondValue *parts, size_t count,DiamondValue *out);
 DIAMOND_INTERNAL DiamondVmStatus dir_glob_helper(DiamondVm *vm,const DiamondString *pattern,
-    const DiamondString *base,DiamondValue *result);
+    const DiamondString *base,bool hidden,DiamondValue *result);
 DIAMOND_INTERNAL DiamondVmStatus file_publish_helper(DiamondVm *vm,const DiamondString *path, const DiamondString *bytes);
 DIAMOND_INTERNAL DiamondVmStatus file_read_helper(DiamondVm *vm,const DiamondString *path, DiamondValue *result);
 DIAMOND_INTERNAL DiamondVmStatus file_rename_helper(DiamondVm *vm,const DiamondString *from, const DiamondString *to);
@@ -1389,7 +1389,7 @@ DIAMOND_INTERNAL DiamondVmStatus aes_gcm_decrypt_helper(DiamondVm *vm,DiamondVal
         DiamondValue blob_value,DiamondValue *out_result);
 
 DIAMOND_INTERNAL DiamondVmStatus gzip_compress_helper(DiamondVm *vm,DiamondValue data_value,
-        DiamondValue *out_result);
+        bool zlib,DiamondValue *out_result);
 
 DIAMOND_INTERNAL DiamondVmStatus gzip_decompress_helper(DiamondVm *vm,DiamondValue data_value,
         DiamondValue max_size_value,DiamondValue *out_result);

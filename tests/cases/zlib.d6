@@ -1,0 +1,30 @@
+# Zlib.deflate writes zlib's wrapping (0x78 first), which git objects use;
+# Zlib.inflate reads it back, and reads gzip as Gzip.decompress does.
+data = "hello world " * 200
+packed = Zlib.deflate(data)
+puts(packed.getbyte(0))
+puts(packed.bytesize() < data.bytesize())
+puts(Zlib.inflate(packed, 1000000) == data)
+puts(Zlib.inflate(Zlib.deflate(""), 10) == "")
+binary = [0, 255, 128, 10].pack("C*") * 50
+puts(Zlib.inflate(Zlib.deflate(binary), 1000) == binary)
+puts(Zlib.inflate(Gzip.compress("both"), 10))
+puts(Gzip.decompress(Zlib.deflate("either"), 10))
+
+# git's loose object for the blob "hello\n".
+loose = ["78014bcac94f523063c848cdc9c9e702001dc50414"].pack("H*")
+puts(Zlib.inflate(loose, 100).inspect())
+
+begin
+  Zlib.inflate(packed, 10)
+  puts("no raise")
+rescue error: IOError
+  puts("size cap raised")
+end
+
+begin
+  Zlib.deflate(42)
+  puts("no raise")
+rescue error: TypeError
+  puts(error.message())
+end

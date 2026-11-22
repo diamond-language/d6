@@ -1,0 +1,6 @@
+begin
+  Dir.pwd()
+  "escaped"
+rescue error: SandboxError
+  error.message()
+end

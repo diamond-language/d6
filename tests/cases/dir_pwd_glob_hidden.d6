@@ -1,0 +1,17 @@
+# Dir.pwd is the working directory, absolute; Dir.glob's hidden: true lets
+# patterns match dotfiles and enter hidden directories.
+puts(Dir.pwd() == File.expand_path("."))
+puts(Dir.pwd().start_with?("/"))
+
+root = Dir.mktmpdir("glob-hidden-")
+Dir.mkdir_p(File.join(root, ".github/workflows"))
+Dir.mkdir_p(File.join(root, "src"))
+File.write(File.join(root, ".gitignore"), "x\n")
+File.write(File.join(root, ".github/workflows/ci.yml"), "x\n")
+File.write(File.join(root, "src/main.d6"), "x\n")
+File.write(File.join(root, "README"), "x\n")
+puts(Dir.glob("**/*", base: root).inspect())
+puts(Dir.glob("**/*", base: root, hidden: true).inspect())
+puts(Dir.glob("*", hidden: true, base: root).inspect())
+puts(Dir.glob("*", hidden: false, base: root).inspect())
+Dir.delete_tree(root)

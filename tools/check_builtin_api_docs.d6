@@ -205,6 +205,7 @@ NAMESPACES = [
   ["crypto.md", "Cipher", "parse_cipher_call"],
   ["crypto.md", "SecureRandom", "parse_secure_random_call"],
   ["crypto.md", "Gzip", "parse_gzip_call"],
+  ["crypto.md", "Zlib", "parse_zlib_call"],
   ["crypto.md", "Base64", "parse_base64_call"],
   ["crypto.md", "SemVer", "parse_semver_call"],
   ["tensor.md", "Tensor", "parse_tensor_call"]

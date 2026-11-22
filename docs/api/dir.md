@@ -32,7 +32,7 @@ even to a directory) raises `IOError`.
 The names in a directory, without `.` and `..`, in no particular order. It does
 not recurse.
 
-### `Dir.glob(pattern, base: nil) -> Array[String]`
+### `Dir.glob(pattern, base: nil, hidden: false) -> Array[String]`
 
 The paths that match a shell-style pattern, sorted. `*` and `?` match within one name,
 `[abc]`, `[a-z]` and `[!a]` match one character, `{md,txt}` matches either word, and a
@@ -40,10 +40,14 @@ whole `**` segment matches any number of directories (`**/*.md` is every `.md` f
 below the current directory). A pattern ending in `/` matches directories only, and `\`
 escapes the next character.
 
-A name that starts with `.` matches only a segment that starts with a `.`. `**` does not
-enter hidden directories or follow a symlink to a directory. Results are written the way
-the pattern wrote them; with `base:`, the pattern is relative to that directory and so are
+Unless `hidden: true` is given, a name that starts with `.` matches only a segment that
+starts with a `.`, and `**` does not enter hidden directories. `**` never follows a
+symlink to a directory. Results are written the way the pattern wrote them; with `base:`, the pattern is relative to that directory and so are
 the results. A missing or unreadable directory just contributes no matches.
+
+`hidden: true` (a literal `true` or `false`) lets `*`, `?` and `**` match names that
+start with `.` as well, so `Dir.glob("**/*", hidden: true)` lists `.gitignore` and the
+files below `.github/`.
 
 <!-- doc-check: skip -->
 ```ruby
@@ -67,6 +71,10 @@ Creates the directory and any missing parents, like `mkdir -p`, and returns
 Creates a new directory only you can read (mode `0o700`) under `$TMPDIR`, or
 `/tmp`, named `prefix` plus six random characters, and returns its path. Remove it
 with `Dir.delete_tree` when you are done. A prefix with a `/` raises `TypeError`.
+
+### `Dir.pwd() -> String`
+
+The working directory, as an absolute path.
 
 ### `Dir.sync(path) -> String`
 

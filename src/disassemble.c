@@ -71,6 +71,8 @@ static const char *file_path_function_name(uint8_t id) {
         case DIAMOND_FILE_PATH_TERMINAL_RAW: return "terminal_raw";
         case DIAMOND_FILE_PATH_TERMINAL_WINSIZE: return "winsize";
         case DIAMOND_FILE_PATH_STDIN_READ: return "readpartial";
+        case DIAMOND_FILE_PATH_PWD: return "pwd";
+        case DIAMOND_FILE_PATH_GLOB_HIDDEN: return "glob_hidden";
         case DIAMOND_FILE_PATH_GLOB: return "glob";
         default: return "<invalid file path function>";
     }
@@ -1617,7 +1619,12 @@ static bool disassemble_natives_and_debugging(DisassemblyWalk *walk) {
         case DIAMOND_OP_CIPHER_DECRYPT:
             offset=three_registers(stream,chunk,"CIPHER_DECRYPT",offset,&valid);break;
         case DIAMOND_OP_GZIP_COMPRESS:
-            offset=two_registers(stream,chunk,"GZIP_COMPRESS",offset,&valid);break;
+            if(!require_bytes(stream,chunk,offset,6)){valid=false;offset=chunk->code_count;break;}
+            out_printf(stream,"%-18s r%u, r%u, zlib=%u\n","GZIP_COMPRESS",
+                checked_register(chunk,stream,read_operand(chunk,offset+1),&valid),
+                checked_register(chunk,stream,read_operand(chunk,offset+3),&valid),
+                chunk->code[offset+5]);
+            offset+=6;break;
         case DIAMOND_OP_GZIP_DECOMPRESS:
             offset=three_registers(stream,chunk,"GZIP_DECOMPRESS",offset,&valid);break;
         case DIAMOND_OP_BASE64_ENCODE:

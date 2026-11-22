@@ -1,0 +1,7 @@
+true
+true
+["README", "src", "src/main.d6"]
+[".github", ".github/workflows", ".github/workflows/ci.yml", ".gitignore", "README", "src", "src/main.d6"]
+[".github", ".gitignore", "README", "src"]
+["README", "src"]
+true

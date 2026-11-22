@@ -200,7 +200,9 @@ Areas worth considering:
 - smaller application-driven collection and string conveniences;
 - calendar helpers that fit the existing UTC/local/fixed-offset model;
 - explicit metaprogramming operations with inspectable behavior;
-- better ways to express common typed callback and data-shaping patterns.
+- better ways to express common typed callback and data-shaping patterns;
+- typed variadic parameters (`def ok(*args: String)` is a compile error today), with each
+  element checked like a typed parameter. The twig dogfood app wanted them for test helpers.
 
 ### Non-x86_64 architecture validation
 

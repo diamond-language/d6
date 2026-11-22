@@ -1087,6 +1087,12 @@ printf 'def rows(list: Array, more: Array, flag: Bool) -> Array\n  if flag\n    
 [[ "$("$diamond_abs" "$warn_dir/nested.d6" 2>"$warn_dir/nested_stderr")" == 2* ]]
 grep -q "nested.d6:3:5: warning: concat() returns a new Array" "$warn_dir/nested_stderr"
 [[ "$(grep -c "warning:" "$warn_dir/nested_stderr")" == 1 ]]
+# The last line of an each() block is the block's value, which each ignores, so
+# a copy there is thrown away too; in a map() block the value is used.
+printf 'out = []\n[[1], [2]].each() do |part|\n  out.concat(part)\nend\nkept = [[1], [2]].map() do |part|\n  out.concat(part)\nend\nputs(kept.length())\n' >"$warn_dir/block.d6"
+[[ "$("$diamond_abs" "$warn_dir/block.d6" 2>"$warn_dir/block_stderr")" == 2* ]]
+grep -q "block.d6:3:3: warning: concat() returns a new Array" "$warn_dir/block_stderr"
+[[ "$(grep -c "warning:" "$warn_dir/block_stderr")" == 1 ]]
 # A reader written without parentheses is a method reference: compared with
 # nil, used as a condition or interpolated, it is a slip for a call. Passing
 # or assigning one is not.

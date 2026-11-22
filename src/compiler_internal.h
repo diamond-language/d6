@@ -941,6 +941,7 @@ DIAMOND_INTERNAL uint16_t parse_time_call(Compiler *compiler);
 DIAMOND_INTERNAL uint16_t parse_process_call(Compiler *compiler);
 DIAMOND_INTERNAL uint16_t parse_bcrypt_call(Compiler *compiler);
 DIAMOND_INTERNAL uint16_t parse_gzip_call(Compiler *compiler);
+DIAMOND_INTERNAL uint16_t parse_zlib_call(Compiler *compiler);
 DIAMOND_INTERNAL uint16_t parse_tensor_call(Compiler *compiler);
 DIAMOND_INTERNAL uint16_t parse_base64_call(Compiler *compiler);
 DIAMOND_INTERNAL uint16_t parse_cipher_call(Compiler *compiler);
@@ -1086,6 +1087,7 @@ DIAMOND_INTERNAL DiamondInterface *diamond_program_interface_slot(DiamondProgram
 DIAMOND_INTERNAL DiamondModule *diamond_program_module_slot(DiamondProgram *program,size_t index);
 DIAMOND_INTERNAL void diamond_program_free(DiamondProgram *program);
 DIAMOND_INTERNAL void diamond_program_init(DiamondProgram *program);
+DIAMOND_INTERNAL void settle_block_copies(Compiler *compiler,size_t block_start,size_t pending_before);
 DIAMOND_INTERNAL bool diamond_compile_impl(const char *source, DiamondProgram *program,
                                  const DiamondProgram *template,
                                  bool debug_mode,
