@@ -5,7 +5,15 @@ The corrected A record is **142.93.192.149**. External health and catalog
 requests succeeded. Since 2026-09-25 nginx terminates TLS with certbot
 certificates (see "Proxy and certificates" below); Caddy was retired.
 
-Runtime revision: `5892351a8181daae50cbbc68b5ba677ef2ceff7d` (tag v1.3.1 on `main`, deployed
+Runtime revision: `189b9974c4257665a6d6de5f736ee82aa0bee692` (tag v1.4.0 on `main`, deployed
+2026-11-22 UTC (08:24) with `tools/deploy_registry.sh --no-verify --revision=v1.4.0` after its dry
+run; the upgrade check reported REQUIRED, with 38 runtime files changed). It went first so that the
+registry knew the Cutfile `d6` range before any cut carrying one was published. Health ok; the
+verified pre-upgrade snapshot is `~/diamond-registry-backups/cutbackup-2026-11-22-002138-pre-189b9974`.
+Then 12 cuts were published (below), and `tools/verify_registry_launch.d6` passed for all 26 public
+cuts. `?d6=1.3.1` resolves http to 0.2.7 and `?d6=1.4.0` to 0.2.8.
+
+Previous runtime revision: `5892351a8181daae50cbbc68b5ba677ef2ceff7d` (tag v1.3.1 on `main`, deployed
 2026-11-21 UTC (04:05) with `tools/deploy_registry.sh --revision=v1.3.1` after its dry run; the
 upgrade check reported REQUIRED because the http code and `tools/facet.c` the registry uses
 changed, plus 21 runtime files). Health ok, `DIAMOND_JIT=1` kept, and all 23 public cuts passed
@@ -162,6 +170,15 @@ published sha256s (markdown `f8e0532e8c706dc577c1ce3d3057349c1ee916342c9d736de4f
 mustache `b7419825a206c439f66126123b0ecde9b9a1fe20563e947676eca0b4732fce05`) match
 `docs/registry-launch-inventory.json`, and `tools/verify_registry_launch.d6` passed for all 25
 public cuts. No redeploy: the registry uses neither.
+
+cookies 0.2.7, csv 0.1.1, div 0.3.4, gremlin 0.5.8, html 0.1.1, http 0.2.8, redis 0.2.5,
+registry 0.3.3, toml 0.1.2 and websocket 0.2.5 (fixed for 1.4.0's character Strings, each with
+`"d6": ">=1.4.0"`), graphql 0.3.7 and terminal 0.1.0 (new) were published on 2026-11-22 UTC from
+the v1.4.0 tag, right after the registry upgrade above and its snapshot, from a seed trimmed with
+`tools/trim_seed_to.d6`. One 30-minute credential for `diamond-language` was scoped to the 12
+`publish:` names (id 51, revoked afterwards). Every published sha256 matches
+`docs/registry-launch-inventory.json`. `tools/publish_registry_seed.d6` needed a fix first: it
+compared archive sizes and sent Content-Length with `length()`, which counts characters from 1.4.0.
 
 Previously `0e482f26c56854c4c41c6c82d093ad04f6569a21` (v1.0.0-rc4, deployed 2026-11-12 UTC (2026-11-11 Pacific)
 with `tools/deploy_registry.sh --revision=v1.0.0-rc4 --force` after its dry run).
