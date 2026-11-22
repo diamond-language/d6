@@ -19,6 +19,14 @@
       "version": "0.21.4"
     },
     {
+      "archive": "cancellation.tar",
+      "dependencies": {},
+      "name": "cancellation",
+      "sha256": "9dc2cd0dcf3796761659482fe9362074619d6708301aa9a7dda849f2a5eba1f4",
+      "size": 20992,
+      "version": "0.7.2"
+    },
+    {
       "archive": "cookies.tar",
       "dependencies": {},
       "name": "cookies",

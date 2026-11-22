@@ -180,6 +180,14 @@ the v1.4.0 tag, right after the registry upgrade above and its snapshot, from a 
 `docs/registry-launch-inventory.json`. `tools/publish_registry_seed.d6` needed a fix first: it
 compared archive sizes and sent Content-Length with `length()`, which counts characters from 1.4.0.
 
+cancellation 0.7.2, first published (the threads guide recommends it, and the kiln dogfood app
+needed it from the registry), was published on 2026-11-22 UTC from main `7329d94a` with a
+30-minute credential for `diamond-language` scoped to `publish:cancellation` (id 52, revoked
+afterwards). No snapshot was taken first; a first publication only adds a cut. The published
+sha256 `9dc2cd0dcf3796761659482fe9362074619d6708301aa9a7dda849f2a5eba1f4` matches
+`docs/registry-launch-inventory.json`, and `tools/verify_registry_launch.d6` passed for all 27
+public cuts. No redeploy: the registry doesn't use cancellation.
+
 Previously `0e482f26c56854c4c41c6c82d093ad04f6569a21` (v1.0.0-rc4, deployed 2026-11-12 UTC (2026-11-11 Pacific)
 with `tools/deploy_registry.sh --revision=v1.0.0-rc4 --force` after its dry run).
 The fresh snapshot at
