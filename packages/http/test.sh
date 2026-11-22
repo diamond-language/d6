@@ -523,11 +523,15 @@ preserved = http_put("http://127.0.0.1:$redirect_port/preserve", "keepme", {}, {
 puts(preserved["body"])
 relative = http_get("http://127.0.0.1:$redirect_port/docs/old", {}, {"follow_redirects": true})
 puts(relative["body"])
+base = http_parse_url("http://example.test/items?page=2")
+puts(http_resolve_location(base, "#details"))
+puts(http_resolve_location(base, "?next=http://other.test"))
+puts(http_parse_url("http://example.test?next=/items")["path"])
 CLIENTEOF
 )")"
 kill "$redirect_pid" 2>/dev/null || true
 wait "$redirect_pid" 2>/dev/null || true
-[[ "$redirect_response" == $'302\n200\nredirected\npreserved:keepme\nredirected\nnil' ]]
+[[ "$redirect_response" == $'302\n200\nredirected\npreserved:keepme\nredirected\nhttp://example.test/items?page=2\nhttp://example.test/items?next=http://other.test\n/?next=/items\nnil' ]]
 rm -f "$redirect_out"
 
 # Client: HttpSession's cookie jar (a Set-Cookie value comes back on

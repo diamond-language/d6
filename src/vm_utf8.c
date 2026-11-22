@@ -20,6 +20,9 @@ size_t utf8_char_size(const char *chars,size_t length,size_t at) {
     else if(lead>=0xF0&&lead<=0xF4)size=4;
     else return 1;
     if(at+size>length)return 1;
+    const unsigned char second=(unsigned char)chars[at+1];
+    if((lead==0xE0&&second<0xA0)||(lead==0xED&&second>=0xA0)||
+       (lead==0xF0&&second<0x90)||(lead==0xF4&&second>=0x90))return 1;
     for(size_t index=1;index<size;index++) {
         const unsigned char next=(unsigned char)chars[at+index];
         if(next<0x80||next>0xBF)return 1;
@@ -62,8 +65,8 @@ bool string_is_ascii(const DiamondString *string) {
 
 /* The last character position looked up, per thread: a scan that steps through a
  * non-ASCII String (s[i], slice(i, 1), index_of(x, i)) walks on from there instead
- * of from the start. Keyed by the String's address, so it is dropped whenever any
- * collector sweeps (the only time an address can be reused): `epoch` counts sweeps. */
+ * of from the start. Keyed by the String's address, so collection and VM
+ * teardown invalidate the cursor before an address can be reused. */
 typedef struct {
     const DiamondString *string;
     uint64_t epoch;

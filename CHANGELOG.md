@@ -27,6 +27,13 @@ come only in minor releases, marked **Breaking** here.
 
 ### Fixed
 
+- HTTP redirects preserve the request query for fragment-only locations and
+  resolve query-only locations containing URLs against the original request.
+- `JSON.each` and `JSON.parse_all` require whitespace between values.
+- String character operations count malformed UTF-8 bytes individually, and
+  destroying a VM clears cached character offsets for its strings.
+- A `break` from a block passed through a keyword or spread call resumes after
+  the call, including calls through a Callable and to constructors.
 - A `break` in a block passed to a method on a receiver of unknown type resumes
   after the call.
 

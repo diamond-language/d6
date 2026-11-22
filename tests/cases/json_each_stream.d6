@@ -10,6 +10,17 @@ rescue error: JSONError
   puts("error: #{error.message()}")
 end
 
+begin
+  JSON.each("truefalse") do |value| p(value) end
+rescue error: JSONError
+  puts(error.message())
+end
+begin
+  JSON.parse_all("{}[]")
+rescue error: JSONError
+  puts(error.message())
+end
+
 def nested_in_fiber()
   begin
     JSON.parse("[" * 500 + "]" * 500)

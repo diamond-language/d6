@@ -7,6 +7,9 @@
 1
 2
 error: expected string key in object
+true
+expected whitespace between JSON values at position 4
+expected whitespace between JSON values at position 2
 "too deep"
 1
 1
