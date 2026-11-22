@@ -587,11 +587,17 @@ uint16_t load_current_block(Compiler *compiler) {
     return block;
 }
 
+/* The type set of any Callable at all. A set that also names a return type
+ * or parameter types (a block literal's inferred signature) is narrower and
+ * must not be reused: a `yield` checking its block against `Callable ->
+ * Array` rejected every block that wasn't known to return an Array. */
 uint16_t callable_type_set_index(Compiler *compiler) {
     for(size_t index=0;index<compiler->function->type_set_count;index++) {
         const DiamondTypeSet *set=&compiler->function->type_sets[index];
         if(set->count==1&&set->members[0].id==DIAMOND_TYPE_CALLABLE&&
-           set->members[0].callable_arity==UINT8_MAX)
+           set->members[0].callable_arity==UINT8_MAX&&
+           set->members[0].callable_return_set==DIAMOND_NO_TYPE_SET&&
+           !set->members[0].callable_parameters_typed)
             return (uint16_t)index;
     }
     if(!reserve_type_sets(compiler,1))return 0;
