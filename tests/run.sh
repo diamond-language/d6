@@ -1104,6 +1104,10 @@ printf 'class Box\n  attr_reader items: Array[Int]\n  def initialize()\n    @ite
 "$diamond_abs" "$warn_dir/member.d6" >/dev/null 2>"$warn_dir/member_stderr"
 grep -q "member.d6:10:7: warning: 'items' without parentheses is a method reference, which has no 'push'" "$warn_dir/member_stderr"
 [[ $(grep -c warning "$warn_dir/member_stderr") == 1 ]]
+# JSON nesting in the main program goes as deep as its call-depth budget,
+# far past the 150 a fiber or thread allows.
+printf 'deep = "[" * 3000 + "]" * 3000\nputs(JSON.stringify(JSON.parse(deep)).length())\n' >"$warn_dir/json_deep.d6"
+[[ $("$diamond_abs" "$warn_dir/json_deep.d6" | head -1) == 6000 ]]
 # A reader written without parentheses is a method reference: compared with
 # nil, used as a condition or interpolated, it is a slip for a call. Passing
 # or assigning one is not.

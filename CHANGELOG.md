@@ -15,6 +15,8 @@ come only in minor releases, marked **Breaking** here.
 - `Zlib.deflate(data)` and `Zlib.inflate(data, max_size)`: compression in zlib's wrapping,
   which git objects, PNG and HTTP's `deflate` use. `Gzip.compress` wrote only gzip.
 - `Dir.pwd()`, the working directory.
+- `JSON.each(source) do |value| ... end` and `JSON.parse_all(source)` read a stream of JSON
+  values separated by whitespace, such as JSON Lines. `JSON.parse` still takes exactly one.
 - A struct can extend a class with no fields and no `initialize`, such as a `sealed class`
   naming the kind, so each variant of a sealed hierarchy can be a one-line struct.
 - `Dir.glob(pattern, hidden: true)` also matches names that start with `.` and enters hidden
@@ -43,6 +45,8 @@ come only in minor releases, marked **Breaking** here.
 - A `do` block on a method call that skipped a defaulted parameter failed with "invalid
   bytecode" when the caller's first parameter was an instance.
 - `f(x, &block, y)` is a compile error: a forwarded block must come last.
+- JSON nesting may go as deep as the program can recurse (about 9,600 levels in the main
+  program) instead of 150, and going past it raises `JSONError` rather than a stack overflow.
 - A `case` over a sealed class with more than 8 direct subclasses is checked for exhaustiveness
   (up to 256); it was silently left unchecked.
 - A keyword call on another instance, `other.step(1, by: 2)`, could reach a private method.

@@ -1,0 +1,12 @@
+1
+[2, 3]
+{"a": 4}
+"five"
+[true, nil, 2.5, "héllo"]
+[]
+1
+2
+error: expected string key in object
+"too deep"
+1
+1

@@ -43,20 +43,31 @@ typedef struct JsonParser {
     const char *source;
     size_t length;
     size_t pos;
-    /* Unlike ordinary Diamond-level recursion (run_chunk's own `depth`,
-     * bounded by DIAMOND_MAX_CALL_DEPTH), array/object nesting here
-     * recurses directly in C with no depth accounting at all otherwise
-     * -- a real, not hypothetical, gap for a corpus-loading parser
-     * specifically: deeply nested real-world JSON would crash the whole
-     * process via a genuine C stack overflow instead of raising a clean
-     * SystemStackError the way every other unbounded-recursion path in
-     * this VM already does. Reuses DIAMOND_MAX_CALL_DEPTH itself rather
-     * than a separate constant: this parser's own per-level C stack
-     * frames are smaller than run_chunk's own (no register file, no
-     * opcode dispatch), so the same bound that's already empirically
-     * proven safe there is safe here too. */
+    /* Array/object nesting recurses in C, so it is bounded like Diamond
+     * calls: max_depth is the call-depth budget the caller has left (see
+     * json_depth_budget). A level's C frame is smaller than run_chunk's, so
+     * a bound that is safe for calls is safe here. */
     size_t depth;
+    size_t max_depth;
 } JsonParser;
+
+/* How many levels of nesting the parser and writer may recurse: what is left
+ * of this thread's call-depth limit (diamond_call_depth_limit, ~9,600 on the
+ * main thread) below `call_depth`, but never fewer than the 150 every thread
+ * and fiber has always allowed (a level's C frame is a fraction of a call's,
+ * so that much fits on any stack a call can still run on). */
+static size_t json_depth_budget(const DiamondVm *vm,size_t call_depth) {
+    const size_t limit=diamond_call_depth_limit(vm);
+    const size_t floor=(size_t)DIAMOND_MAX_CALL_DEPTH;
+    const size_t left=limit>call_depth?limit-call_depth:0;
+    return left>floor?left:floor;
+}
+
+static DiamondVmStatus json_too_deep(DiamondVm *vm,size_t max_depth) {
+    snprintf(vm->error,sizeof vm->error,
+        "JSON nested more than %zu levels deep",max_depth);
+    return DIAMOND_VM_JSON_ERROR;
+}
 
 static DiamondVmStatus json_parse_value(JsonParser *parser,DiamondValue *out);
 
@@ -332,7 +343,7 @@ static DiamondVmStatus json_parse_array_body(JsonParser *parser,DiamondValue *ou
  * flat array/object never trips this regardless of its element count --
  * only genuine nesting depth does. */
 static DiamondVmStatus json_parse_array(JsonParser *parser,DiamondValue *out) {
-    if(parser->depth>=DIAMOND_MAX_CALL_DEPTH)return DIAMOND_VM_STACK_OVERFLOW;
+    if(parser->depth>=parser->max_depth)return json_too_deep(parser->vm,parser->max_depth);
     parser->depth++;
     const DiamondVmStatus status=json_parse_array_body(parser,out);
     parser->depth--;
@@ -393,7 +404,7 @@ static DiamondVmStatus json_parse_object_body(JsonParser *parser,DiamondValue *o
 }
 
 static DiamondVmStatus json_parse_object(JsonParser *parser,DiamondValue *out) {
-    if(parser->depth>=DIAMOND_MAX_CALL_DEPTH)return DIAMOND_VM_STACK_OVERFLOW;
+    if(parser->depth>=parser->max_depth)return json_too_deep(parser->vm,parser->max_depth);
     parser->depth++;
     const DiamondVmStatus status=json_parse_object_body(parser,out);
     parser->depth--;
@@ -423,8 +434,9 @@ static DiamondVmStatus json_parse_value(JsonParser *parser,DiamondValue *out) {
  * JSONCodec#parse's own "parsed = parse_value(...); pos =
  * skip_whitespace(...); pos != length -> error" shape exactly. */
 DiamondVmStatus json_parse_document(DiamondVm *vm,const char *source,
-        size_t length,DiamondValue *out) {
-    JsonParser parser={.vm=vm,.source=source,.length=length,.pos=0};
+        size_t length,size_t call_depth,DiamondValue *out) {
+    JsonParser parser={.vm=vm,.source=source,.length=length,.pos=0,
+        .max_depth=json_depth_budget(vm,call_depth)};
     const DiamondVmStatus status=json_parse_value(&parser,out);
     if(status!=DIAMOND_VM_OK)return status;
     json_skip_whitespace(&parser);
@@ -432,6 +444,26 @@ DiamondVmStatus json_parse_document(DiamondVm *vm,const char *source,
         snprintf(vm->error,sizeof vm->error,"trailing content after JSON value");
         return DIAMOND_VM_JSON_ERROR;
     }
+    return DIAMOND_VM_OK;
+}
+
+/* One value of a whitespace-separated stream, starting at byte `offset`
+ * (JSON.each): nil when only whitespace is left, else [value, the byte
+ * offset after it]. Byte offsets stay inside JSON.each. */
+DiamondVmStatus json_parse_next(DiamondVm *vm,const char *source,size_t length,
+        size_t offset,size_t call_depth,DiamondValue *out) {
+    JsonParser parser={.vm=vm,.source=source,.length=length,.pos=offset,
+        .max_depth=json_depth_budget(vm,call_depth)};
+    json_skip_whitespace(&parser);
+    if(parser.pos>=parser.length) {*out=DIAMOND_NIL;return DIAMOND_VM_OK;}
+    DiamondValue value=DIAMOND_NIL;
+    const DiamondVmStatus status=json_parse_value(&parser,&value);
+    if(status!=DIAMOND_VM_OK)return status;
+    if(!gc_protect(vm,value))return DIAMOND_VM_OUT_OF_MEMORY;
+    const DiamondValue pair[2]={value,DIAMOND_INT((int64_t)parser.pos)};
+    DiamondArray *result=allocate_array(vm,pair,2);
+    if(result==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
+    *out=DIAMOND_OBJECT(result);
     return DIAMOND_VM_OK;
 }
 
@@ -625,7 +657,8 @@ static DiamondVmStatus json_write_value(JsonWriter *writer,DiamondValue value) {
             "cannot convert this value to JSON");
         return DIAMOND_VM_JSON_ERROR;
     }
-    if(writer->nesting>=DIAMOND_MAX_CALL_DEPTH)return DIAMOND_VM_STACK_OVERFLOW;
+    const size_t max_depth=json_depth_budget(writer->vm,writer->call_depth);
+    if(writer->nesting>=max_depth)return json_too_deep(writer->vm,max_depth);
     writer->nesting++;
     DiamondVmStatus status=DIAMOND_VM_OK;
     if(object->kind==DIAMOND_OBJECT_ARRAY) {
