@@ -1,0 +1,50 @@
+# Tests for the terminal cut. `bash test.sh`, or `d6 test/terminal_test.d6`.
+# Screen needs a real terminal, so only its pieces that don't are checked here;
+# docs/internal/terminal-testing.md covers trying it by hand in tmux.
+
+require "../lib/terminal"
+
+STATS = {"checks" => 0, "failures" => 0}
+
+def check(name: String, expected, actual)
+  STATS["checks"] += 1
+  return if actual == expected
+  STATS["failures"] += 1
+  puts("FAIL #{name}")
+  puts("  expected: #{expected.inspect()}")
+  puts("  actual:   #{actual.inspect()}")
+end
+
+keys = Terminal::Keys.new()
+check("a key and the start of a sequence", ["a"], keys.feed("a\e["))
+check("the rest of it, then Delete", ["up", "delete"], keys.feed("A\e[3~"))
+check("half a character waits", [], keys.feed("\xE6\x97"))
+check("the rest of it, and control keys", ["日", "enter", "ctrl-c", "backspace"], keys.feed("\xA5\r\x03\x7F"))
+check("page keys and shift-tab", ["page-up", "page-down", "shift-tab"], keys.feed("\e[5~\e[6~\e[Z"))
+check("a lone ESC waits", [], keys.feed("\e"))
+check("and is Escape once nothing follows", ["escape"], keys.flush())
+check("Alt-x is Escape then x", ["escape", "x"], keys.feed("\ex"))
+check("nothing is left over", false, keys.pending?())
+
+check("fit pads", "ab   ", Terminal::Cells.fit("ab", 5))
+check("fit cuts with an ellipsis", "日本… ", Terminal::Cells.fit("日本語です", 6))
+check("fit counts columns", 6, Terminal::Cells.fit("日本語です", 6).display_width())
+check("fit of nothing", "", Terminal::Cells.fit("abc", 0))
+check("wrap at spaces", ["ab cd", "ef"], Terminal::Cells.wrap("ab cd ef", 5))
+check("wrap inside a long word", ["abcde", "fg"], Terminal::Cells.wrap("abcdefg", 5))
+check("wrap wide characters", ["日本", "語"], Terminal::Cells.wrap("日本語", 4))
+check("short text is one line", ["short"], Terminal::Cells.wrap("short", 10))
+
+# Without a terminal, Screen.open says so rather than scrambling the output.
+refused = false
+unless IO.tty?(:stdin)
+  begin
+    Terminal::Screen.open() do |screen| screen.write("never") end
+  rescue error: IOError
+    refused = true
+  end
+  check("open needs a terminal", true, refused)
+end
+
+puts("#{STATS["checks"]} checks, #{STATS["failures"]} failures")
+exit(STATS["failures"] == 0 ? 0 : 1)

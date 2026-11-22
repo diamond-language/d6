@@ -1,0 +1,6 @@
+puts("a", 2, :c)
+print("x", "y", "\n")
+puts(
+  "spread",
+  "over lines"
+)

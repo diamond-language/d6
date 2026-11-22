@@ -167,7 +167,7 @@ static const char *const NATIVE_OBJECT_MEMBERS_SOCKET[]={
     "close","finish_connect","peer_address","read","shutdown_write","write"};
 static const char *const NATIVE_OBJECT_MEMBERS_UDP_SOCKET[]={"close","port","receive","send"};
 static const char *const NATIVE_OBJECT_MEMBERS_TLS_SOCKET[]={
-    "abort","alpn_protocol","close","finish_handshake","gets","peer_fingerprint",
+    "abort","alpn_protocol","close","finish_handshake","gets","peer_address","peer_fingerprint",
     "peer_subject","read","server_name","session","session_reused?","write"};
 static const char *const NATIVE_OBJECT_MEMBERS_REGEXP[]={"match","match?","options","source"};
 static const char *const NATIVE_OBJECT_MEMBERS_SQLITE3[]={

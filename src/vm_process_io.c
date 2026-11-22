@@ -1315,7 +1315,7 @@ DiamondVmStatus process_stream_dispatch_helper(DiamondVm *vm,
             const ssize_t written=write(target->fd,data->chars+offset,data->length-offset);
             if(written<0) {
                 if(errno==EINTR)continue;
-                snprintf(vm->error,sizeof vm->error,"write error: %s",strerror(errno));
+                snprintf(vm->error,sizeof vm->error,"write error: %s",diamond_io_error_text(errno));
                 return DIAMOND_VM_IO_ERROR;
             }
             offset+=(size_t)written;
@@ -1345,7 +1345,7 @@ DiamondVmStatus process_stream_dispatch_helper(DiamondVm *vm,
             }
             if(got<0) {
                 free(line.chars);
-                snprintf(vm->error,sizeof vm->error,"read error: %s",strerror(errno));
+                snprintf(vm->error,sizeof vm->error,"read error: %s",diamond_io_error_text(errno));
                 return DIAMOND_VM_IO_ERROR;
             }
             if(got==0)break;
@@ -1402,7 +1402,7 @@ DiamondVmStatus process_stream_dispatch_helper(DiamondVm *vm,
             snprintf(vm->error,sizeof vm->error,"read would block");
             return DIAMOND_VM_WOULD_BLOCK;
         }
-        snprintf(vm->error,sizeof vm->error,"read error: %s",strerror(saved_errno));
+        snprintf(vm->error,sizeof vm->error,"read error: %s",diamond_io_error_text(saved_errno));
         return DIAMOND_VM_IO_ERROR;
     }
     if(read_count==0) {
@@ -1585,7 +1585,7 @@ static DiamondVmStatus read_line_direct(DiamondVm *vm,FILE *stream,StringBuilder
     stream_nonblocking_end(nonblocking);
     errno=read_errno;
     if(ferror(stream)) {
-        snprintf(vm->error,sizeof vm->error,"read error: %s",strerror(errno));
+        snprintf(vm->error,sizeof vm->error,"read error: %s",diamond_io_error_text(errno));
         /* The error indicator is sticky: without this a read that timed out would make
          * every later read on the same stream fail too, even once data arrives. */
         clearerr(stream);
@@ -1635,7 +1635,7 @@ DiamondVmStatus read_line(DiamondVm *vm,FILE *stream,StringBuilder *builder,
         const int ready=poll_interruptible(vm,&interest,1,-1,&status);
         if(status!=DIAMOND_VM_OK)break;
         if(ready<0) {
-            snprintf(vm->error,sizeof vm->error,"read error: %s",strerror(errno));
+            snprintf(vm->error,sizeof vm->error,"read error: %s",diamond_io_error_text(errno));
             status=DIAMOND_VM_IO_ERROR;break;
         }
         if(ready==0)continue;
@@ -1644,7 +1644,7 @@ DiamondVmStatus read_line(DiamondVm *vm,FILE *stream,StringBuilder *builder,
         const ssize_t got=read(STDIN_FILENO,&byte,1);
         if(got<0) {
             if(errno==EINTR||errno==EAGAIN||errno==EWOULDBLOCK)continue;
-            snprintf(vm->error,sizeof vm->error,"read error: %s",strerror(errno));
+            snprintf(vm->error,sizeof vm->error,"read error: %s",diamond_io_error_text(errno));
             status=DIAMOND_VM_IO_ERROR;break;
         }
         if(got==0||byte=='\n') {
@@ -1682,7 +1682,7 @@ DiamondVmStatus stdin_read_partial(DiamondVm *vm,DiamondValue limit,DiamondValue
 #ifdef __wasi__
     got=read(STDIN_FILENO,buffer,wanted);
     if(got<0) {
-        snprintf(vm->error,sizeof vm->error,"read error: %s",strerror(errno));
+        snprintf(vm->error,sizeof vm->error,"read error: %s",diamond_io_error_text(errno));
         return DIAMOND_VM_IO_ERROR;
     }
 #else
@@ -1712,7 +1712,7 @@ DiamondVmStatus stdin_read_partial(DiamondVm *vm,DiamondValue limit,DiamondValue
             got=read(STDIN_FILENO,buffer,wanted);
             if(got>=0)break;
             if(errno==EINTR||errno==EAGAIN||errno==EWOULDBLOCK)continue;
-            snprintf(vm->error,sizeof vm->error,"read error: %s",strerror(errno));
+            snprintf(vm->error,sizeof vm->error,"read error: %s",diamond_io_error_text(errno));
             status=DIAMOND_VM_IO_ERROR;break;
         }
     }
@@ -1907,7 +1907,7 @@ DiamondVmStatus file_invoke_helper(DiamondVm *vm,
         errno=read_errno;
         if(ferror(target_file->stream)) {
             free(builder.chars);
-            snprintf(vm->error,sizeof vm->error,"read error: %s",strerror(errno));
+            snprintf(vm->error,sizeof vm->error,"read error: %s",diamond_io_error_text(errno));
             clearerr(target_file->stream);
             return DIAMOND_VM_IO_ERROR;
         }
@@ -1956,7 +1956,7 @@ DiamondVmStatus file_invoke_helper(DiamondVm *vm,
         if(fflush(writer)==0)target_file->write_pending=false;
     }
     if(written!=text->length||ferror(writer)) {
-        snprintf(vm->error,sizeof vm->error,"write error: %s",strerror(errno));
+        snprintf(vm->error,sizeof vm->error,"write error: %s",diamond_io_error_text(errno));
         return DIAMOND_VM_IO_ERROR;
     }
     registers[dest]=DIAMOND_NIL;return DIAMOND_VM_OK;

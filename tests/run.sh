@@ -1503,10 +1503,11 @@ grep -Eq 'PRINT +r[0-9]+, r[0-9]+, newline=0' <<<"$actual"
 actual="$($diamond --dump-bytecode -e 'puts("x")')"
 grep -Eq 'PRINT +r[0-9]+, r[0-9]+, newline=1' <<<"$actual"
 
-if "$diamond" -e 'puts(1, 2)' >/dev/null 2>&1; then
-    echo "puts with more than one argument unexpectedly compiled" >&2
-    exit 1
-fi
+# Several arguments print in turn, each on its own line for puts and warn.
+[[ "$("$diamond" -e 'puts(1, 2)
+exit(0)')" == $'1\n2' ]]
+[[ "$("$diamond" -e 'warn("a", "b")
+exit(0)' 2>&1 >/dev/null)" == $'a\nb' ]]
 
 # warn() writes to stderr with a newline and leaves stdout alone; a user
 # function named warn still takes precedence, as with print/puts.
@@ -2381,6 +2382,13 @@ wait "$tls_stress_server_pid"
 [[ "$(cat "$tls_stress_client_out")" == "echo: hello" ]]
 rm -f "$tls_stress_server_out" "$tls_stress_client_out"
 
+# Nonblocking TLS, both sides in one thread under IO.poll, plain and with a
+# collection at every allocation.
+[[ "$(SSL_CERT_FILE="$tls_dir/cert.pem" timeout 60 "$diamond" tests/tls_nonblocking_test.d6 \
+    "$tls_dir/cert.pem" "$tls_dir/key.pem")" == "tls nonblocking ok" ]]
+[[ "$(SSL_CERT_FILE="$tls_dir/cert.pem" DIAMOND_STRESS_GC=1 timeout 300 "$diamond" \
+    tests/tls_nonblocking_test.d6 "$tls_dir/cert.pem" "$tls_dir/key.pem")" == "tls nonblocking ok" ]]
+
 # Untrusted certificate: no $SSL_CERT_FILE override, so this self-signed
 # cert isn't trusted by anything -- TLSSocket.connect must refuse the
 # connection rather than silently accepting it (there is no verify=false
@@ -2556,7 +2564,7 @@ c.read()' "$options_tls_port" "$options_dir/cert.pem")" >/dev/null 2>"$error_fil
     echo "TLSSocket read with read_timeout_ms against a silent peer unexpectedly succeeded" >&2
     exit 1
 fi
-grep -Eq "Resource temporarily unavailable|timed out" "$error_file"
+grep -q "timed out" "$error_file"
 rm -f "$error_file"
 wait "$options_tls_server_pid" || true
 rm -f "$options_tls_server_out"

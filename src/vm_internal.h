@@ -16,6 +16,7 @@
 #include "compiler.h"
 #include <stdatomic.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <string.h>
 #include <time.h>
 #include <poll.h>
@@ -533,7 +534,7 @@ DIAMOND_INTERNAL void tls_abort_handshake(DiamondTlsSocketHandle *handle);
 DIAMOND_INTERNAL DiamondVmStatus tls_encode_alpn_protocols(DiamondVm *vm,const char *owner, const DiamondArray *protocols,unsigned char **out_buffer,unsigned int *out_length);
 DIAMOND_INTERNAL DiamondVmStatus diamond_tls_finish_handshake(DiamondVm *vm, DiamondTlsSocketHandle *handle,const char **direction);
 DIAMOND_INTERNAL void tls_format_error(char *buffer,size_t buffer_size);
-DIAMOND_INTERNAL DiamondVmStatus tls_listen_helper(DiamondVm *vm,int64_t port, const char *cert_path,const char *key_path,const DiamondArray *alpn_protocols, const char *client_ca_path,DiamondListenerHandle **out_handle);
+DIAMOND_INTERNAL DiamondVmStatus tls_listen_helper(DiamondVm *vm,const char *host,int64_t port,bool nonblocking, const char *cert_path,const char *key_path,const DiamondArray *alpn_protocols, const char *client_ca_path,DiamondListenerHandle **out_handle);
 DIAMOND_INTERNAL int tls_new_session_callback(SSL *ssl,SSL_SESSION *session);
 DIAMOND_INTERNAL DiamondVmStatus tls_read_chunk(DiamondVm *vm,SSL *ssl,void *buffer,size_t want, size_t *out_read,bool *out_eof);
 DIAMOND_INTERNAL DiamondVmStatus tls_read_line(DiamondVm *vm,SSL *ssl,StringBuilder *builder, bool *saw_any);
@@ -1192,6 +1193,8 @@ typedef struct {
     const DiamondString *key;
     const DiamondString *session;
     const DiamondArray *alpn;
+    /* start_handshake's "nonblocking": 1 keeps the socket nonblocking after the handshake. */
+    int64_t nonblocking;
 } DiamondSocketConnectOptions;
 
 DIAMOND_INTERNAL DiamondVmStatus parse_socket_connect_options_helper(DiamondVm *vm,
@@ -1200,9 +1203,17 @@ DIAMOND_INTERNAL DiamondVmStatus parse_socket_connect_options_helper(DiamondVm *
 
 DIAMOND_INTERNAL DiamondVmStatus parse_tls_listen_options_helper(DiamondVm *vm,
         DiamondValue options_value,const DiamondArray **out_alpn,
-        const DiamondString **out_client_ca);
+        const DiamondString **out_client_ca,const DiamondString **out_host,bool *out_nonblocking);
+
+/* What a failed read or write on a blocking descriptor says: EAGAIN there only comes from
+ * a read_timeout_ms/write_timeout_ms expiring, so it reads "timed out". */
+static inline const char *diamond_io_error_text(int error) {
+    return error==EAGAIN||error==EWOULDBLOCK?"timed out":strerror(error);
+}
 
 DIAMOND_INTERNAL DiamondVmStatus pollable_fd(DiamondVm *vm,DiamondValue value,int *out_fd);
+/* Whether `value` is a nonblocking TLS socket holding data OpenSSL has already read off the wire. */
+DIAMOND_INTERNAL bool pollable_buffered(DiamondValue value);
 
 DIAMOND_INTERNAL bool poll_register_fd(struct pollfd *fds,nfds_t *fd_count,size_t max_fds,
         int fd,short want_events,size_t *out_slot);
