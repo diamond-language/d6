@@ -3086,8 +3086,13 @@ static uint16_t parse_invoke_named_impl(Compiler *compiler, uint16_t receiver,
      * (INVOKE_KEYWORDS' block flag), so defaulted parameters in between
      * keep their defaults rather than receiving it. `recv.method(args,
      * &block)` forwards a block the same way. */
+    /* No signature yet: the receiver's type is unknown, or it is an instance
+     * whose method is defined later in the program. */
+    const uint16_t receiver_type=compiler->known_types[receiver];
     const bool untyped_receiver=contextual_target==nullptr&&
-        compiler->known_types[receiver]==DIAMOND_TYPE_NONE;
+        (receiver_type==DIAMOND_TYPE_NONE||
+         (receiver_type>=DIAMOND_TYPE_CLASS_BASE&&
+          receiver_type<DIAMOND_TYPE_CLASS_BASE+DIAMOND_MAX_CLASSES));
     if(forwarded_block) {
         const uint16_t block=args[--count];
         const size_t block_slot=
