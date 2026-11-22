@@ -78,9 +78,8 @@ client = TCPSocket.connect("example.com", 8080,
 - **`read_timeout_ms`**/**`write_timeout_ms`** — `SO_RCVTIMEO`/
   `SO_SNDTIMEO` on the connected socket, applying to every subsequent
   `.read()`/`.gets()`/`.write()` on it. A timed-out read/write raises the
-  same rescuable `IOError` an ordinary failed read/write already does
-  (`strerror(EAGAIN)`, i.e. "Resource temporarily unavailable") — no new
-  error path, just a new way for the existing one to trigger.
+  same rescuable `IOError` an ordinary failed read/write already does, with
+  the message "read error: timed out" (or "write error: timed out").
 
 Omitting a key leaves the corresponding OS default (block forever)
 untouched. An unrecognized key, or a value of the wrong type, raises a
@@ -333,7 +332,9 @@ validation failure leaves it owned by the original socket. The returned TLS sock
 allows `finish_handshake()`, `close()`, and `abort()` while pending. Each finish call
 returns `"read"`, `"write"`, or nil (complete). Poll only the requested direction,
 then retry. Terminal errors close the connection immediately; completed calls are
-idempotent. `IO.poll` accepts TLS sockets only during a pending handshake.
+idempotent. `IO.poll` accepts TLS sockets during a pending handshake, and afterwards
+when they are nonblocking (the `"nonblocking" => true` option: see the
+[networking reference](api/network.md#nonblocking-tls)).
 
 The token checks cancellation before each attempt and after completion. Its failure
 cleanup calls `abort()`, an idempotent close without any TLS shutdown exchange.

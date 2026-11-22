@@ -1999,20 +1999,29 @@ uint16_t parse_math_binary_call(Compiler *compiler, DiamondMathFunction id) {
 }
 
 /* print/puts/warn: `flags` is a set of DIAMOND_PRINT_* bits. */
+/* `puts(a, b, ...)`, `print(...)`, `warn(...)`: one PRINT per argument, in order, so
+ * puts and warn put each on its own line and print runs them together, as Ruby does. */
 uint16_t parse_print_call(Compiler *compiler, uint8_t flags) {
     advance_token(compiler); /* consume '(' */
-    const uint16_t source=parse_expression(compiler);
+    uint16_t dest=0;
+    for(;;) {
+        skip_newlines(compiler);
+        const uint16_t source=parse_expression(compiler);
+        skip_newlines(compiler);
+        dest=allocate_register(compiler);
+        emit_opcode(compiler,DIAMOND_OP_PRINT);
+        emit_register(compiler,dest);
+        emit_register(compiler,source);
+        emit_byte(compiler,flags);
+        compiler->known_types[dest]=DIAMOND_TYPE_NIL;
+        if(compiler->current.kind!=DIAMOND_TOKEN_COMMA||compiler->failed)break;
+        advance_token(compiler); /* consume ',' */
+    }
     if(compiler->current.kind!=DIAMOND_TOKEN_RIGHT_PAREN) {
         fail(compiler,compiler->current.span,"expected ')' after arguments");
         return 0;
     }
     advance_token(compiler);
-    const uint16_t dest=allocate_register(compiler);
-    emit_opcode(compiler,DIAMOND_OP_PRINT);
-    emit_register(compiler,dest);
-    emit_register(compiler,source);
-    emit_byte(compiler,flags);
-    compiler->known_types[dest]=DIAMOND_TYPE_NIL;
     return dest;
 }
 

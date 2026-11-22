@@ -508,8 +508,15 @@ typedef struct DiamondUdpSocketHandle {
  * either; both steps are genuinely required, not defensive redundancy. */
 typedef struct DiamondTlsSocketHandle {
     DiamondObject object;
-    bool handshake_pending;
-    SSL *ssl;
+bool handshake_pending;
+/* Set by start_handshake's "nonblocking" option and on connections that a
+ * nonblocking TLSServer.listen accepts: the descriptor stays O_NONBLOCK after
+ * the handshake, read(n) and write take what is ready now or raise
+ * WouldBlockError, and IO.poll accepts the socket. */
+bool nonblocking;
+/* The server side of a pending handshake: finish_handshake runs SSL_accept. */
+bool accepting;
+SSL *ssl;
     int fd;
     /* Set by tls_new_session_callback (vm.c), registered on every
      * connection's own SSL_CTX (a fresh, private context per connection

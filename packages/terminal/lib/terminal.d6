@@ -1,0 +1,243 @@
+## Building blocks for full-screen terminal programs:
+##
+## - `Terminal::Keys` turns the bytes a raw-mode terminal sends into key names.
+## - `Terminal::Cells` fits and wraps text by the columns it takes on screen.
+## - `Terminal::Screen` runs a block in raw mode on the alternate screen and
+##   redraws only the lines that changed.
+##
+## The parts that decide what to draw stay testable: give them keys and look at
+## the lines they return. Only `Screen` touches the terminal.
+module Terminal
+  ## Turns the bytes a raw-mode terminal sends into key names: "up", "enter",
+  ## "ctrl-c", "page-up", or the typed character itself ("a", "é", "日").
+  ##
+  ## Input arrives in pieces, so an escape sequence or a multi-byte character can
+  ## be split across reads: what isn't complete yet waits for the next `feed`. A
+  ## lone ESC is the Escape key only once a read comes back empty (see `flush`).
+  class Keys
+    ## The final byte of a CSI sequence (ESC [ ... X) and the key it means.
+    FINALS = {"A" => "up", "B" => "down", "C" => "right", "D" => "left", "H" => "home", "F" => "end",
+              "Z" => "shift-tab"}
+
+    ## ESC [ N ~ sequences, by N.
+    TILDES = {"1" => "home", "2" => "insert", "3" => "delete", "4" => "end", "5" => "page-up",
+              "6" => "page-down", "7" => "home", "8" => "end"}
+
+    def initialize()
+      @pending = ""
+    end
+
+    ## Whether part of a key is waiting for more bytes.
+    def pending?() -> Bool = @pending != ""
+
+    ## The keys in what has arrived so far.
+    def feed(bytes: String) -> Array[String]
+      @pending += bytes
+      keys = []
+      index = 0
+      while index < @pending.bytesize()
+        taken = self.decode_at(index, keys)
+        break if taken == 0
+        index += taken
+      end
+      @pending = @pending.byteslice(index, @pending.bytesize() - index)
+      keys
+    end
+
+    ## A read came back empty, so nothing more of a sequence is coming: a lone
+    ## ESC is the Escape key, and anything else left over is dropped.
+    def flush() -> Array[String]
+      keys = @pending.start_with?("\e") ? ["escape"] : []
+      @pending = ""
+      keys
+    end
+
+    # Decodes the key starting at byte `index` of the pending input into `keys`
+    # and returns how many bytes it took, or 0 when it isn't complete yet.
+    def decode_at(index: Int, keys: Array) -> Int
+      byte = @pending.getbyte(index)
+      return self.decode_escape(index, keys) if byte == 27
+      if byte == 13 || byte == 10
+        keys.push("enter")
+        return 1
+      end
+      if byte == 127 || byte == 8
+        keys.push("backspace")
+        return 1
+      end
+      if byte == 9
+        keys.push("tab")
+        return 1
+      end
+      if byte < 32
+        keys.push("ctrl-" + [byte + 96].pack("C"))
+        return 1
+      end
+      size = Terminal::Keys.sequence_length(byte)
+      return 0 if index + size > @pending.bytesize()
+      keys.push(@pending.byteslice(index, size))
+      size
+    end
+
+    # How many bytes a UTF-8 sequence starting with `lead` has; a byte that can't
+    # start one counts alone.
+    def self.sequence_length(lead: Int) -> Int
+      return 2 if lead >= 0xC2 && lead < 0xE0
+      return 3 if lead >= 0xE0 && lead < 0xF0
+      return 4 if lead >= 0xF0 && lead < 0xF5
+      1
+    end
+
+    def decode_escape(index: Int, keys: Array) -> Int
+      remaining = @pending.bytesize() - index
+      return 0 if remaining == 1
+      second = @pending.byteslice(index + 1, 1)
+      unless second == "[" || second == "O"
+        # ESC then a key: Alt held down. Report the Escape, then the key.
+        keys.push("escape")
+        return 1
+      end
+      # Parameters run until a final byte between @ and ~.
+      stop = index + 2
+      while stop < @pending.bytesize()
+        code = @pending.getbyte(stop)
+        break if code >= 64 && code <= 126
+        stop += 1
+      end
+      return 0 if stop >= @pending.bytesize()
+      final = @pending.byteslice(stop, 1)
+      parameters = @pending.byteslice(index + 2, stop - index - 2)
+      key = final == "~" ? TILDES[parameters.split(";")[0]] : FINALS[final]
+      keys.push(key) if key != nil
+      stop - index + 1
+    end
+  end
+
+  ## Text measured in terminal columns, where a wide character such as 日 or an
+  ## emoji takes two (`String#display_width`).
+  module Cells
+    ## `text` cut or padded with spaces to exactly `width` columns. Cut text ends
+    ## in "…"; a wide character that would straddle the edge becomes a space.
+    def self.fit(text: String, width: Int) -> String
+      return "" if width <= 0
+      over = text.display_width() > width
+      limit = over ? width - 1 : width
+      out = StringBuilder.new()
+      used = 0
+      text.each_char() do |char|
+        cells = char.display_width()
+        break if used + cells > limit
+        out.append(char)
+        used += cells
+      end
+      if over
+        out.append("…")
+        used += 1
+      end
+      out.append(" " * (width - used)) if used < width
+      out.to_s()
+    end
+
+    ## `text` broken into lines at most `width` columns wide, at spaces when it
+    ## can be and inside a word when the word is wider than a line.
+    def self.wrap(text: String, width: Int) -> Array[String]
+      return [text] if width <= 0 || text.display_width() <= width
+      lines = []
+      line = StringBuilder.new()
+      used = 0
+      text.split(" ").each() do |word|
+        cells = word.display_width()
+        gap = used == 0 ? 0 : 1
+        if used + gap + cells <= width
+          line.append(" ") if gap == 1
+          line.append(word)
+          used += gap + cells
+          next
+        end
+        if used > 0
+          lines.push(line.to_s())
+          line = StringBuilder.new()
+          used = 0
+        end
+        # A word wider than a line is cut into pieces.
+        word.each_char() do |char|
+          char_cells = char.display_width()
+          if used + char_cells > width
+            lines.push(line.to_s())
+            line = StringBuilder.new()
+            used = 0
+          end
+          line.append(char)
+          used += char_cells
+        end
+      end
+      lines.push(line.to_s()) if used > 0
+      lines
+    end
+  end
+
+  ## The controlling terminal: raw mode, its size, reading keys and drawing.
+  class Screen
+    # Alternate screen on, cursor hidden; and the reverse.
+    ENTER = "\e[?1049h\e[?25l"
+    LEAVE = "\e[?25h\e[?1049l"
+
+    def initialize()
+      # What each screen line showed last, so redraws send only changed lines.
+      @shown = []
+    end
+
+    ## Runs the block with the terminal in raw mode on the alternate screen, and
+    ## puts both back afterwards, however the block ends. Raises IOError when
+    ## standard input is not a terminal.
+    def self.open(&block)
+      screen = Terminal::Screen.new()
+      STDIN.raw() do
+        screen.write(ENTER)
+        begin
+          yield(screen)
+        ensure
+          screen.write(LEAVE)
+        end
+      end
+    end
+
+    ## [rows, columns], or [24, 80] when the size can't be read.
+    def size() -> Array[Int]
+      size = STDOUT.winsize()
+      size == nil ? [24, 80] : size
+    end
+
+    ## The bytes that arrive within `wait` milliseconds: "" when none do, nil
+    ## when the terminal has gone away. Feed them to a `Terminal::Keys`.
+    def read(wait: Int) -> String | Nil
+      return "" unless IO.poll([STDIN], [], wait)["readable"][0]
+      STDIN.readpartial(64)
+    end
+
+    def write(text: String)
+      STDOUT.write(text)
+      STDOUT.flush()
+    end
+
+    ## Draws `lines`, one per screen row from the top, sending only the ones that
+    ## changed since the last draw. Each should fill its row (see `Cells.fit`).
+    def draw(lines: Array[String])
+      out = StringBuilder.new()
+      lines.each_with_index() do |line, index|
+        next if index < @shown.length() && @shown[index] == line
+        out.append("\e[#{index + 1};1H")
+        out.append(line)
+      end
+      @shown = lines
+      self.write(out.to_s()) if out.length() > 0
+    end
+
+    ## Forgets what is on screen, so the next draw repaints everything. Use it
+    ## after a resize.
+    def clear()
+      @shown = []
+      self.write("\e[2J")
+    end
+  end
+end

@@ -676,6 +676,12 @@ uint16_t parse_postfix_while(Compiler *compiler,bool inverted,DiamondLexer after
 }
 
 uint16_t parse_loop(Compiler *compiler) {
+    /* `loop = value`: the word is the loop keyword, so it can't name a variable. */
+    if(compiler->current.kind==DIAMOND_TOKEN_EQUAL) {
+        fail(compiler,compiler->previous.span,
+             "`loop` is a keyword and can't be a variable name; call the variable something else");
+        return 0;
+    }
     const uint16_t destination=allocate_register(compiler);
     emit_instruction(compiler,DIAMOND_OP_NIL,destination,0,0,1);
     if(!consume_loop_start(compiler))return destination;

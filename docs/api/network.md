@@ -139,15 +139,47 @@ Array of protocols to offer, and `"session"` is a saved `session()` to resume.
 ### `TLSSocket.start_handshake(socket, host, options = nil) -> TLSSocket`
 
 Starts TLS on a connected non-blocking `Socket`, which it takes over. Call
-`finish_handshake` until it returns `nil`.
+`finish_handshake` until it returns `nil`. The connection then reads and
+writes like a blocking File, unless the options have `"nonblocking" => true`:
+see [Nonblocking TLS](#nonblocking-tls).
 
 ### `TLSServer.listen(port, cert_path, key_path, options = nil) -> Listener`
 
 Listens like `TCPServer.listen` with a PEM certificate chain and key. Its
 `accept` performs the handshake and returns a `TLSSocket`. Options: `"alpn"`,
-an Array of protocols in the server's preference order, and `"client_ca"`, a
+an Array of protocols in the server's preference order; `"client_ca"`, a
 PEM file that client certificates must chain to (clients without one are
-refused).
+refused); `"host"`, the one address to listen on; and `"nonblocking" => true`,
+for a listener whose `accept` returns `nil` when nobody is waiting and
+otherwise a TLSSocket whose handshake you finish (see below).
+
+### Nonblocking TLS
+
+A TLSSocket from a nonblocking listener, or from `start_handshake` with
+`"nonblocking" => true`, never waits, like a [`Socket`](#socket-methods):
+
+- `finish_handshake` until it returns `nil`, polling in the direction it names.
+- `read(n)` returns up to `n` bytes, `nil` once the peer has closed, or raises
+  `WouldBlockError`.
+- `write(text)` returns how many bytes it took, which may be fewer than
+  `text` has, or raises `WouldBlockError`. Send the rest later, starting
+  with the bytes it didn't take.
+- `IO.poll` accepts the socket. It counts as readable when OpenSSL already
+  holds bytes for it, which `poll(2)` alone would miss.
+- `gets` raises `IOError`: read with `read(n)` and split lines yourself.
+
+OpenSSL sometimes needs to read in order to write, or the reverse, so a call can
+raise `WouldBlockError` even when `IO.poll` reported that direction ready. Polling
+the socket in both directions while data is waiting to go out avoids a stall.
+
+<!-- doc-check: skip -->
+```ruby
+listener = TLSServer.listen(0, "cert.pem", "key.pem", {"nonblocking" => true})
+conn = listener.accept()          # nil, or a TLSSocket mid-handshake
+while (direction = conn.finish_handshake()) != nil
+  IO.poll(direction == "read" ? [conn] : [], direction == "write" ? [conn] : [], 1000)
+end
+```
 
 ### `read(n = nil) -> String | Nil`
 
@@ -162,6 +194,11 @@ As on a [File](file.md).
 ### `alpn_protocol() -> String | Nil`
 
 The negotiated protocol, if any.
+
+### `peer_address() -> String | Nil`
+
+The remote address, as on a [Socket](#peer_address---string--nil). It works
+while a handshake is still running.
 
 ### `session() -> String | Nil`
 

@@ -102,6 +102,11 @@ static inline int SSL_write(SSL *ssl, const void *buffer, int count) {
     (void)ssl; (void)buffer; (void)count; return -1;
 }
 static inline int SSL_pending(const SSL *ssl) { (void)ssl; return 0; }
+static inline int SSL_has_pending(const SSL *ssl) { (void)ssl; return 0; }
+static inline void SSL_set_accept_state(SSL *ssl) { (void)ssl; }
+#define SSL_MODE_ENABLE_PARTIAL_WRITE 0x00000001L
+#define SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER 0x00000002L
+static inline long SSL_set_mode(SSL *ssl, long mode) { (void)ssl; return mode; }
 static inline int SSL_shutdown(SSL *ssl) { (void)ssl; return -1; }
 static inline int SSL_get_error(const SSL *ssl, int result) { (void)ssl; (void)result; return SSL_ERROR_SSL; }
 static inline long SSL_get_verify_result(const SSL *ssl) { (void)ssl; return 1; }

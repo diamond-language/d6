@@ -279,6 +279,10 @@ DiamondVmStatus outlined_tls_connect(DiamondVm *vm,const DiamondChunk *chunk,Dia
     const DiamondVmStatus options_status=parse_socket_connect_options_helper(
         vm,registers[options_reg],true,&options);
     VM_PROPAGATE(options_status);
+    if(!start_handshake&&options.nonblocking) {
+        snprintf(vm->error,sizeof vm->error,"TLSSocket.connect: 'nonblocking' is a start_handshake option");
+        VM_RETURN(DIAMOND_VM_TYPE_ERROR);
+    }
     if(start_handshake&&options.connect_timeout_ms>=0) {
         snprintf(vm->error,sizeof vm->error,"start_handshake uses caller readiness/deadlines, not connect_timeout_ms");
         VM_RETURN(DIAMOND_VM_TYPE_ERROR);
@@ -347,6 +351,9 @@ DiamondVmStatus outlined_tls_connect(DiamondVm *vm,const DiamondChunk *chunk,Dia
     registers[dest]=(DiamondValue){.kind=DIAMOND_VALUE_OBJECT,
         .as.object=(DiamondObject *)handle};
     handle->handshake_pending=start_handshake;
+    handle->nonblocking=options.nonblocking!=0;
+    if(handle->nonblocking)
+        SSL_set_mode(ssl,SSL_MODE_ENABLE_PARTIAL_WRITE|SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
     SSL_set_app_data(ssl,handle);
     if(SSL_set_fd(ssl,connected_fd)!=1) {
         tls_abort_handshake(handle);VM_RETURN(DIAMOND_VM_IO_ERROR);
@@ -2011,9 +2018,26 @@ DiamondVmStatus outlined_io_poll(DiamondVm *vm,const DiamondChunk *chunk,Diamond
             VM_RETURN(DIAMOND_VM_TYPE_ERROR);
         }
     }
-    const DiamondValue timeout=registers[timeout_reg];
-    if(timeout.kind==DIAMOND_VALUE_OBJECT&&
-       timeout.as.object->kind==DIAMOND_OBJECT_HASH) {
+/* A nonblocking TLS socket can hold data OpenSSL already took off the wire,
+ * which poll(2) cannot see: such a socket is readable now, so check the rest
+ * without waiting. */
+bool buffered[DIAMOND_MAX_POLL_FDS];
+bool any_buffered=false;
+for(size_t index=0;index<readable_array->count;index++) {
+    buffered[index]=pollable_buffered(readable_array->values[index]);
+    any_buffered=any_buffered||buffered[index];
+}
+const DiamondValue timeout=registers[timeout_reg];
+if(any_buffered&&(timeout.kind==DIAMOND_VALUE_INT||(timeout.kind==DIAMOND_VALUE_OBJECT&&
+   timeout.as.object->kind==DIAMOND_OBJECT_HASH))) {
+    for(nfds_t slot=0;slot<fd_count;slot++)fds[slot].revents=0;
+    errno=0;
+    if(poll(fds,fd_count,0)<0&&errno!=EINTR) {
+        snprintf(vm->error,sizeof vm->error,"poll failed: %s",strerror(errno));
+        VM_RETURN(DIAMOND_VM_IO_ERROR);
+    }
+} else if(timeout.kind==DIAMOND_VALUE_OBJECT&&
+   timeout.as.object->kind==DIAMOND_OBJECT_HASH) {
         const DiamondHash *options=(const DiamondHash *)timeout.as.object;
         DiamondValue cancellations=DIAMOND_NIL,deadline=DIAMOND_NIL;
         for(size_t i=0;i<options->count;i++) {
@@ -2102,7 +2126,7 @@ DiamondVmStatus outlined_io_poll(DiamondVm *vm,const DiamondChunk *chunk,Diamond
     for(size_t index=0;index<readable_array->count;index++) {
         const short revents=fds[read_slot[index]].revents;
         readable_results[index]=
-            DIAMOND_BOOL((revents&(POLLIN|POLLHUP|POLLERR|POLLNVAL))!=0);
+            DIAMOND_BOOL(buffered[index]||(revents&(POLLIN|POLLHUP|POLLERR|POLLNVAL))!=0);
     }
     DiamondValue writable_results[DIAMOND_MAX_POLL_FDS];
     for(size_t index=0;index<writable_array->count;index++) {
@@ -4037,8 +4061,10 @@ DiamondVmStatus outlined_tls_listen(DiamondVm *vm,const DiamondChunk *chunk,Diam
     }
     const DiamondArray *alpn_protocols=nullptr;
     const DiamondString *client_ca=nullptr;
+    const DiamondString *host=nullptr;
+    bool nonblocking=false;
     const DiamondVmStatus options_status=parse_tls_listen_options_helper(
-        vm,registers[options_reg],&alpn_protocols,&client_ca);
+        vm,registers[options_reg],&alpn_protocols,&client_ca,&host,&nonblocking);
     VM_PROPAGATE(options_status);
     const DiamondString *cert_path=
         (const DiamondString *)registers[cert_reg].as.object;
@@ -4046,7 +4072,7 @@ DiamondVmStatus outlined_tls_listen(DiamondVm *vm,const DiamondChunk *chunk,Diam
         (const DiamondString *)registers[key_reg].as.object;
     DiamondListenerHandle *listener_handle=nullptr;
     const DiamondVmStatus listen_status=tls_listen_helper(vm,
-        registers[port_reg].as.integer,cert_path->chars,key_path->chars,
+        host==nullptr?nullptr:host->chars,registers[port_reg].as.integer,nonblocking,cert_path->chars,key_path->chars,
         alpn_protocols,client_ca==nullptr?nullptr:client_ca->chars,
         &listener_handle);
     VM_PROPAGATE(listen_status);

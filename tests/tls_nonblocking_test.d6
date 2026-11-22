@@ -1,0 +1,164 @@
+# Nonblocking TLS on both sides in one thread: a TLSServer.listen listener with
+# "nonblocking", a client from TLSSocket.start_handshake with "nonblocking", both
+# handshakes driven by IO.poll, then reads and writes that take only what is
+# ready. Run by tests/run.sh with ARGV = [cert.pem, key.pem] and SSL_CERT_FILE
+# pointing at the same self-signed certificate.
+cert = ARGV[0]
+key = ARGV[1]
+
+def check(ok: Bool, what: String)
+  unless ok
+    STDERR.write("tls_nonblocking_test: #{what}\n")
+    exit(1)
+  end
+end
+
+# Drives a handshake to the end, waiting on the direction OpenSSL asks for, while
+# also stepping `other` (the peer's handshake in this same thread).
+def handshake(sockets: Array)
+  done = sockets.map() do false end
+  200.times() do
+    waiting = []
+    sockets.each_with_index() do |socket, index|
+      next if done[index]
+      direction = socket.finish_handshake()
+      if direction == nil
+        done[index] = true
+      else
+        waiting.push(socket)
+      end
+    end
+    return if done.all?() do |flag| flag end
+    IO.poll(waiting, waiting, 50)
+  end
+  check(false, "handshakes did not finish")
+end
+
+listener = TLSServer.listen(0, cert, key, {"nonblocking" => true, "host" => "127.0.0.1"})
+check(listener.accept() == nil, "accept with nobody connecting should be nil")
+tcp = TCPSocket.connect_nonblocking("127.0.0.1", listener.port())
+connected = false
+100.times() do
+  IO.poll([], [tcp], 50)
+  begin
+    tcp.finish_connect()
+    connected = true
+    break
+  rescue error: WouldBlockError
+    next
+  end
+end
+check(connected, "TCP connect did not finish")
+client = TLSSocket.start_handshake(tcp, "localhost", {"nonblocking" => true})
+server = nil
+100.times() do
+  # The client must send its hello before the server has anything to accept.
+  client.finish_handshake()
+  IO.poll([listener], [], 50)
+  server = listener.accept()
+  break if server != nil
+end
+check(server != nil, "the listener never accepted")
+handshake([client, server])
+
+# Nothing has been sent, so a read would block.
+blocked = false
+begin
+  server.read(10)
+rescue error: WouldBlockError
+  blocked = true
+end
+check(blocked, "an empty read did not raise WouldBlockError")
+check(IO.poll([server], [], 0)["readable"] == [false], "an idle socket polled readable")
+
+# A megabyte each way: writes come back partial, and reads take it in pieces.
+payload = "0123456789abcdef" * 65536
+outgoing = payload
+received = StringBuilder.new()
+rounds = 0
+while received.bytesize() < payload.bytesize()
+  rounds += 1
+  check(rounds < 100000, "the transfer stalled at #{received.bytesize()} bytes")
+  ready = IO.poll([server], outgoing.empty?() ? [] : [client], 100)
+  unless outgoing.empty?()
+    begin
+      sent = client.write(outgoing)
+      outgoing = outgoing.byteslice(sent, outgoing.bytesize() - sent)
+    rescue error: WouldBlockError
+      nil
+    end
+  end
+  if ready["readable"][0]
+    begin
+      chunk = server.read(16384)
+      check(chunk != nil, "end of stream in the middle of the transfer")
+      received.append(chunk)
+    rescue error: WouldBlockError
+      nil
+    end
+  end
+end
+check(received.to_s() == payload, "the payload arrived changed")
+
+# A short reply, read back; IO.poll sees bytes OpenSSL already holds.
+check(server.write("pong\n") == 5, "a short write was not taken whole")
+reply = nil
+50.times() do
+  IO.poll([client], [], 50)
+  begin
+    reply = client.read(2)
+    break
+  rescue error: WouldBlockError
+    next
+  end
+end
+check(reply == "po", "the reply started #{reply.inspect()}")
+check(IO.poll([client], [], 0)["readable"] == [true], "buffered bytes did not poll readable")
+check(client.read(10) == "ng\n", "the rest of the reply")
+
+# gets needs a blocking socket.
+refused = false
+begin
+  client.gets()
+rescue error: IOError
+  refused = error.message().include?("read(n)")
+end
+check(refused, "gets on a nonblocking socket should explain itself")
+
+# The peer closing is the end of the stream: nil.
+server.close()
+ending = :none
+50.times() do
+  IO.poll([client], [], 50)
+  begin
+    ending = client.read(10)
+    break
+  rescue error: WouldBlockError
+    next
+  rescue error: IOError
+    # Some OpenSSL builds report the dropped TCP connection as an error.
+    ending = nil
+    break
+  end
+end
+check(ending == nil, "read after the peer closed was #{ending.inspect()}")
+client.close()
+listener.close()
+
+# The option belongs to start_handshake, not to the blocking connect.
+wrong = false
+begin
+  TLSSocket.connect("localhost", 1, {"nonblocking" => true})
+rescue error: TypeError
+  wrong = error.message().include?("start_handshake")
+end
+check(wrong, "TLSSocket.connect accepted 'nonblocking'")
+bad = false
+begin
+  TLSServer.listen(0, cert, key, {"nonblocking" => "yes"})
+rescue error: TypeError
+  bad = true
+end
+check(bad, "a non-Bool 'nonblocking' was accepted")
+puts("tls nonblocking ok")
+exit(0)

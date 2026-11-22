@@ -154,8 +154,8 @@ DiamondVmStatus pollable_fd(DiamondVm *vm,DiamondValue value,int *out_fd) {
         fd=((DiamondSocketHandle *)value.as.object)->fd;
     else if(value.as.object->kind==DIAMOND_OBJECT_TLS_SOCKET) {
         DiamondTlsSocketHandle *tls=(DiamondTlsSocketHandle *)value.as.object;
-        if(!tls->handshake_pending) {
-            snprintf(vm->error,sizeof vm->error,"IO.poll only supports TLS sockets during their handshake");
+        if(!tls->handshake_pending&&!tls->nonblocking) {
+            snprintf(vm->error,sizeof vm->error,"IO.poll only supports TLS sockets during their handshake, or nonblocking ones");
             return DIAMOND_VM_TYPE_ERROR;
         }
         fd=tls->fd;

@@ -199,6 +199,14 @@
       "version": "0.3.3"
     },
     {
+      "archive": "terminal.tar",
+      "dependencies": {},
+      "name": "terminal",
+      "sha256": "5d5d56a09e6ae8bf76c0aefc8909d86aa1b2740620e7dd2fc11549907b1cb30e",
+      "size": 16384,
+      "version": "0.1.0"
+    },
+    {
       "archive": "toml.tar",
       "dependencies": {},
       "name": "toml",

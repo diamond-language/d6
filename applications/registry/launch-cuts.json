@@ -22,6 +22,7 @@
   "rack": "0.2.5",
   "redis": "0.2.5",
   "registry": "0.3.3",
+  "terminal": "0.1.0",
   "toml": "0.1.2",
   "websocket": "0.2.5"
 }

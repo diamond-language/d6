@@ -8,6 +8,18 @@ record. From 1.0.0, releases follow the [1.x compatibility policy](docs/compatib
 
 ### Added
 
+- `puts`, `print` and `warn` take several arguments: `puts(a, b)` prints each on its own line.
+- `TLSSocket#peer_address`, as on other connections.
+- The `terminal` cut: key names from raw input (`Terminal::Keys`), text fitted and wrapped to
+  screen columns (`Terminal::Cells`), and a raw-mode screen that redraws only changed lines
+  (`Terminal::Screen`). It is the code the board and relay dogfood apps had each copied.
+- Nonblocking TLS, so one thread can serve TLS connections and wait on a terminal at the same
+  time. `TLSSocket.start_handshake(socket, host, {"nonblocking" => true})` keeps the socket
+  nonblocking after its handshake, and `TLSServer.listen(port, cert, key, {"nonblocking" => true})`
+  accepts connections whose handshake you finish with `finish_handshake`. On these sockets
+  `read(n)` and `write(text)` take what is ready and raise `WouldBlockError` otherwise, and
+  `IO.poll` accepts them, counting bytes OpenSSL has already read as readable.
+  `TLSServer.listen` also takes `"host"`, to listen on one address.
 - A cut's `Cutfile` can say which d6 versions it works with: `"d6": ">=1.4.0"`. facet won't
   install it on a d6 outside that range, and the registry leaves it out of what older d6 versions
   resolve, so they stay on the cut's last release that works for them.
@@ -53,6 +65,9 @@ record. From 1.0.0, releases follow the [1.x compatibility policy](docs/compatib
 
 ### Fixed
 
+- A read or write that hits `read_timeout_ms`/`write_timeout_ms` says "timed out" instead of
+  "Resource temporarily unavailable".
+- `loop = value` says `loop` is a keyword instead of asking for parentheses around a condition.
 - `min`, `max` and `abs` of Ints are typed `Int` (of Floats, `Float`), so `def f(a: Int, b: Int) -> Int = min(a, b)`
   compiles. With an untyped argument the result is unchecked until the return, as `+`'s is.
 - The `cli`, `tcp` and `udp` templates' READMEs line up their command comments again.

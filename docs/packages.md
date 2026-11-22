@@ -498,6 +498,7 @@ with `facet` like any other cut. The public ones each have a page under
 | `rack` | Compose HTTP request middleware |
 | `redis` | Redis client using RESP2 and RESP3 |
 | `registry` | Cut registry storage primitives |
+| `terminal` | Keys, text widths and redraws for full-screen terminal programs |
 | `toml` | Read and write TOML 1.0 configuration files |
 | `websocket` | WebSocket handshake and frame handling |
 
