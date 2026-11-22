@@ -215,7 +215,9 @@ class Drill
       ["name", "version", "sha256", "size"].each() do |key|
         check(published[key] == cut[key], "published #{key} differs for #{cut["name"]}")
       end
-      shown = self.request("/v1/cuts/" + cut["name"] + "/versions/" + cut["version"], "GET", nil, {})
+      # Cuts with a d6 range are only shown to a client that says which d6 it is.
+      client = run([@diamond, "--version"], nil, nil).stdout().strip().split(" ")[1]
+      shown = self.request("/v1/cuts/" + cut["name"] + "/versions/" + cut["version"] + "?d6=" + client, "GET", nil, {})
       check(shown[0] == 200 && JSON.parse(shown[2])["dependencies"] == cut["dependencies"], "release #{cut["name"]}")
       puts("seed published: #{cut["name"]} #{cut["version"]}")
       # Honor the shipped six writes/minute policy, including across cuts.
