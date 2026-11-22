@@ -60,7 +60,7 @@ echo "runtime workflows: cold/hot bytecode passed"
 # Compiled entry points must preserve the same semantics and native services.
 # AOT is part of the integration target, rather than every ordinary unit run.
 if [[ ${1:-} == --aot ]]; then
-    for name in runtime_workflow_control runtime_workflow_json sqlite3_workflow_recovery deep_recursion_large_stack; do
+    for name in runtime_workflow_control runtime_workflow_json sqlite3_workflow_recovery; do
         if ! "$diamond" build "tests/cases/$name.d6" -o "$work/app" > "$work/build.log" 2>&1; then
             echo "FAIL standalone build $name" >&2
             cat "$work/build.log" >&2
@@ -78,6 +78,21 @@ if [[ ${1:-} == --aot ]]; then
             count=$((count + 1))
         done
     done
+    # A built binary runs on the same large stack as the CLI, so it recurses
+    # far past a thread's 150-frame budget (it once stopped at 149).
+    printf 'def depth(n: Int) -> Int = n == 0 ? 0 : 1 + depth(n - 1)\nputs(depth(3000))\n' \
+        > "$work/deep.d6"
+    if ! "$diamond" build "$work/deep.d6" -o "$work/deep" > "$work/build.log" 2>&1; then
+        echo "FAIL standalone build deep recursion" >&2
+        cat "$work/build.log" >&2
+        exit 1
+    fi
+    deep_output=$(timeout 30 "$work/deep" 2>&1) || true
+    if [[ $deep_output != 3000 ]]; then
+        echo "FAIL standalone deep recursion: $deep_output" >&2
+        exit 1
+    fi
+    count=$((count + 1))
     echo "runtime workflows: standalone binaries passed"
 fi
 echo "$count runtime workflow executions passed"

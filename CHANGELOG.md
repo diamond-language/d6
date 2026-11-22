@@ -25,6 +25,17 @@ come only in minor releases, marked **Breaking** here.
 - docs/api/crypto.md no longer says Strings are byte buffers.
 - Writing `obj.count < 1` or `obj.size - 1` without the call's parentheses now warns at compile
   time that a method reference has no `<` or `-`, as conditions and nil comparisons already did.
+- Binaries from `d6 build` run on the same large stack as `d6` itself. They stopped at 149 levels
+  of recursion; now they reach the ~9,600 that interpreted programs do.
+- A method that passes a block literal returning an Array, String or Hash (or one that only
+  raises) no longer fails its own `yield` with "expected Callable, got Callable[1]".
+- A block forwarded with `f(x, &block)` binds the callee's `&block` parameter instead of the
+  next positional one, so defaulted parameters before it keep their defaults. This works for
+  functions, instance and singleton methods. A `do` block on a receiver whose type isn't known
+  binds the same way.
+- A `do` block on a method call that skipped a defaulted parameter failed with "invalid
+  bytecode" when the caller's first parameter was an instance.
+- `f(x, &block, y)` is a compile error: a forwarded block must come last.
 
 ## 1.4.0 — 2026-11-22
 

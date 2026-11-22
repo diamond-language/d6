@@ -68,7 +68,8 @@ That matches the stack against which the interpreter recursion guard is
 calibrated instead of inheriting libc-dependent defaults (roughly 128 KiB on
 musl and 512 KiB on Darwin), which are too small for `run_chunk`'s fixed native
 frame and can fault before d6 can report `SystemStackError`. The program's
-own main thread runs on a 512 MiB pthread stack (`DIAMOND_MAIN_STACK_MB`), with
+own main thread, in `d6` and in `d6 build` binaries alike, runs on a 512 MiB
+pthread stack (`DIAMOND_MAIN_STACK_MB`), with
 the call-depth limit scaled to match; if that allocation fails it halves the
 request and finally falls back to the process's own stack.
 
