@@ -689,6 +689,8 @@ def math_unary_id(name)
   return 5 if name == "exp"
   return 6 if name == "log"
   return 7 if name == "tanh"
+  return 8 if name == "log10"
+  return 9 if name == "log2"
   3
 end
 
@@ -11116,6 +11118,8 @@ class Parser
     return true if name == "exp"
     return true if name == "log"
     return true if name == "tanh"
+    return true if name == "log10"
+    return true if name == "log2"
     name == "tan"
   end
 

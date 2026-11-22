@@ -220,8 +220,8 @@ p(first_negative([3, -1, -5]))   # => -1
 
 - **Ruby**: a block is never implicit. Take it as `&block`, then call
   `block(x)` or `yield(x)`; in a function without a `&` parameter, `yield`
-  pauses a [fiber](concurrency.md#fibers) instead. There is no `.call`: a
-  callable is called with parentheses.
+  pauses a [fiber](concurrency.md#fibers) instead. A callable is called with
+  parentheses, `block(x)`, though `block.call(x)` works too.
   There are no `lambda`/`proc` literals; a nested `def` is the closure.
 - **Python**: there are no `lambda` expressions. Use a nested `def`, which,
   unlike Python's, can assign to the variables it captures without

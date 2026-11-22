@@ -413,6 +413,8 @@ static inline bool diamond_math_apply(uint8_t function_id,double left,double rig
         case DIAMOND_MATH_EXP: *result=exp(left); return true;
         case DIAMOND_MATH_LOG: *result=log(left); return true;
         case DIAMOND_MATH_TANH: *result=tanh(left); return true;
+        case DIAMOND_MATH_LOG10: *result=log10(left); return true;
+        case DIAMOND_MATH_LOG2: *result=log2(left); return true;
         case DIAMOND_MATH_POW: *result=pow(left,right); return true;
     }
     return false;

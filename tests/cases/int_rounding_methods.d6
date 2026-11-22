@@ -1,0 +1,8 @@
+# Int answers Float's rounding methods, so code given either number can round
+# it. A negative digits count rounds to tens, hundreds, ...
+p([7.floor(), 7.ceil(), 7.round(), 7.truncate(), 7.round(2)])
+p([1234.floor(-2), 1234.ceil(-2), 1250.round(-2), 1249.round(-2), 1234.truncate(-2)])
+p([-1234.floor(-2), -1234.ceil(-2), -1250.round(-2), -1234.truncate(-2)])
+p([7.finite?(), 7.nan?(), 7.infinite?()])
+numbers = [3, 2.5, -2.5, 10]
+p(numbers.map() do |n| n.floor() end)

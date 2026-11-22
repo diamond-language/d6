@@ -791,6 +791,8 @@ typedef enum DiamondMathFunction : uint8_t {
     DIAMOND_MATH_EXP,
     DIAMOND_MATH_LOG,
     DIAMOND_MATH_TANH,
+    DIAMOND_MATH_LOG10,
+    DIAMOND_MATH_LOG2,
 } DiamondMathFunction;
 
 /* The class operand of DIAMOND_OP_DEFINE_METHOD/REDEFINE_METHOD/

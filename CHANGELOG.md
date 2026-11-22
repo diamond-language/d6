@@ -17,6 +17,9 @@ come only in minor releases, marked **Breaking** here.
 - `Dir.pwd()`, the working directory.
 - `Dir.glob(pattern, hidden: true)` also matches names that start with `.` and enters hidden
   directories, so `**/*` can list `.gitignore` and `.github/`.
+- Int has Float's rounding methods: `floor`, `ceil`, `round` and `truncate` (a negative
+  `digits` rounds to tens, hundreds, ...), and `finite?`, `nan?` and `infinite?`. Code given
+  either kind of number can round it without checking which it got.
 
 ### Fixed
 
@@ -36,6 +39,9 @@ come only in minor releases, marked **Breaking** here.
 - A `do` block on a method call that skipped a defaulted parameter failed with "invalid
   bytecode" when the caller's first parameter was an instance.
 - `f(x, &block, y)` is a compile error: a forwarded block must come last.
+- A keyword call on another instance, `other.step(1, by: 2)`, could reach a private method.
+- `Math.log10` and `Math.log2` use C's `log10` and `log2`; they divided natural logarithms and
+  could be one unit in the last place off.
 
 ## 1.4.0 — 2026-11-22
 
