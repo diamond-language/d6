@@ -24,4 +24,29 @@ puts(stop_at_two([1, 2, 3]))
 puts(stop_at_two(BlockIterator.new()))
 puts(find_two([1, 2, 3]))
 puts(find_two(BlockIterator.new()))
+
+def yield_value(value, &block)
+  yield(value)
+end
+
+class BlockConstructor
+  def initialize(value, &block)
+    yield(value)
+  end
+
+  def self.visit(value, &block)
+    yield(value)
+  end
+end
+
+def keyword_and_spread_exits()
+  callable = yield_value
+  from_callable = callable(value: 4) do |value| break value end
+  from_constructor = BlockConstructor.new(value: 5) do |value| break value end
+  from_singleton = BlockConstructor.visit(value: 6) do |value| break value end
+  from_spread = yield_value(*[7]) do |value| break value end
+  puts([from_callable, from_constructor, from_singleton, from_spread])
+end
+
+keyword_and_spread_exits()
 nil

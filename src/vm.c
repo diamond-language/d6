@@ -464,6 +464,7 @@ static void free_object_list(const DiamondVm *vm,DiamondObject *object) {
 }
 
 void diamond_vm_free(DiamondVm *vm) {
+    string_cursors_invalidate();
     budget_unregister(vm);
     free_object_list(vm,vm->young_objects);
     free_object_list(vm,vm->old_objects);

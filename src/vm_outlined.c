@@ -81,7 +81,9 @@ static void *mysql_connect_thread(void *argument) {
 
 /* The macros the outlined case bodies below were written with. run_chunk defines its own, with the same
  * names, further down: there they unwind through its handlers, here they return the status and the
- * caller applies VM_PROPAGATE. HELPER_DONE is the case's normal `break`. */
+ * caller applies VM_PROPAGATE. HELPER_DONE is the case's normal `break`.
+ * Outlined calls also publish the decoded IP before running the callee so a
+ * nonlocal block break can resume after the instruction. */
 #define VM_RETURN(status_) return (status_)
 #define VM_PROPAGATE(status_)                                      \
     do { const DiamondVmStatus propagated_=(status_);              \
@@ -2289,6 +2291,7 @@ DiamondVmStatus outlined_call_typed(DiamondVm *vm,const DiamondChunk *chunk,Diam
         bind_context_set(&explicit_bindings[index],0,chunk,
                          chunk->type_sets,set_index);
     }
+    *ip_ref=ip;
     const DiamondChunk called_chunk={.name=function->name,
         .code=function->code,.lines=function->lines,
         .columns=function->columns,.code_count=function->code_count,
@@ -2353,6 +2356,7 @@ DiamondVmStatus outlined_call_spread(DiamondVm *vm,const DiamondChunk *chunk,Dia
         for(size_t index=0;index<type_argument_count;index++)
             READ_SHORT(type_arguments[index]);
     }
+    *ip_ref=ip;
     if((size_t)function_index>=chunk->function_count)
         VM_RETURN(DIAMOND_VM_INVALID_BYTECODE);
     if(registers[array_register].kind!=DIAMOND_VALUE_OBJECT||
@@ -2498,6 +2502,7 @@ DiamondVmStatus outlined_call_singleton_keywords(DiamondVm *vm,const DiamondChun
             VM_RETURN(DIAMOND_VM_INVALID_BYTECODE);
         for(size_t index=0;index<type_count;index++)READ_SHORT(type_arguments[index]);
     }
+    *ip_ref=ip;
     if((size_t)function_index>=chunk->function_count||needs_receiver>1||
        (class_index!=DIAMOND_NO_CLASS&&(size_t)class_index>=chunk->class_count)||
        registers[positional_register].kind!=DIAMOND_VALUE_OBJECT||
@@ -2583,6 +2588,7 @@ DiamondVmStatus outlined_call_singleton_spread(DiamondVm *vm,const DiamondChunk 
         for(size_t index=0;index<type_argument_count;index++)
             READ_SHORT(type_arguments[index]);
     }
+    *ip_ref=ip;
     if((size_t)function_index>=chunk->function_count||
        needs_receiver>1||
        (class_index!=DIAMOND_NO_CLASS&&(size_t)class_index>=chunk->class_count))
@@ -2668,6 +2674,7 @@ DiamondVmStatus outlined_new_spread(DiamondVm *vm,const DiamondChunk *chunk,Diam
     size_t ip=*ip_ref;
     uint16_t dest=0,spread_register=0;uint16_t class_index=0;
     READ_SHORT(dest);READ_SHORT(class_index);READ_SHORT(spread_register);
+    *ip_ref=ip;
     if((size_t)class_index>=chunk->class_count)
         VM_RETURN(DIAMOND_VM_INVALID_BYTECODE);
     if(registers[spread_register].kind!=DIAMOND_VALUE_OBJECT||
@@ -3008,6 +3015,7 @@ DiamondVmStatus outlined_invoke_spread(DiamondVm *vm,const DiamondChunk *chunk,D
         for(size_t index=0;index<type_argument_count;index++)
             READ_SHORT(type_arguments[index]);
     }
+    *ip_ref=ip;
     if((size_t)name>=chunk->string_count)
         VM_RETURN(DIAMOND_VM_INVALID_BYTECODE);
     if(registers[spread_register].kind!=DIAMOND_VALUE_OBJECT||
@@ -3701,6 +3709,7 @@ DiamondVmStatus outlined_invoke_self_method(DiamondVm *vm,const DiamondChunk *ch
     size_t ip=*ip_ref;(void)depth;
     uint16_t dest=0,base=0,name_index=0;uint8_t argc=0;
     READ_SHORT(dest);READ_SHORT(name_index);READ_SHORT(base);READ_BYTE(argc);
+    *ip_ref=ip;
     if(registers[0].kind!=DIAMOND_VALUE_CLASS)
         VM_RETURN(DIAMOND_VM_INVALID_BYTECODE);
     const uint16_t class_operand=registers[0].as.class_index;
@@ -3838,6 +3847,7 @@ DiamondVmStatus outlined_call_closure_keywords(DiamondVm *vm,const DiamondChunk 
     if(has_block)READ_SHORT(block_register);
     if(has_block&&block_register>=DIAMOND_REGISTER_COUNT)
         VM_RETURN(DIAMOND_VM_INVALID_BYTECODE);
+    *ip_ref=ip;
     if(registers[callable].kind!=DIAMOND_VALUE_OBJECT||
        registers[callable].as.object->kind!=DIAMOND_OBJECT_CLOSURE) {
         snprintf(vm->error,sizeof vm->error,
@@ -3881,6 +3891,7 @@ DiamondVmStatus outlined_call_closure_spread(DiamondVm *vm,const DiamondChunk *c
     size_t ip=*ip_ref;(void)depth;
     uint16_t dest=0,callable=0,spread_register=0;
     READ_SHORT(dest);READ_SHORT(callable);READ_SHORT(spread_register);
+    *ip_ref=ip;
     if(registers[callable].kind!=DIAMOND_VALUE_OBJECT||
        registers[callable].as.object->kind!=DIAMOND_OBJECT_CLOSURE) {
         snprintf(vm->error,sizeof vm->error,
@@ -3942,6 +3953,7 @@ DiamondVmStatus outlined_new_keywords(DiamondVm *vm,const DiamondChunk *chunk,Di
     if(has_block)READ_SHORT(block_register);
     if(has_block&&block_register>=DIAMOND_REGISTER_COUNT)
         VM_RETURN(DIAMOND_VM_INVALID_BYTECODE);
+    *ip_ref=ip;
     const DiamondClass *class=chunk->classes[class_index];
     const DiamondMethod *initialize=lookup_method(chunk,class,
         "initialize",sizeof("initialize")-1);

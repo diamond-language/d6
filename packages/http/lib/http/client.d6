@@ -56,11 +56,16 @@ def http_parse_url(url)
   end
   rest = url.slice(scheme_end + 3, url.length())
   path_start = rest.index_of("/")
+  query_start = rest.index_of("?")
+  if query_start != nil && (path_start == nil || query_start < path_start)
+    path_start = query_start
+  end
   host_and_port = rest
   path = "/"
   unless path_start == nil
     host_and_port = rest.slice(0, path_start)
     path = rest.slice(path_start, rest.length())
+    path = "/" + path if path.start_with?("?")
   end
   default_port = if scheme == "https" then 443 else 80 end
   colon = host_and_port.index_of(":")
@@ -409,47 +414,10 @@ def http_body_limit(options)
 end
 
 def http_resolve_location(parsed, location)
-  location = location.strip()
-  hash = location.index_of("#")
-  location = location.slice(0, hash) unless hash == nil
-  return location if location.index_of("://") != nil
-  return "#{parsed["scheme"]}:#{location}" if location.start_with?("//")
   origin = "#{parsed["scheme"]}://#{parsed["host"]}"
   origin = "#{origin}:#{parsed["port"]}" unless parsed["port"] == parsed["default_port"]
-  path = parsed["path"]
-  question = path.index_of("?")
-  path = path.slice(0, question) unless question == nil
-  return origin + path + location if location.start_with?("?")
-  return origin + path if location == ""
-  target = if location.start_with?("/")
-    location
-  else
-    slash = path.rindex("/")
-    directory = if slash == nil then "/" else path.slice(0, slash + 1) end
-    directory + location
-  end
-  query = ""
-  question = target.index_of("?")
-  unless question == nil
-    query = target.slice(question, target.length() - question)
-    target = target.slice(0, question)
-  end
-  output = []
-  segments = target.split("/", -1)
-  segments.each_with_index() do |segment, index|
-    last = index == segments.length() - 1
-    if segment == "."
-      output.push("") if last
-    elsif segment == ".."
-      output.pop() if output.length() > 1
-      output.push("") if last
-    else
-      output.push(segment)
-    end
-  end
-  joined = output.join("/")
-  joined = "/" + joined unless joined.start_with?("/")
-  origin + joined + query
+  base = URI.parse(origin + parsed["path"])
+  base.resolve(location.strip()).with_fragment(nil).to_s()
 end
 
 def http_origin(parsed)

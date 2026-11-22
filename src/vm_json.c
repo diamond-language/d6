@@ -456,6 +456,11 @@ DiamondVmStatus json_parse_next(DiamondVm *vm,const char *source,size_t length,
         .max_depth=json_depth_budget(vm,call_depth)};
     json_skip_whitespace(&parser);
     if(parser.pos>=parser.length) {*out=DIAMOND_NIL;return DIAMOND_VM_OK;}
+    if(offset!=0&&parser.pos==offset) {
+        snprintf(vm->error,sizeof vm->error,
+            "expected whitespace between JSON values at position %zu",offset);
+        return DIAMOND_VM_JSON_ERROR;
+    }
     DiamondValue value=DIAMOND_NIL;
     const DiamondVmStatus status=json_parse_value(&parser,&value);
     if(status!=DIAMOND_VM_OK)return status;
