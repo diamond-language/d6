@@ -2912,6 +2912,24 @@ static bool callable_answers(const Compiler *compiler,DiamondSpan name) {
     return false;
 }
 
+/* What an instance call's result is known to be, for the compiler and the
+ * editor; `arguments` ends with the block, if the call has one. */
+static void publish_invoke_result_types(Compiler *compiler,uint16_t result,
+        uint16_t receiver,uint16_t mutation_receiver,int32_t receiver_set_index,
+        DiamondSpan name,const DiamondFunction *return_target,
+        const uint16_t *resolved_arguments,size_t resolved_count,
+        const uint16_t *arguments,size_t count) {
+    publish_instance_return_type(compiler,result,receiver,receiver_set_index,name,
+        return_target,resolved_arguments,resolved_count);
+    publish_native_scalar_method_return_type(compiler,result,receiver,
+        receiver_set_index,name,(uint8_t)count);
+    publish_collection_argument_return_type(compiler,result,receiver_set_index,
+        name,arguments,count);
+    publish_array_map_tooling_type(compiler,result,receiver,name,arguments,count);
+    publish_array_push_return_type(compiler,result,mutation_receiver,name,
+        arguments,count);
+}
+
 static uint16_t parse_invoke_named_impl(Compiler *compiler, uint16_t receiver,
         uint16_t mutation_receiver, int32_t receiver_set_index, DiamondSpan name) {
     const DiamondFunction *contextual_target=
@@ -3102,8 +3120,11 @@ static uint16_t parse_invoke_named_impl(Compiler *compiler, uint16_t receiver,
             const uint16_t positional=emit_argument_array(compiler,args,count);
             const uint16_t result=emit_invoke_keywords(compiler,receiver,name,positional,
                 nullptr,nullptr,0,type_arguments,type_argument_count,true,block);
-            publish_instance_return_type(compiler,result,receiver,receiver_set_index,
-                name,return_target,resolved_arguments,resolved_count);
+            /* The same facts as a positional call with the block last. */
+            args[count++]=block;
+            publish_invoke_result_types(compiler,result,receiver,mutation_receiver,
+                receiver_set_index,name,return_target,resolved_arguments,
+                resolved_count,args,count);
             return result;
         }
         args[count++]=block;
@@ -3142,23 +3163,20 @@ static uint16_t parse_invoke_named_impl(Compiler *compiler, uint16_t receiver,
             const uint16_t positional=emit_argument_array(compiler,args,count);
             const uint16_t result=emit_invoke_keywords(compiler,receiver,name,positional,
                 nullptr,nullptr,0,type_arguments,type_argument_count,true,block);
-            publish_instance_return_type(compiler,result,receiver,receiver_set_index,
-                name,return_target,resolved_arguments,resolved_count);
+            /* The same facts as a positional call with the block last. */
+            args[count++]=block;
+            publish_invoke_result_types(compiler,result,receiver,mutation_receiver,
+                receiver_set_index,name,return_target,resolved_arguments,
+                resolved_count,args,count);
             return result;
         }
         args[count++]=block;
     }
     const uint16_t result=emit_invoke_call(compiler,receiver,name,writer_name,
         type_arguments,type_argument_count,args,count);
-    publish_instance_return_type(compiler,result,receiver,receiver_set_index,name,
-        return_target,resolved_arguments,resolved_count);
-    publish_native_scalar_method_return_type(compiler,result,receiver,
-        receiver_set_index,name,(uint8_t)count);
-    publish_collection_argument_return_type(compiler,result,receiver_set_index,
-        name,args,count);
-    publish_array_map_tooling_type(compiler,result,receiver,name,args,count);
-    publish_array_push_return_type(compiler,result,mutation_receiver,name,args,
-        count);
+    publish_invoke_result_types(compiler,result,receiver,mutation_receiver,
+        receiver_set_index,name,return_target,resolved_arguments,resolved_count,
+        args,count);
     return result;
 }
 
