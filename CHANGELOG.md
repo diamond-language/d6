@@ -28,6 +28,8 @@ come only in minor releases, marked **Breaking** here.
 - docs/api/crypto.md no longer says Strings are byte buffers.
 - Writing `obj.count < 1` or `obj.size - 1` without the call's parentheses now warns at compile
   time that a method reference has no `<` or `-`, as conditions and nil comparisons already did.
+  Calling a method on one, `box.items.push(x)`, warns the same way unless a Callable has that
+  method (`arity`, `call`, `inspect`, ...).
 - Binaries from `d6 build` run on the same large stack as `d6` itself. They stopped at 149 levels
   of recursion; now they reach the ~9,600 that interpreted programs do.
 - A method that passes a block literal returning an Array, String or Hash (or one that only

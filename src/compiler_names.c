@@ -2901,6 +2901,17 @@ static uint16_t compile_setter_compound_assignment(Compiler *compiler,
 /* parse_invoke after `.name` has been consumed -- also reached from
  * parse_call for a bare `name(...)` inside a method, with self as the
  * receiver. */
+/* Whether a Callable value answers `name`: the methods every value has, plus
+ * arity and call. */
+static bool callable_answers(const Compiler *compiler,DiamondSpan name) {
+    static const char *const members[]={"arity","call","class","deep_freeze",
+        "dup","equal?","freeze","frozen?","inspect","is_a?","nil?",
+        "respond_to?","tap","to_s"};
+    for(size_t index=0;index<sizeof members/sizeof members[0];index++)
+        if(name_equals(compiler,members[index],name,false))return true;
+    return false;
+}
+
 static uint16_t parse_invoke_named_impl(Compiler *compiler, uint16_t receiver,
         uint16_t mutation_receiver, int32_t receiver_set_index, DiamondSpan name) {
     const DiamondFunction *contextual_target=
@@ -3003,6 +3014,19 @@ static uint16_t parse_invoke_named_impl(Compiler *compiler, uint16_t receiver,
                 char consequence[64];
                 snprintf(consequence,sizeof consequence,"which has no '%s'",operator);
                 warn_method_reference_use(compiler,reference,consequence);
+            }
+            /* `obj.files.push(x)`: a method a Callable doesn't have, so the
+             * reader call was meant. */
+            if(compiler->current.kind==DIAMOND_TOKEN_DOT) {
+                DiamondLexer lookahead=compiler->lexer;
+                const DiamondToken member=diamond_lexer_next(&lookahead);
+                if(member.kind==DIAMOND_TOKEN_IDENTIFIER&&
+                   !callable_answers(compiler,member.span)) {
+                    char consequence[DIAMOND_MAX_FUNCTION_NAME+32];
+                    snprintf(consequence,sizeof consequence,"which has no '%.*s'",
+                        (int)member.span.length,compiler->source+member.span.start);
+                    warn_method_reference_use(compiler,reference,consequence);
+                }
             }
             return reference;
         }

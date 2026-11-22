@@ -1098,6 +1098,12 @@ grep -q "block.d6:3:3: warning: concat() returns a new Array" "$warn_dir/block_s
 printf 'class Box\n  attr_reader count: Int\n  def initialize()\n    @count = 2\n  end\nend\nbox = Box.new()\nbegin\n  puts(box.count < 1)\nrescue error: TypeError\n  puts("raised")\nend\n' >"$warn_dir/operator.d6"
 [[ "$("$diamond_abs" "$warn_dir/operator.d6" 2>"$warn_dir/operator_stderr")" == raised* ]]
 grep -q "operator.d6:9:12: warning: 'count' without parentheses is a method reference, which has no '<'" "$warn_dir/operator_stderr"
+# Calling a method a Callable doesn't have on one (`box.items.push(x)`) is the
+# same slip; arity and call are a Callable's own and don't warn.
+printf 'class Box\n  attr_reader items: Array[Int]\n  def initialize()\n    @items = []\n  end\nend\nbox = Box.new()\np(box.items.arity())\nbegin\n  box.items.push(1)\nrescue error: TypeError\n  puts("raised")\nend\n' >"$warn_dir/member.d6"
+"$diamond_abs" "$warn_dir/member.d6" >/dev/null 2>"$warn_dir/member_stderr"
+grep -q "member.d6:10:7: warning: 'items' without parentheses is a method reference, which has no 'push'" "$warn_dir/member_stderr"
+[[ $(grep -c warning "$warn_dir/member_stderr") == 1 ]]
 # A reader written without parentheses is a method reference: compared with
 # nil, used as a condition or interpolated, it is a slip for a call. Passing
 # or assigning one is not.
