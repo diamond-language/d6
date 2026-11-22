@@ -1,0 +1,21 @@
+# A struct can extend a class with no fields and no initialize, such as a
+# sealed class that only names the kind, so each variant is a struct and a
+# case over the sealed class is checked for every variant.
+sealed class Node
+  def kind() -> String = "node"
+end
+struct Lit(value: Int) < Node
+end
+struct Add(left: Node, right: Node) < Node
+end
+def eval(node: Node) -> Int
+  case node
+  when Lit then node.value()
+  when Add then eval(node.left()) + eval(node.right())
+  end
+end
+tree = Add.new(Lit.new(1), Add.new(Lit.new(2), Lit.new(3)))
+puts(eval(tree))
+puts(Lit.new(4) == Lit.new(4))
+puts(Lit.new(4).kind())
+p(tree)

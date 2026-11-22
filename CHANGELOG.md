@@ -15,6 +15,8 @@ come only in minor releases, marked **Breaking** here.
 - `Zlib.deflate(data)` and `Zlib.inflate(data, max_size)`: compression in zlib's wrapping,
   which git objects, PNG and HTTP's `deflate` use. `Gzip.compress` wrote only gzip.
 - `Dir.pwd()`, the working directory.
+- A struct can extend a class with no fields and no `initialize`, such as a `sealed class`
+  naming the kind, so each variant of a sealed hierarchy can be a one-line struct.
 - `Dir.glob(pattern, hidden: true)` also matches names that start with `.` and enters hidden
   directories, so `**/*` can list `.gitignore` and `.github/`.
 - Int has Float's rounding methods: `floor`, `ceil`, `round` and `truncate` (a negative

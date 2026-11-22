@@ -227,18 +227,10 @@ subclasses and checks that a `case` over one covers them all:
 sealed class Shape
 end
 
-class Circle < Shape
-  attr_reader radius: Float
-  def initialize(radius: Float)
-    @radius = radius
-  end
+struct Circle(radius: Float) < Shape
 end
 
-class Square < Shape
-  attr_reader side: Float
-  def initialize(side: Float)
-    @side = side
-  end
+struct Square(side: Float) < Shape
 end
 
 def area(shape: Shape) -> Float
@@ -259,6 +251,10 @@ error: case is not exhaustive over its subject's known closed type; missing: Squ
 
 Adding a new subclass later turns every `case` that forgot it into a compile
 error, instead of a `nil` at run time.
+
+The variants can be structs, as here, or classes. A struct can extend a class
+like `Shape` that has no fields and no `initialize`; otherwise its parent must
+be another struct.
 
 ## Coming from another language
 

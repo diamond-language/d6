@@ -3263,8 +3263,13 @@ class Parser
         return 0
       end
       inherited = self.struct_fields_of(parent_entry[1])
+      # A class with no fields and no initialize (a sealed marker) works too.
+      if inherited == nil && self.class_all_fields(parent_entry[1]).empty?() &&
+         self.case_pattern_reader(parent_entry[1], "initialize") == nil
+        inherited = []
+      end
       if inherited == nil
-        self.fail("a struct's superclass must be a struct declared earlier")
+        self.fail("a struct's superclass must be a struct, or a class with no fields and no initialize, declared earlier")
         return 0
       end
       index = 0

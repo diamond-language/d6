@@ -1,0 +1,5 @@
+6
+true
+node
+#<Add left=#<Lit value=1>, right=#<Add left=#<Lit value=2>, right=#<Lit value=3>>>
+#<Add>
