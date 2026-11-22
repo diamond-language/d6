@@ -154,17 +154,17 @@ class Fixture
     JSON.parse(run([@diamond, "credentials.d6"] + args, @env, @work).stdout())
   end
 
-  def facet(args: Array, cwd)
-    run([@facet] + args, @env, cwd)
+  def facet(args: Array, cwd, env: Hash = {})
+    run([@facet] + args, @env.merge(env), cwd)
   end
 end
 
-def write_package(work, name, version, body, dependencies)
+def write_package(work, name, version, body, dependencies, extra: Hash = {})
   path = work + "/" + name
   Harness.mkdir_p(path + "/lib")
   manifest = {"name": name, "version": version, "summary": "test cut", "license": "MIT",
               "maintainers": [{"name": "Test", "contact": "test@example.com"}],
-              "dependencies": dependencies}
+              "dependencies": dependencies}.merge(extra)
   File.write(path + "/Cutfile", JSON.stringify(manifest))
   File.write(path + "/README.md", "test\n")
   File.write(path + "/LICENSE", "MIT\n")
@@ -466,6 +466,49 @@ class Scenario
     loaded = run([@diamond, "-e", "require_cut \"greeter\"\nputs(greet())\nexit(0)"], @env, @consumer)
     self.check(loaded.stdout().strip() == "installed from registry", "greeter did not load: #{loaded.stdout()}")
     self.check(File.exist?(@consumer + "/cuts/helper/lib/helper.d6"), "the dependency was not installed")
+  end
+
+  # The versions /v1/cuts/future/versions lists for `query`.
+  def future_versions(query: String) -> Array
+    answer = @f.get("/v1/cuts/future/versions" + query)
+    self.check(answer[0] == 200, "future index#{query} status #{answer[0]}")
+    answer[1]["versions"].map() do |v| v["version"] end
+  end
+
+  # A release whose `d6` range leaves out the asking facet's d6 is hidden from it:
+  # from the index, so the newest usable version wins, and as a release document.
+  # Facets that send no ?d6= predate the field and see only releases without one.
+  def d6_ranges()
+    body = "def future_value() = 1\n"
+    token = @f.credential(["issue", "test-owner", "3600", "publish:future", "d6 range test"])["token"]
+    old_cut = write_package(@work, "future", "0.1.0", body, {})
+    @f.facet(["publish", old_cut, "--registry", @url, "--token", token], nil)
+    new_cut = write_package(@work, "future", "1.0.0", body, {}, {"d6": ">=9.0.0"})
+    @f.facet(["publish", new_cut, "--registry", @url, "--token", token], nil)
+    self.check(self.future_versions("") == ["0.1.0"], "a facet without ?d6= saw a release with a range")
+    self.check(self.future_versions("?d6=1.4.0") == ["0.1.0"], "d6 1.4.0 saw a release needing 9")
+    self.check(self.future_versions("?d6=9.1.0") == ["0.1.0", "1.0.0"], "d6 9.1.0 did not see both releases")
+    self.check(@f.get("/v1/cuts/future/versions/1.0.0")[0] == 404, "a facet without ?d6= got a release with a range")
+    answer = @f.get("/v1/cuts/future/versions/1.0.0?d6=9.0.0-dev")
+    self.check(answer[0] == 200 && answer[1]["d6"] == ">=9.0.0", "a 9.0.0 prerelease did not get the release: #{answer[1]}")
+    self.check(!@f.get("/v1/cuts/future/versions/0.1.0?d6=1.4.0")[1].key?("d6"), "a release without a range reported one")
+    self.check(@f.get("/v1/cuts/future/versions?d6=soon")[0] == 400, "an invalid ?d6= was accepted")
+    self.check(@f.get("/v1/cuts/future/versions?limit=1")[0] == 400, "an unknown query key was accepted")
+    self.check(@f.get(@release["archive"]["path"] + "?d6=1.4.0")[0] == 404, "a blob path took a query")
+    # facet add picks the newest version this d6 can install.
+    project = @work + "/d6_consumer"
+    Dir.mkdir(project)
+    @f.facet(["init", "consumer"], project)
+    @f.facet(["add", "future", "--registry", @url], project, {"FACET_D6_VERSION": "1.4.0"})
+    self.check(File.read(project + "/Cutfile").include?("\"version\": \"^0.1.0\""), "facet add picked a version d6 1.4.0 can't use")
+    @f.facet(["update"], project, {"FACET_D6_VERSION": "1.4.0"})
+    future = JSON.parse(File.read(project + "/Cutfile.lock"))["future"]
+    self.check(future["version"] == "0.1.0", "d6 1.4.0 locked future #{future["version"]}")
+    newer = @work + "/d6_consumer_new"
+    Dir.mkdir(newer)
+    @f.facet(["init", "consumer"], newer)
+    @f.facet(["add", "future", "--registry", @url], newer, {"FACET_D6_VERSION": "9.1.0"})
+    self.check(File.read(newer + "/Cutfile").include?("\"version\": \"^1.0.0\""), "facet add on d6 9.1.0 did not pick 1.0.0")
   end
 
   # --- ownership, yanking, credentials ---------------------------------------------------------
@@ -771,6 +814,7 @@ class Scenario
     self.monitor_probes()
     self.catalog_pages()
     self.consumer_install()
+    self.d6_ranges()
     self.ownership()
     self.yanking()
     self.credentials()

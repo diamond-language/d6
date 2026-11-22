@@ -3,8 +3,20 @@ module Registry
   end
 
   struct Release(id: Int, cut_id: Int, version: String, dependencies: String, maintainers: String | Nil,
-                 sha256: String, size: Int, yanked: Int, takedown_reason: String | Nil, created_at: Int)
-    def yanked?() -> Bool = self.yanked() == 1
+             sha256: String, size: Int, yanked: Int, takedown_reason: String | Nil, created_at: Int,
+             d6: String | Nil)
+def yanked?() -> Bool = self.yanked() == 1
+
+# Whether a facet for d6 `client` can install this release. `client` is nil for a
+# facet that predates the `d6` field, which can't read an archive that has one. A
+# prerelease d6 counts as the release it leads up to.
+def usable_by?(client: String | Nil) -> Bool
+  range = self.d6()
+  return true if range == nil
+  return false if client == nil
+  release = client.split("+")[0].split("-")[0]
+  SemVer.satisfies?(release, range)
+end
     def taken_down?() -> Bool = self.takedown_reason() != nil
   end
 
@@ -40,7 +52,7 @@ module Registry
 
   def self.build_release(row: Hash) -> Release =
     Release.new(row["id"], row["cut_id"], row["version"], row["dependencies"], row["maintainers"], row["sha256"],
-      row["size"], row["yanked"], row["takedown_reason"], row["created_at"])
+      row["size"], row["yanked"], row["takedown_reason"], row["created_at"], row["d6"])
 
   def self.build_owner(row: Hash) -> Owner = Owner.new(row["cut_id"], row["owner"], row["created_at"])
 
@@ -64,7 +76,7 @@ module Registry
       @cuts = Mjolnir::Schema.new("cuts", {"id": :int, "name": :string, "created_at": :int}, Registry.build_cut)
       @releases = Mjolnir::Schema.new("releases", {"id": :int, "cut_id": :int, "version": :string,
         "dependencies": :string, "maintainers": :string, "sha256": :string, "size": :int, "yanked": :int,
-        "takedown_reason": :string, "created_at": :int}, Registry.build_release)
+        "takedown_reason": :string, "created_at": :int, "d6": :string}, Registry.build_release)
       @owners = Mjolnir::Schema.new("owners", {"cut_id": :int, "owner": :string, "created_at": :int},
         Registry.build_owner, ["cut_id", "owner"])
       @credentials = Mjolnir::Schema.new("credentials", {"id": :int, "token_digest": :string, "subject": :string,

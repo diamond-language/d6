@@ -43,6 +43,8 @@ module Registry
       # Publisher#record_missing_details fills in releases published before this table.
       self.migrate(db, "2026110101", [
         "CREATE TABLE release_details (release_id INTEGER PRIMARY KEY, summary TEXT, license TEXT, homepage TEXT, source TEXT, documentation TEXT, issues TEXT, readme TEXT, FOREIGN KEY(release_id) REFERENCES releases(id))"])
+      # The range of d6 versions a release works with; NULL for releases that don't say.
+      self.migrate(db, "2026112101", ["ALTER TABLE releases ADD COLUMN d6 TEXT"])
     end
   end
 end

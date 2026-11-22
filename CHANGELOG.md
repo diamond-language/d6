@@ -8,6 +8,9 @@ record. From 1.0.0, releases follow the [1.x compatibility policy](docs/compatib
 
 ### Added
 
+- A cut's `Cutfile` can say which d6 versions it works with: `"d6": ">=1.4.0"`. facet won't
+  install it on a d6 outside that range, and the registry leaves it out of what older d6 versions
+  resolve, so they stay on the cut's last release that works for them.
 - `facet add` takes several names: `facet add toml csv http`.
 - `File.join` takes Arrays of parts, so `File.join(*parts)` and `File.join(root, parts)` work.
 - `File.mtime(path)`: when a file was last modified, as a `Time`.
