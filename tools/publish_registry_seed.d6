@@ -34,7 +34,7 @@ def post(host, port, path, token, data)
     {"connect_timeout_ms": 60000, "read_timeout_ms": 60000, "write_timeout_ms": 60000})
   begin
     socket.write("POST #{path} HTTP/1.1\r\nHost: #{host}\r\nAuthorization: Bearer #{token}\r\n" +
-      "Content-Type: application/octet-stream\r\nContent-Length: #{data.length()}\r\n" +
+      "Content-Type: application/octet-stream\r\nContent-Length: #{data.bytesize()}\r\n" +
       "Connection: close\r\n\r\n" + data)
     status_line = socket.gets()
     raise IOError.new("no response") if status_line == nil
@@ -56,7 +56,7 @@ end
 
 def check_archive(seed, cut, message)
   data = File.read(seed + "/" + cut["archive"])
-  if data.length() != cut["size"] || Digest.sha256(data) != cut["sha256"]
+  if data.bytesize() != cut["size"] || Digest.sha256(data) != cut["sha256"]
     raise ArgumentError.new(message + cut["name"])
   end
   data
@@ -97,7 +97,7 @@ def publish(base, seed, credentials)
       break if status != 429
       IO.poll([], [], 10100)
     end
-    unless (status == 200 || status == 201) && body.length() <= 65536
+    unless (status == 200 || status == 201) && body.bytesize() <= 65536
       raise ArgumentError.new("publish failed for #{cut["name"]}: HTTP #{status}")
     end
     published = JSON.parse(body)
