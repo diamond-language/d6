@@ -228,6 +228,18 @@ Renames `from` to `to`, atomically replacing any file at `to`, and returns
 `to`. Writing a temporary file and renaming it over the original is the safe
 way to update a file.
 
+### `File.touch(path, time = nil) -> String`
+
+Creates `path` if it is missing, then sets its access and modification times to `time`:
+a Time, or seconds since the epoch as an Int or Float. Without `time` it uses now. Returns
+`path`. Build tools use it to mark targets up to date, and tests to age files.
+
+<!-- doc-check: skip -->
+```ruby
+File.touch("out.txt", Time.utc(2026, 1, 1, 0, 0, 0))
+File.mtime("out.txt").year()   # => 2026
+```
+
 ### `File.sync(path) -> String`
 
 Flushes a regular file and its directory to disk and returns `path`.

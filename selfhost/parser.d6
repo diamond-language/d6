@@ -12113,7 +12113,8 @@ class Parser
     ["copy", 12, true, Type::STRING], ["size", 13, false, Type::INT],
     ["sha256", 20, false, Type::STRING], ["chmod", 23, true, Type::STRING],
     ["mode", 19, false, Type::INT], ["file?", 14, false, Type::BOOL],
-    ["symlink?", 15, false, Type::BOOL], ["write", 11, true, Type::INT]
+    ["symlink?", 15, false, Type::BOOL], ["write", 11, true, Type::INT],
+    ["touch", 34, true, Type::STRING]
   ]
 
   def dir_path_methods() = [
