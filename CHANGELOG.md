@@ -5,7 +5,7 @@ implementation step; the Git history remains the authoritative fine-grained
 record. Releases follow the [compatibility policy](docs/compatibility.md): breaking changes
 come only in minor releases, marked **Breaking** here.
 
-## 1.4.0 — 2026-11-21
+## 1.4.0 — 2026-11-22
 
 What five dogfood applications ran short of: full-screen terminal programs, nonblocking TLS,
 assignment expressions, compile warnings, `Dir.glob`, process groups, a `d6` range in Cutfiles,
