@@ -1,19 +1,25 @@
-# Compatibility in 1.x
+# Compatibility
 
-d6 follows semantic versioning from 1.0.0:
+d6 numbers its releases major.minor.patch:
 
-- **Patch releases** (1.0.1, 1.0.2, ...) contain only bug fixes and performance
-  improvements.
-- **Minor releases** (1.1, 1.2, ...) may also add features.
-- **Nothing in 1.x breaks compatibility.** A program, project or cut that works
-  on one 1.x release keeps working on every later 1.x release. Anything that has
-  to break waits for 2.0.
+- **Patch releases** (1.4.1, 1.4.2, ...) contain only bug fixes and performance
+  improvements. Nothing in a patch release breaks a working program.
+- **Minor releases** (1.5, 1.6, ...) add features, and occasionally make a
+  breaking change when that fixes a real problem. Each one is marked
+  **Breaking** in the
+  [changelog](https://github.com/diamond-language/d6/blob/main/CHANGELOG.md)
+  and the release notes, with what to change.
+
+Pin the version you build with, as a mise version or a package, and upgrade
+when you're ready. Until 1.4.0, minor releases made no breaking changes; the
+first was 1.4.0's [character Strings](release-1.4.0.md#breaking-strings-count-characters).
 
 ## Language and standard library
 
-Source that compiles and runs on 1.x compiles and runs, with the same results,
-on later 1.x releases. Later releases may add syntax, core methods, classes,
-modules, cuts and command-line options.
+Apart from the changes marked **Breaking**, source that compiles and runs on one
+release compiles and runs, with the same results, on later releases. Later
+releases may add syntax, core methods, classes, modules, cuts and command-line
+options.
 
 These are not covered:
 
@@ -43,13 +49,16 @@ cache files.
 
 ## Projects and packages
 
-Every 1.x `facet` reads `Cutfile`, `Cutfile.dev` and `Cutfile.lock` files
-written by earlier 1.x releases, and installs from them the same versions they
+Every `facet` reads `Cutfile`, `Cutfile.dev` and `Cutfile.lock` files
+written by earlier releases, and installs from them the same versions they
 lock. Later releases may add manifest keys. A project that uses a new key needs
 a `facet` that knows it, and older releases reject it rather than ignoring it.
 
 Published cut releases are immutable; see the [cut contract](cut-contract.md).
-A cut that installs and loads on 1.x keeps doing so on later 1.x releases.
+A cut that a breaking change affects can name the d6 versions it works with
+(`"d6": ">=1.4.0"` in its Cutfile). facet and the registry then give an older
+d6 the cut's last release that works for it, so a project that hasn't upgraded
+keeps installing.
 
 ## Experimental interfaces
 
@@ -68,6 +77,6 @@ These may change in any release:
 
 ## Platforms
 
-Supported platforms are listed in [portability](portability.md). A 1.x release
+Supported platforms are listed in [portability](portability.md). A release
 may add platforms. It drops one only when its toolchain or vendor support ends,
 and the changelog announces the change a release ahead.
