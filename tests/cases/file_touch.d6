@@ -1,0 +1,26 @@
+# File.touch creates a missing file and sets its times to a Time, epoch
+# seconds, or now.
+root = Dir.mktmpdir("touch-")
+path = File.join(root, "made.txt")
+puts(File.touch(path) == path)
+puts(File.exist?(path) && File.read(path) == "")
+puts((File.mtime(path).to_f() - Time.now().to_f()).abs() < 5)
+File.touch(path, 1700000000.5)
+puts(File.mtime(path).to_f())
+File.touch(path, Time.utc(2020, 1, 2, 3, 4, 5))
+puts(File.mtime(path).utc().iso8601())
+File.write(path, "kept")
+File.touch(path, 42)
+puts(File.mtime(path).to_i())
+puts(File.read(path))
+begin
+  File.touch(path, "tomorrow")
+rescue error: TypeError
+  puts(error.message())
+end
+begin
+  File.touch(File.join(root, "missing/dir/file"))
+rescue error: IOError
+  puts("missing directory raised")
+end
+Dir.delete_tree(root)

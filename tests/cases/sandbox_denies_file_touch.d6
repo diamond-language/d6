@@ -1,0 +1,6 @@
+begin
+  File.touch("x")
+  "escaped"
+rescue error: SandboxError
+  error.message()
+end

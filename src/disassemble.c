@@ -73,6 +73,7 @@ static const char *file_path_function_name(uint8_t id) {
         case DIAMOND_FILE_PATH_STDIN_READ: return "readpartial";
         case DIAMOND_FILE_PATH_PWD: return "pwd";
         case DIAMOND_FILE_PATH_GLOB_HIDDEN: return "glob_hidden";
+        case DIAMOND_FILE_PATH_TOUCH: return "touch";
         case DIAMOND_FILE_PATH_GLOB: return "glob";
         default: return "<invalid file path function>";
     }

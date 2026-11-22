@@ -688,6 +688,64 @@ static DiamondVmStatus dir_mktmpdir_helper(DiamondVm *vm,DiamondValue prefix_val
     return DIAMOND_VM_OK;
 }
 
+/* File.touch(path, time = nil): creates `path` if it is missing, then sets its
+ * access and modification times to `time` (a Time, or epoch seconds as an Int
+ * or Float), or to now. Returns the path. */
+static DiamondVmStatus file_touch_helper(DiamondVm *vm,DiamondValue path_value,DiamondValue time_value,
+        DiamondValue *out) {
+    if(path_value.kind!=DIAMOND_VALUE_OBJECT||path_value.as.object->kind!=DIAMOND_OBJECT_STRING) {
+        snprintf(vm->error,sizeof vm->error,"File path argument must be a String");
+        return DIAMOND_VM_TYPE_ERROR;
+    }
+    const DiamondString *path=(const DiamondString *)path_value.as.object;
+    if(memchr(path->chars,'\0',path->length)!=nullptr) {
+        snprintf(vm->error,sizeof vm->error,"File path must not contain a NUL byte");
+        return DIAMOND_VM_TYPE_ERROR;
+    }
+    struct timespec times[2];
+    if(time_value.kind==DIAMOND_VALUE_NIL) {
+        times[0].tv_sec=0;times[0].tv_nsec=UTIME_NOW;
+    } else {
+        double seconds=0;
+        if(time_value.kind==DIAMOND_VALUE_INT)seconds=(double)time_value.as.integer;
+        else if(time_value.kind==DIAMOND_VALUE_FLOAT)seconds=time_value.as.real;
+        else if(time_value.kind==DIAMOND_VALUE_OBJECT&&time_value.as.object->kind==DIAMOND_OBJECT_TIME)
+            seconds=((const DiamondTime *)time_value.as.object)->epoch;
+        else {
+            char actual[80];
+            diamond_format_value_type(actual,sizeof actual,time_value);
+            snprintf(vm->error,sizeof vm->error,"File.touch time must be a Time or epoch seconds, got %s",actual);
+            return DIAMOND_VM_TYPE_ERROR;
+        }
+        if(!isfinite(seconds)||seconds<-9.2e18||seconds>9.2e18) {
+            snprintf(vm->error,sizeof vm->error,"File.touch time is out of range");
+            return DIAMOND_VM_ARITY_ERROR;
+        }
+        const double whole=floor(seconds);
+        times[0].tv_sec=(time_t)whole;
+        long nanoseconds=(long)((seconds-whole)*1e9+0.5);
+        if(nanoseconds>=1000000000L){times[0].tv_sec+=1;nanoseconds-=1000000000L;}
+        times[0].tv_nsec=nanoseconds;
+    }
+    times[1]=times[0];
+    const int descriptor=open(path->chars,O_WRONLY|O_CREAT|O_CLOEXEC|O_NOCTTY,0666);
+    if(descriptor<0) {
+        snprintf(vm->error,sizeof vm->error,"cannot touch '%.*s': %s",
+            (int)path->length,path->chars,strerror(errno));
+        return DIAMOND_VM_IO_ERROR;
+    }
+    const int status=futimens(descriptor,times);
+    const int saved=errno;
+    close(descriptor);
+    if(status!=0) {
+        snprintf(vm->error,sizeof vm->error,"cannot set the times of '%.*s': %s",
+            (int)path->length,path->chars,strerror(saved));
+        return DIAMOND_VM_IO_ERROR;
+    }
+    *out=path_value;
+    return DIAMOND_VM_OK;
+}
+
 /* A String argument of a SemVer method as C text. Embedded NUL is reported through
  * `has_nul`, since no valid version or range contains one. */
 static bool semver_argument(DiamondVm *vm,DiamondValue value,const DiamondString **text,bool *has_nul) {
@@ -819,6 +877,13 @@ DiamondVmStatus outlined_file_path(DiamondVm *vm,const DiamondChunk *chunk,Diamo
         DiamondString *text=allocate_string(vm,here,strlen(here));
         if(text==nullptr)VM_RETURN(DIAMOND_VM_OUT_OF_MEMORY);
         registers[dest]=DIAMOND_OBJECT(text);
+        HELPER_DONE;
+    }
+    if(selector==DIAMOND_FILE_PATH_TOUCH) {
+        VM_SANDBOX_GUARD("File.touch", "filesystem");
+        DiamondValue made=DIAMOND_NIL;
+        VM_PROPAGATE(file_touch_helper(vm,registers[arg1],registers[arg2],&made));
+        registers[dest]=made;
         HELPER_DONE;
     }
     if(selector==DIAMOND_FILE_PATH_MKTMPDIR) {

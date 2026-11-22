@@ -9,6 +9,9 @@ come only in minor releases, marked **Breaking** here.
 
 ### Added
 
+- `File.touch(path, time = nil)` creates a file if it is missing and sets its modification time,
+  to a Time, epoch seconds, or now.
+- The `cancellation` cut is published to the registry: `facet add cancellation`.
 - `Zlib.deflate(data)` and `Zlib.inflate(data, max_size)`: compression in zlib's wrapping,
   which git objects, PNG and HTTP's `deflate` use. `Gzip.compress` wrote only gzip.
 - `Dir.pwd()`, the working directory.
@@ -20,6 +23,8 @@ come only in minor releases, marked **Breaking** here.
 - The warning about a discarded `concat`/`sort`/... copy now also covers the last line of an
   `each()`, `each_with_index()`, `times()` or other iterator block, whose value is ignored.
 - docs/api/crypto.md no longer says Strings are byte buffers.
+- Writing `obj.count < 1` or `obj.size - 1` without the call's parentheses now warns at compile
+  time that a method reference has no `<` or `-`, as conditions and nil comparisons already did.
 
 ## 1.4.0 — 2026-11-22
 

@@ -779,6 +779,7 @@ typedef enum {
     DIAMOND_FILE_PATH_STDIN_READ,
     DIAMOND_FILE_PATH_PWD,
     DIAMOND_FILE_PATH_GLOB_HIDDEN,
+    DIAMOND_FILE_PATH_TOUCH,
 } DiamondFilePathFunction;
 
 typedef enum DiamondMathFunction : uint8_t {

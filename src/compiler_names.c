@@ -2375,6 +2375,23 @@ static bool bind_reference_self_arguments(Compiler *compiler,const DiamondFuncti
  * (bound_reference, src/compiler_internal.h) and it is used where only a
  * call makes sense. A warning, so programs that compiled on earlier 1.x
  * releases still do. */
+/* The spelling of a comparison or arithmetic operator token, or nullptr for
+ * any other token. */
+static const char *method_reference_operator(DiamondTokenKind kind) {
+    switch(kind) {
+    case DIAMOND_TOKEN_LESS: return "<";
+    case DIAMOND_TOKEN_LESS_EQUAL: return "<=";
+    case DIAMOND_TOKEN_GREATER: return ">";
+    case DIAMOND_TOKEN_GREATER_EQUAL: return ">=";
+    case DIAMOND_TOKEN_PLUS: return "+";
+    case DIAMOND_TOKEN_MINUS: return "-";
+    case DIAMOND_TOKEN_STAR: return "*";
+    case DIAMOND_TOKEN_SLASH: return "/";
+    case DIAMOND_TOKEN_PERCENT: return "%";
+    default: return nullptr;
+    }
+}
+
 void warn_method_reference_use(Compiler *compiler,uint16_t value,const char *consequence) {
     if(compiler->bound_reference.function!=compiler->function||
        compiler->bound_reference.code_end!=compiler->function->code_count||
@@ -2977,6 +2994,14 @@ static uint16_t parse_invoke_named_impl(Compiler *compiler, uint16_t receiver,
                 DiamondLexer lookahead=compiler->lexer;
                 if(diamond_lexer_next(&lookahead).kind==DIAMOND_TOKEN_NIL)
                     warn_method_reference_use(compiler,reference,"which is never nil");
+            }
+            /* `obj.count < 1`, `obj.size - 1`: an operator a method reference
+             * doesn't have, so the call was meant. */
+            const char *operator=method_reference_operator(compiler->current.kind);
+            if(operator!=nullptr) {
+                char consequence[64];
+                snprintf(consequence,sizeof consequence,"which has no '%s'",operator);
+                warn_method_reference_use(compiler,reference,consequence);
             }
             return reference;
         }

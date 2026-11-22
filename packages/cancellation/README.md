@@ -4,7 +4,7 @@ Cooperative cancellation, monotonic deadlines, and scopes that join their tasks.
 
 ## Installation
 
-`cancellation` is not published to the registry yet. Until it is, copy `packages/cancellation` from a checkout of the [d6 repository](https://github.com/diamond-language/d6) into your project as `cuts/cancellation/`, then load it with `require_cut "cancellation"`. `facet update` leaves hand-copied cuts in place.
+Add it with `facet add cancellation`, then load it with `require_cut "cancellation"`. It is experimental: while its version is below 1.0, a minor release may change the API.
 
 Version 0.6.0 requires a d6 runtime with channel readiness waits and cancellation options for `IO.poll`, `TCPSocket.connect_nonblocking`, `DNS.resolve`, and `TLSSocket.start_handshake`.
 
@@ -68,8 +68,7 @@ Thread transfer rules. The [design](https://github.com/diamond-language/d6/blob/
 precedence, deadline behavior, limitations, and the native wait lifetime protocol.
 
 Run `DIAMOND_BIN=/absolute/path/to/diamond bash test.sh` for interpreted and
-compiled tests. This package is experimental and not yet published to the
-registry.
+compiled tests.
 
 ## DNS and outbound TCP connections
 
