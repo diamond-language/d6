@@ -27,6 +27,9 @@ come only in minor releases, marked **Breaking** here.
 
 ### Fixed
 
+- A `break` in a block passed to a method on a receiver of unknown type resumes
+  after the call.
+
 - The warning about a discarded `concat`/`sort`/... copy now also covers the last line of an
   `each()`, `each_with_index()`, `times()` or other iterator block, whose value is ignored.
 - docs/api/crypto.md no longer says Strings are byte buffers.

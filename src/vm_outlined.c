@@ -2787,6 +2787,9 @@ DiamondVmStatus outlined_invoke_keywords(DiamondVm *vm,const DiamondChunk *chunk
             VM_RETURN(DIAMOND_VM_INVALID_BYTECODE);
         for(size_t index=0;index<type_count;index++)READ_SHORT(type_arguments[index]);
     }
+    /* A block break can resume this frame after the call even when the
+     * helper returns a nonlocal exit instead of reaching HELPER_DONE. */
+    *ip_ref=ip;
     if(registers[positional_register].kind!=DIAMOND_VALUE_OBJECT||
        registers[positional_register].as.object->kind!=DIAMOND_OBJECT_ARRAY)
         VM_RETURN(DIAMOND_VM_TYPE_ERROR);
