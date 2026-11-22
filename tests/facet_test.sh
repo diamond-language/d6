@@ -652,7 +652,10 @@ while (($#)); do
 done
 # Metadata requests say which d6 is asking, so the registry can leave out versions it can't use.
 route="${url%%\?*}"
-if [[ "$route" == */v1/cuts/* && "$url" != *"?d6="* ]]; then
+if [[ -n "${FACET_TEST_OLD_REGISTRY:-}" ]]; then
+    # A registry from before the d6 field 404s any query.
+    [[ "$url" == "$route" ]] || exit 22
+elif [[ "$route" == */v1/cuts/* && "$url" != *"?d6="* ]]; then
     echo "registry metadata request without ?d6=: $url" >&2; exit 22
 fi
 case "$route" in
@@ -677,6 +680,8 @@ export FACET_TEST_LOGGER_ARCHIVE="$work/registry_logger.tar"
 export FACET_TEST_GREETER13_DIGEST="$greeter13_digest"
 export FACET_TEST_GREETER13_ARCHIVE="$work/registry_greeter13.tar"
 (cd project21_registry && "$facet" update >/dev/null)
+# A registry older than the d6 field rejects the query; facet asks again without it.
+(cd project21_registry && FACET_TEST_OLD_REGISTRY=1 "$facet" update >/dev/null)
 grep -q '"greeter": {"source": "registry"' project21_registry/Cutfile.lock
 grep -q '"logger": {"source": "registry"' project21_registry/Cutfile.lock
 # The lockfile is JSON (and a d6 Hash literal): no trailing comma, so JSON.parse reads it.

@@ -80,6 +80,8 @@ typedef struct FacetWorkQueue {
 
 static bool run_curl_download(const char *url, const char *output, uint64_t max_size,
                               char *error, size_t error_size);
+/* curl's exit status from the last run_curl_download; 22 is an HTTP error. */
+static int curl_exit_status = 0;
 static bool resolve_manifest_dependencies(const FacetManifest *manifest,
     const char *required_by, FacetResolution *resolution, FacetPendingTable *pending,
     FacetWorkQueue *queue, const char *scratch_root, FacetConstraintHistory *history,
@@ -473,7 +475,17 @@ static bool only_keys(const DiamondManifestValue *hash, const char *const keys[]
 static DiamondManifestValue *fetch_registry_hash(const char *url, const char *path,
         char *error, size_t error_size) {
     (void)remove(path);
-    if (!run_curl_download(url, path, 1024 * 1024, error, error_size)) return NULL;
+    if (!run_curl_download(url, path, 1024 * 1024, error, error_size)) {
+        /* Registries older than the `d6` field answer any query with an HTTP error.
+         * Ask again without it: such a registry holds no cut with a d6 range, and
+         * facet still checks the range of every manifest it reads. */
+        const char *query = strstr(url, "?d6=");
+        if (curl_exit_status != 22 || query == NULL) return NULL;
+        char plain[FACET_MAX_PATH];
+        (void)snprintf(plain, sizeof plain, "%.*s", (int)(query - url), url);
+        (void)remove(path);
+        if (!run_curl_download(plain, path, 1024 * 1024, error, error_size)) return NULL;
+    }
     struct stat info;
     if (stat(path, &info) != 0 || !S_ISREG(info.st_mode) || info.st_size <= 0 ||
         info.st_size > 1024 * 1024) {
@@ -888,8 +900,9 @@ static bool run_curl_download(const char *url, const char *output, uint64_t max_
         _exit(127);
     }
     int status = 0;
-    if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) ||
-        WEXITSTATUS(status) != 0) {
+    const bool waited = waitpid(pid, &status, 0) >= 0 && WIFEXITED(status);
+    curl_exit_status = waited ? WEXITSTATUS(status) : -1;
+    if (curl_exit_status != 0) {
         (void)snprintf(error, error_size, "cannot download '%s'", url);
         return false;
     }

@@ -87,7 +87,10 @@ release request below. The registry then lists only releases whose `d6` range
 includes that version (a prerelease counts as its release), and answers 404 for a
 release that leaves it out. A request without `?d6=` comes from a facet that
 predates the field, so it sees only releases without a range. Any other query, or
-a `d6` value that isn't a version, is a 400.
+a `d6` value that isn't a version, is a 400. A registry older than the field
+answers the query with an error, so when the query gets an HTTP error facet asks
+again without it. Such a registry holds no cut with a range, and facet checks the
+range of every manifest it reads anyway.
 
 ### `GET /v1/cuts/<name>/versions/<version>`
 
