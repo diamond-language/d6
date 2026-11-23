@@ -376,6 +376,11 @@ static bool write_new_file(const char *root, const NewFile *spec, const NewValue
     return ok;
 }
 
+void print_new_kind_names(void) {
+    for (size_t index = 0; index < sizeof KINDS / sizeof KINDS[0]; index++)
+        fprintf(stderr, "%s%s", index == 0 ? "" : ", ", KINDS[index].kind);
+}
+
 static void print_new_usage(void) {
     fputs("usage: facet new <kind> <path>\n\nkinds:\n", stderr);
     for (size_t index = 0; index < sizeof KINDS / sizeof KINDS[0]; index++)

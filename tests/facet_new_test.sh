@@ -144,6 +144,7 @@ refuses() {
         fail "facet $*: expected $expected/'$message', got $status/'$output'"
 }
 refuses 64 "usage: facet new" new
+refuses 64 "(kinds: cli, web, graphql, tcp, udp, lib)"
 refuses 64 "usage: facet new" new cli
 refuses 64 "unknown project kind 'rails'" new rails app
 refuses 64 "not a valid project name" new cli MyApp

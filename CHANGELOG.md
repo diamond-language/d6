@@ -7,6 +7,10 @@ come only in minor releases, marked **Breaking** here.
 
 ## Unreleased
 
+### Fixed
+
+- Facet lists `graphql` among the project kinds in its top-level usage.
+
 ## 1.6.0-rc1
 
 ### Added
