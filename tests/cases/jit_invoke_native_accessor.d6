@@ -1,0 +1,15 @@
+struct Appointment(start: Time)
+end
+
+def next_year(item: Appointment) -> Int
+  start = item.start()
+  later = start.days_from_now(1)
+  later.year()
+end
+
+item = Appointment.new(Time.utc(2026, 12, 31, 12, 0, 0))
+total = 0
+200.times() do
+  total += next_year(item)
+end
+puts(total)
