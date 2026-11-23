@@ -19,7 +19,7 @@
 #     worried about, and the one the first version of this file
 #     couldn't produce at all (see "Per-worker session cache").
 
-require "../../packages/gremlin/gremlin"
+require "../../packages/gremlin/lib/gremlin"
 
 def build_payload(seed)
   items = []

@@ -7,7 +7,7 @@
 # undersold real risk once before -- see the "Bound resource experiments"
 # lesson this round is applying).
 
-require "../../packages/gremlin/gremlin"
+require "../../packages/gremlin/lib/gremlin"
 
 def build_payload(seed)
   items = []
