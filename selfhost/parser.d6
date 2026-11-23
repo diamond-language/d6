@@ -101,6 +101,7 @@ module Opcode
   PROCESS_RUN_OPTIONS = 183
   PROCESS_SPAWN_OPTIONS = 184
   PROCESS_PID = 200
+  MOVE_PAIR = 201
   IO_POLL = 77
   UDP_BIND = 78
   FILE_DELETE = 73
@@ -1027,14 +1028,14 @@ class Parser
     self.emit_byte(mod(function_index, 256))
   end
 
-  # 4096, mirroring compiler.c's own DIAMOND_REGISTER_COUNT ceiling check
+  # 12288, mirroring compiler.c's own DIAMOND_REGISTER_COUNT ceiling check
   # (Compiler.next_register >= DIAMOND_REGISTER_COUNT, "program needs too
   # many registers") -- not a wire-format limit (registers are 16-bit
   # operands now, see emit_register above) but a deliberate cap on the
   # native VM's per-call register array (a VLA sized to each function's
   # own register count, see run_chunk in vm.c).
   def allocate_register()
-    if @next_register >= 4096
+    if @next_register >= 12288
       self.fail("program needs too many registers")
       return @next_register
     end
@@ -4571,7 +4572,7 @@ class Parser
           self.fail("keyword arguments need the function defined before the call")
           return nil
         end
-        arguments.push(self.parse_expression())
+        arguments.push(self.parse_positional_argument())
         self.skip_newlines()
         if @current.kind() == :comma
           self.advance_token()
@@ -5601,7 +5602,7 @@ class Parser
           if expectation != nil && spread == nil
             self.expect_annotation(self.expected_slot_annotation(expectation, positional, positional.length()))
           end
-          positional.push(self.parse_expression())
+          positional.push(self.parse_positional_argument())
         end
       end
       self.skip_newlines()
@@ -5667,10 +5668,11 @@ class Parser
       index = index + 1
     end
     index = 0
-    while index < values.length()
-      self.emit_instruction2(Opcode::MOVE, base + index, values[index])
-      index = index + 1
+    while index + 1 < values.length()
+      self.emit_instruction3(Opcode::MOVE_PAIR, base + index, values[index], values[index + 1])
+      index = index + 2
     end
+    self.emit_instruction2(Opcode::MOVE, base + index, values[index]) if index < values.length()
     base
   end
 
@@ -5843,14 +5845,25 @@ class Parser
     self.emit_call_spread(function_index, arguments, type_arguments)
   end
 
+  # A leading `&` forwards a block and must finish the argument list.
+  def parse_positional_argument()
+    forwarding = @current.kind() == :ampersand
+    value = self.parse_expression()
+    if forwarding && !@failed
+      self.skip_newlines()
+      self.fail("a forwarded block argument must be last") if @current.kind() != :right_paren
+    end
+    value
+  end
+
   def parse_call_arguments(expectation = nil)
     self.skip_newlines()
     arguments = []
     if @current.kind() != :right_paren
       more = true
-      while more
+      while more && !@failed
         self.expect_annotation(self.expected_slot_annotation(expectation, arguments, arguments.length())) if expectation != nil
-        arguments.push(self.parse_expression())
+        arguments.push(self.parse_positional_argument())
         self.skip_newlines()
         if @current.kind() == :comma
           self.advance_token()
@@ -5866,17 +5879,7 @@ class Parser
       return nil
     end
     self.advance_token()
-    argument_base = self.allocate_register()
-    i = 1
-    while i < arguments.length()
-      self.allocate_register()
-      i = i + 1
-    end
-    i = 0
-    while i < arguments.length()
-      self.emit_instruction2(Opcode::MOVE, argument_base + i, arguments[i])
-      i = i + 1
-    end
+    argument_base = self.move_contiguous(arguments)
     [argument_base, arguments.length(), arguments]
   end
 
@@ -6130,9 +6133,10 @@ class Parser
     seen_keyword = false
     if @current.kind() != :right_paren
       more = true
-      while more
+      while more && !@failed
         slot = -1
-        if self.keyword_argument_ahead?()
+        is_keyword = self.keyword_argument_ahead?()
+        if is_keyword
           keyword_token = @current
           keyword_name = self.token_text(@current)
           self.advance_token()
@@ -6162,7 +6166,7 @@ class Parser
           return nil
         end
         self.expect_annotation(self.concrete_parameter_annotation(function_entry[7], slot, function_entry[9]))
-        slot_values[slot] = self.parse_expression()
+        slot_values[slot] = is_keyword ? self.parse_expression() : self.parse_positional_argument()
         slot_filled[slot] = true
         self.skip_newlines()
         if @current.kind() == :comma
@@ -9220,6 +9224,11 @@ class Parser
   end
 
   def parse_loop()
+    if @current.kind() == :equal
+      self.fail_at(@previous.start(), @previous.line(), @previous.column(),
+        "`loop` is a keyword and can't be a variable name; call the variable something else")
+      return 0
+    end
     destination = self.allocate_register()
     self.emit_instruction1(Opcode::NIL, destination)
     return destination unless self.consume_block_start_or(:do)
@@ -10132,17 +10141,20 @@ class Parser
     else
       1
     end
-    base = self.allocate_register()
-    index = 1
-    while index < offset + parsed[1]
-      self.allocate_register()
-      index = index + 1
-    end
-    self.emit_instruction2(Opcode::LOAD_CLASS, base, needs_receiver) if needs_receiver != true && needs_receiver != false
-    index = 0
-    while index < parsed[1]
-      self.emit_instruction2(Opcode::MOVE, base + index + offset, parsed[0] + index)
-      index = index + 1
+    base = parsed[0]
+    if offset > 0
+      base = self.allocate_register()
+      index = 1
+      while index < offset + parsed[1]
+        self.allocate_register()
+        index = index + 1
+      end
+      self.emit_instruction2(Opcode::LOAD_CLASS, base, needs_receiver) if needs_receiver != true && needs_receiver != false
+      index = 0
+      while index < parsed[1]
+        self.emit_instruction2(Opcode::MOVE, base + index + offset, parsed[0] + index)
+        index = index + 1
+      end
     end
     destination = self.allocate_register()
     if type_arguments.length() == 0

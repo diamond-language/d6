@@ -802,6 +802,8 @@ DIAMOND_INTERNAL void mark_capture_needed(Compiler *compiler,size_t capture);
 DIAMOND_INTERNAL bool register_is_named(const Compiler *compiler, uint16_t reg);
 DIAMOND_INTERNAL bool try_rewrite_producer_destination(Compiler *compiler, uint16_t value,
                                               uint16_t destination);
+DIAMOND_INTERNAL void emit_call_argument_moves(Compiler *compiler,uint16_t base,
+    const uint16_t *arguments,size_t argument_count);
 DIAMOND_INTERNAL uint16_t stage_call_arguments(Compiler *compiler,const uint16_t *arguments,
                                                size_t argument_count);
 DIAMOND_INTERNAL void fold_join_jump_into_return(Compiler *compiler,uint16_t reg);

@@ -66,6 +66,8 @@ end
 `if`/`while`/`begin` and friends are all expressions — the last line of a
 block is its value. Blocks are `end`-delimited throughout; there are no
 braces. `next`/`break` work inside loops.
+A function can have up to 128 named locals in scope, including parameters.
+Large generated functions also have separate register and bytecode limits.
 
 A one-line loop puts the condition after the statement: `i += 1 while i < 10` and
 `i -= 1 until i == 0`. As in the block form the condition is tested first, so the statement may

@@ -150,7 +150,7 @@ bool emit_function_index(Compiler *compiler, size_t function_index) {
 
 /* Same big-endian 16-bit convention as emit_function_index, for a register
  * operand -- registers are wide enough to exceed one byte now that
- * DIAMOND_REGISTER_COUNT is 4096 (see its own comment in src/vm.h). */
+ * DIAMOND_REGISTER_COUNT bounds the compiler's register indices. */
 bool emit_register(Compiler *compiler, uint16_t reg) {
     return emit_byte(compiler, (uint8_t)(reg >> 8)) &&
            emit_byte(compiler, (uint8_t)(reg & UINT8_MAX));
@@ -2009,6 +2009,17 @@ bool try_rewrite_producer_destination(Compiler *compiler, uint16_t value,
     return true;
 }
 
+void emit_call_argument_moves(Compiler *compiler,uint16_t base,
+        const uint16_t *arguments,size_t argument_count) {
+    size_t index=0;
+    for(;index+1<argument_count;index+=2)
+        emit_instruction(compiler,DIAMOND_OP_MOVE_PAIR,(uint16_t)(base+index),
+            arguments[index],arguments[index+1],3);
+    if(index<argument_count)
+        emit_instruction(compiler,DIAMOND_OP_MOVE,(uint16_t)(base+index),
+            arguments[index],0,2);
+}
+
 /* The first register of a CALL's contiguous argument block. When the argument
  * registers already sit in order (always so for a single argument), the
  * block starts at the first of them and no MOVE is emitted: CALL only reads
@@ -2023,8 +2034,7 @@ uint16_t stage_call_arguments(Compiler *compiler,const uint16_t *arguments,
     if(contiguous)return arguments[0];
     const uint16_t base=allocate_register(compiler);
     for(size_t index=1;index<argument_count;index++)(void)allocate_register(compiler);
-    for(size_t index=0;index<argument_count;index++)
-        emit_instruction(compiler,DIAMOND_OP_MOVE,(uint16_t)(base+index),arguments[index],0,2);
+    emit_call_argument_moves(compiler,base,arguments,argument_count);
     return base;
 }
 
@@ -2063,7 +2073,7 @@ void fold_join_jump_into_return(Compiler *compiler,uint16_t reg) {
  * become this local's home skip allocate_register entirely --
  * compile_assignment_store's own "reuse the RHS's temporary register
  * directly" optimization (see its own comment) is the one user of this
- * today. DIAMOND_REGISTER_COUNT (4096) never reaches UINT16_MAX, so that
+ * today. DIAMOND_REGISTER_COUNT never reaches UINT16_MAX, so that
  * value unambiguously means "no preference, allocate a fresh one" -- the
  * plain define_local wrapper below, every other caller's own case. */
 uint16_t define_local_with_register(Compiler *compiler, DiamondSpan name,

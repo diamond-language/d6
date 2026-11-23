@@ -8,6 +8,15 @@ This document records why that costs real, measured time, what Stage 1
 fixes and how it was made safe (including a real bug it caught along the
 way), and the harder cases left for later stages.
 
+Stencil's generated validator exposed two limits at once. Each repeated
+call site consumed registers for argument staging and emitted one MOVE per
+copy. Adjacent staging copies now use a single MOVE_PAIR instruction. The
+register ceiling is 12,288, while only the actual register high-water mark
+sets the runtime frame size. The 256-field Stencil method that reuses one
+local compiles to about 61 KiB of bytecode and uses about 10,500 registers.
+The wider compiler tables increase its own scratch space, and the method
+still fits the existing 16-bit jump addresses.
+
 ## The problem, measured
 
 A run_chunk call zeroes exactly `chunk->register_count` `DiamondValue`
@@ -131,8 +140,8 @@ contract rather than special-cased away.
 `v0 = seed + 1; v1 = v0 + 1; ...`, alternated binaries, 3 rounds): about
 1200 ns/call before, about 900 ns/call after -- roughly 25% -- with the
 compiled function's own `register_count` dropping from ~180 to ~122 for
-that shape. Bounded by `DIAMOND_MAX_LOCALS` (64 distinct names per
-function), unlike the *reassignment* case below, which has no such bound.
+that shape. Bounded at the time by `DIAMOND_MAX_LOCALS` (64 distinct names
+per function), unlike the *reassignment* case below, which has no such bound.
 
 **Verified**: full suite (1659, including the two new regression tests),
 all 17 examples, self-host smoke, the full self-host parser differential

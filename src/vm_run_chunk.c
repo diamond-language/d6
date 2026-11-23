@@ -267,7 +267,7 @@ DiamondVmStatus run_chunk(const DiamondChunk *chunk,
     }
     /* A fixed DIAMOND_INLINE_REGISTER_COUNT-wide C-stack array covers
      * every function that fits in it (the overwhelming majority --
-     * DIAMOND_REGISTER_COUNT, 4096, is a compile-time ceiling / bytecode
+     * DIAMOND_REGISTER_COUNT is a compile-time ceiling / bytecode
      * operand range, not a typical per-call need, see its own comment in
      * src/vm.h) at exactly the stack cost the DIAMOND_MAX_CALL_DEPTH
      * comment above was measured against. Only a function whose
@@ -598,6 +598,7 @@ DiamondVmStatus run_chunk(const DiamondChunk *chunk,
         [DIAMOND_OP_NIL] = &&op_NIL,
         [DIAMOND_OP_BOOL] = &&op_BOOL,
         [DIAMOND_OP_MOVE] = &&op_MOVE,
+        [DIAMOND_OP_MOVE_PAIR] = &&op_MOVE_PAIR,
         [DIAMOND_OP_ADD] = &&op_ADD,
         [DIAMOND_OP_ADD_INT] = &&op_ADD_INT,
         [DIAMOND_OP_SUBTRACT] = &&op_SUBTRACT,
@@ -1027,6 +1028,17 @@ DiamondVmStatus run_chunk(const DiamondChunk *chunk,
                 READ_OPERANDS(4);
                 destination=OPERAND_SHORT(0); source=OPERAND_SHORT(2);
                 registers[destination] = registers[source];
+                DISPATCH_NEXT();
+            }
+            case DIAMOND_OP_MOVE_PAIR: op_MOVE_PAIR: {
+                READ_OPERANDS(6);
+                const uint16_t base=OPERAND_SHORT(0);
+                const uint16_t first=OPERAND_SHORT(2),second=OPERAND_SHORT(4);
+                if((size_t)base+1>=live_register_count ||
+                   first>=live_register_count || second>=live_register_count)
+                    VM_RETURN(DIAMOND_VM_INVALID_BYTECODE);
+                registers[base]=registers[first];
+                registers[base+1]=registers[second];
                 DISPATCH_NEXT();
             }
             case DIAMOND_OP_ADD: op_ADD: {

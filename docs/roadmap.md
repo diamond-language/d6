@@ -206,8 +206,6 @@ Areas worth considering:
 - type aliases (`type Json = Int | Float | String | Bool | Nil | Array | Hash`), or a usable
   top type: `JSON.parse` is documented `-> Value`, but a field holding any JSON value must
   spell out the whole union. The quarry dogfood app repeats it on every node.
-- more than about 100 locals in one method ("too many lexical bindings"), which a
-  generated `case` with many branches reaches.
 - recursion headroom for tree-walking interpreters: a block-based evaluator spends about 19
   d6 frames per level, so quarry's jq-level recursion stops near 500 levels of the ~9,600
   the main thread allows. A larger or configurable main stack would cover it.

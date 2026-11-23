@@ -265,7 +265,7 @@ typedef struct GrowBuffer {
  * run_chunk's own `registers` array (below) stays a fixed
  * DIAMOND_INLINE_REGISTER_COUNT-wide C-stack array, at the same 256 this
  * comment's own measurement was taken against, rather than a VLA sized to
- * DIAMOND_REGISTER_COUNT (4096, see vm.h) -- a function whose
+ * DIAMOND_REGISTER_COUNT -- a function whose
  * live_register_count exceeds it (rare -- see DIAMOND_REGISTER_COUNT's
  * own comment) heap-allocates instead, which doesn't consume C stack at
  * all and so can't affect this depth calibration regardless of how large

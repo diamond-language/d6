@@ -57,6 +57,26 @@ for name in "${cases[@]}"; do
 done
 echo "runtime workflows: cold/hot bytecode passed"
 
+# Distinct locals and generated static calls must fit independently. The
+# repeated calls would exceed both the former register limit and the
+# bytecode budget if the argument copies were encoded as individual MOVEs.
+awk 'BEGIN {
+    print "def many_locals()"
+    for (i=0; i<128; i++) printf "  item_%d = %d\n", i,i
+    print "  item_0 + item_127\nend"
+    print "def add_four(a, b, c, d) = a + b + c + d"
+    print "def many_calls()\n  total = 0"
+    for (i=0; i<1400; i++) print "  total = add_four(total, 1, 2, 3)"
+    print "  total\nend"
+    print "puts([many_locals(), many_calls()])"
+}' > "$work/compiler_capacity.d6"
+printf '[127, 8400]\n' > "$work/compiler_capacity.expected"
+timeout 30 env DIAMOND_NO_CACHE=1 DIAMOND_JIT=0 \
+    "$diamond" "$work/compiler_capacity.d6" > "$work/actual"
+diff -u "$work/compiler_capacity.expected" "$work/actual"
+count=$((count + 1))
+echo "runtime workflows: compiler capacity passed"
+
 # Compiled entry points must preserve the same semantics and native services.
 # AOT is part of the integration target, rather than every ordinary unit run.
 if [[ ${1:-} == --aot ]]; then
@@ -94,6 +114,13 @@ if [[ ${1:-} == --aot ]]; then
         echo "FAIL standalone deep recursion: $deep_output" >&2
         exit 1
     fi
+    count=$((count + 1))
+    if ! "$diamond" build "$work/compiler_capacity.d6" -o "$work/capacity" > "$work/build.log" 2>&1; then
+        cat "$work/build.log" >&2
+        exit 1
+    fi
+    timeout 30 env DIAMOND_JIT=0 "$work/capacity" > "$work/actual"
+    diff -u "$work/compiler_capacity.expected" "$work/actual"
     count=$((count + 1))
     echo "runtime workflows: standalone binaries passed"
 fi

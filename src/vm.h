@@ -162,18 +162,15 @@ enum {
     DIAMOND_MAX_NAMESPACE_CONSTANTS = UINT16_MAX,
     /* Compile-time ceiling and READ_SHORT-encoded bytecode operand range
      * (big-endian 16-bit, matching the JUMP-target/function-index
-     * convention) -- not a fixed per-call runtime array size. run_chunk
-     * (src/vm.c) sizes its actual `registers` array as a VLA to each
-     * function's own live_register_count instead, so a typical small
-     * function's call frame stays cheap regardless of how high this cap
-     * is; only a function that actually needs this many registers pays
-     * for it, in that one call. */
-    DIAMOND_REGISTER_COUNT = 4096,
+     * convention). The interpreter sizes the register file from the
+     * function's actual high-water mark. Small calls keep using the inline
+     * register buffer, while large calls allocate their own register file. */
+    DIAMOND_REGISTER_COUNT = 12288,
     /* Per DiamondFunction, not per scope -- a function's own top-level
      * locals/parameters *and* every `rescue`-bound name across every
      * rescue clause nested in it all accumulate into the same flat
      * list (DiamondFunction.scope_locals below), so this needs
-     * headroom beyond the ordinary 64-local-at-a-time compile-time cap
+     * headroom beyond the ordinary 128-local-at-a-time compile-time cap
      * (DIAMOND_MAX_LOCALS, just below) for a function with several
      * rescue clauses. Kept deliberately smaller than that cap would
      * suggest: DiamondFunction is already ~152KB and there can be up
@@ -192,7 +189,7 @@ enum {
      * see parse_debugger_call in compiler.c and the DEBUGGER case in
      * run_chunk -- so both sides need to agree on the same fixed-size
      * table cap. */
-    DIAMOND_MAX_LOCALS = 64,
+    DIAMOND_MAX_LOCALS = 128,
     /* How many source lines can be simultaneously armed as a live
      * breakpoint (DiamondVm.debug_active_lines below) -- generous for
      * real editor usage, matching dap/main.c's own DAP_MAX_BREAKPOINTS. */
@@ -688,6 +685,9 @@ typedef enum DiamondOpCode : uint8_t {
     DIAMOND_OP_NOT_EQUAL_INT_K,
     /* dest: Process.pid(), this process's id as an Int. */
     DIAMOND_OP_PROCESS_PID,
+    /* dest base, first source, second source: two sequential MOVEs into
+     * adjacent registers, used to stage a contiguous call argument block. */
+    DIAMOND_OP_MOVE_PAIR,
     DIAMOND_OP_COUNT,
 } DiamondOpCode;
 
