@@ -7,6 +7,8 @@ come only in minor releases, marked **Breaking** here.
 
 ## Unreleased
 
+## 1.6.0-rc1
+
 ### Added
 
 - Variadic parameters accept element annotations such as `*args: String`.
