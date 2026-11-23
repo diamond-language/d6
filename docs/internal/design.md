@@ -1471,11 +1471,11 @@ below, already exposes for ordinary default parameters). Spreading an
 untouched problem on the opposite side of the call.
 
 **Compiler** (`compile_definition`'s parameter loop, `src/compiler.c`):
-`*name` must be the last parameter unless followed by `&block`, at most one per
-list, bare name only
--- no type annotation, no default (neither means anything for a
-collected `Array`), matching `delegate`'s own "bare parameter names
-only" scope cut. Sets a new `has_variadic` flag on `DiamondFunction`
+`*name` must be the last parameter unless followed by `&block`. Each list
+can have one variadic parameter, and it cannot have a default. For
+`*name: T`, the compiler checks the collected value against `Array[T]`
+immediately after collection and records that type for the body. The
+compiler sets a `has_variadic` flag on `DiamondFunction`
 (mirrored onto `DiamondMethod` and, per call site, the transient
 `DiamondChunk` view `run_chunk` actually operates on -- the same
 threading `arity`/`parameter_type_sets`/`register_count` already get),

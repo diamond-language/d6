@@ -1,0 +1,2 @@
+require "../parser_cases/typed_variadic"
+nil

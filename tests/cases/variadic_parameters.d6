@@ -3,7 +3,7 @@
 # Array. See docs/design.md's "Splat/variadic parameters" section.
 #
 # The compile-time-rejected shapes (a variadic parameter that isn't last,
-# more than one variadic parameter, a type annotation or default value on
+# more than one variadic parameter, a default value on
 # one, and a statically-known-callee call site with too few arguments)
 # were verified directly against the built CLI rather than encoded here
 # -- same reasoning tests/cases/method_delegation.d6's own header already
