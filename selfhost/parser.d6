@@ -4571,7 +4571,7 @@ class Parser
           self.fail("keyword arguments need the function defined before the call")
           return nil
         end
-        arguments.push(self.parse_expression())
+        arguments.push(self.parse_positional_argument())
         self.skip_newlines()
         if @current.kind() == :comma
           self.advance_token()
@@ -5601,7 +5601,7 @@ class Parser
           if expectation != nil && spread == nil
             self.expect_annotation(self.expected_slot_annotation(expectation, positional, positional.length()))
           end
-          positional.push(self.parse_expression())
+          positional.push(self.parse_positional_argument())
         end
       end
       self.skip_newlines()
@@ -5843,14 +5843,25 @@ class Parser
     self.emit_call_spread(function_index, arguments, type_arguments)
   end
 
+  # A leading `&` forwards a block and must finish the argument list.
+  def parse_positional_argument()
+    forwarding = @current.kind() == :ampersand
+    value = self.parse_expression()
+    if forwarding && !@failed
+      self.skip_newlines()
+      self.fail("a forwarded block argument must be last") if @current.kind() != :right_paren
+    end
+    value
+  end
+
   def parse_call_arguments(expectation = nil)
     self.skip_newlines()
     arguments = []
     if @current.kind() != :right_paren
       more = true
-      while more
+      while more && !@failed
         self.expect_annotation(self.expected_slot_annotation(expectation, arguments, arguments.length())) if expectation != nil
-        arguments.push(self.parse_expression())
+        arguments.push(self.parse_positional_argument())
         self.skip_newlines()
         if @current.kind() == :comma
           self.advance_token()
@@ -6130,9 +6141,10 @@ class Parser
     seen_keyword = false
     if @current.kind() != :right_paren
       more = true
-      while more
+      while more && !@failed
         slot = -1
-        if self.keyword_argument_ahead?()
+        is_keyword = self.keyword_argument_ahead?()
+        if is_keyword
           keyword_token = @current
           keyword_name = self.token_text(@current)
           self.advance_token()
@@ -6162,7 +6174,7 @@ class Parser
           return nil
         end
         self.expect_annotation(self.concrete_parameter_annotation(function_entry[7], slot, function_entry[9]))
-        slot_values[slot] = self.parse_expression()
+        slot_values[slot] = is_keyword ? self.parse_expression() : self.parse_positional_argument()
         slot_filled[slot] = true
         self.skip_newlines()
         if @current.kind() == :comma
@@ -9220,6 +9232,11 @@ class Parser
   end
 
   def parse_loop()
+    if @current.kind() == :equal
+      self.fail_at(@previous.start(), @previous.line(), @previous.column(),
+        "`loop` is a keyword and can't be a variable name; call the variable something else")
+      return 0
+    end
     destination = self.allocate_register()
     self.emit_instruction1(Opcode::NIL, destination)
     return destination unless self.consume_block_start_or(:do)
