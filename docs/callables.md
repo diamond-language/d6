@@ -448,16 +448,18 @@ announce("Ahab")                 # => "Ahab"
 announce("Ahab", "Captain")      # => "Captain Ahab"
 ```
 
-A trailing `*name` parameter collects every argument beyond the ordinary
-(non-variadic) ones into a plain `Array` — zero extra arguments collects
-an empty one. Works on a top-level `def`, an instance method, a `self.`
-singleton method, and a `closure name() ... end` alike. Deliberately
-scoped narrow, matching this language's usual first-slice shape for a
-feature like this (see `delegate`'s own "bare parameter names only"):
+A trailing `*name` parameter collects extra positional arguments into an
+`Array`. Zero extra arguments produce an empty array. A parameter such as
+`*titles: String` checks each collected argument at function entry and
+gives the function body an `Array[String]`. The check also applies to
+arguments passed through spread or a callable. This syntax works on
+functions, instance methods, singleton methods, and closures.
+Generic type arguments used in the element annotation can be supplied
+explicitly or inferred from fixed parameters.
 
-- must be the *last* parameter, and at most one per parameter list;
-- bare name only — no `: Type` annotation, no `= default` (neither means
-  anything for a collected `Array`);
+- A parameter list can contain one variadic parameter. A trailing `&block`
+  may follow it.
+- A variadic parameter cannot have a default.
 - a *literal* call site can still only ever supply at most 255 argument
   expressions in total, variadic or not — a pre-existing limit on every
   call form (`"too many call arguments"`), not something specific to

@@ -1,0 +1,73 @@
+def strings(*items: String) -> Array[String]
+  items
+end
+
+def forward(*items: String) -> Array[String]
+  strings(*items)
+end
+
+def with_block(label = "default", *items: String, &block)
+  if block == nil
+    label
+  else
+    block(items)
+  end
+end
+
+class TypedCollector
+  def collect(prefix: String, *items: String) -> String
+    prefix + items.join(",")
+  end
+end
+
+def groups(*items: Array[Int]) -> Array[Array[Int]]
+  items
+end
+
+def typed_tail[T](first: T, *items: T) -> Array[T]
+  items
+end
+
+puts(strings().length())
+puts(forward("a", "b").join(","))
+puts(with_block())
+puts(with_block("ignored", "c", "d") do |items|
+  items.join(",")
+end)
+puts(TypedCollector.new().collect("prefix:", "e", "f"))
+puts(groups([1], [2, 3]).length())
+puts(typed_tail("first", "last").join(","))
+
+begin
+  typed_tail("first", 7)
+rescue TypeError
+  puts("bound type rejected")
+end
+
+begin
+  strings("good", 7)
+rescue TypeError
+  puts("direct rejected")
+end
+
+begin
+  with_block("ignored", 7)
+rescue TypeError
+  puts("entry check rejected")
+end
+
+def dynamic_array() = ["good", 7]
+begin
+  strings(*dynamic_array())
+rescue TypeError
+  puts("spread rejected")
+end
+
+def through_callable(callback)
+  callback("good", 7)
+end
+begin
+  through_callable(strings)
+rescue TypeError
+  puts("callable rejected")
+end

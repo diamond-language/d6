@@ -1,0 +1,13 @@
+0
+a,b
+default
+c,d
+prefix:e,f
+2
+last
+bound type rejected
+direct rejected
+entry check rejected
+spread rejected
+callable rejected
+nil

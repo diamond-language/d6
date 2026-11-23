@@ -9,6 +9,8 @@ come only in minor releases, marked **Breaking** here.
 
 ### Added
 
+- Variadic parameters accept element annotations such as `*args: String`.
+  Both compilers check the collected arguments, including values passed by spread.
 - Program-level type aliases give existing types and unions a reusable name in
   annotations and type arguments.
 - `IO.poll` waits on channels and sockets together. Put a channel in either

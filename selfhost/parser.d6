@@ -1155,7 +1155,7 @@ class Parser
       if type_name != nil && is_block
         set_index = self.declare_annotation(type_name)
         @builder.set_parameter_type(function_index, index, set_index) unless @failed
-      elsif type_name != nil
+      elsif type_name != nil && (shape == nil || index != shape[0])
         @declared_types.push([register, type_name])
         set_index = self.emit_type_check(register, type_name)
         # Unlike ARGUMENT_PROVIDED above (a call-time argument index,
@@ -1176,13 +1176,13 @@ class Parser
       end
       index = index + 1
     end
-    self.finish_parameter_shape(function_index, shape, parameter_base, index_offset) if shape != nil
+    self.finish_parameter_shape(function_index, shape, parameter_base, index_offset, parameter_types) if shape != nil
   end
 
   # A `*name` parameter collects every argument past the fixed ones (the
   # receiver slot included) into an Array, keeping a trailing block out of
   # it when a `&block` parameter follows.
-  def finish_parameter_shape(function_index, shape, parameter_base, index_offset)
+  def finish_parameter_shape(function_index, shape, parameter_base, index_offset, parameter_types)
     variadic_index = shape[0]
     return if variadic_index == nil && !shape[1]
     @builder.set_parameter_flags(function_index, variadic_index != nil, shape[1]) unless @failed
@@ -1191,6 +1191,12 @@ class Parser
     register = parameter_base + variadic_index
     self.emit_instruction3(Opcode::COLLECT_VARIADIC, register, variadic_index + index_offset,
       if shape[1] then 1 else 0 end)
+    element_type = parameter_types[variadic_index]
+    if element_type != nil
+      array_type = [["Array", element_type, nil, -1, nil, nil]]
+      self.emit_type_check(register, array_type)
+      @declared_types.push([register, array_type])
+    end
     self.set_type_fact(register, Type::ARRAY)
   end
 
@@ -2162,17 +2168,18 @@ class Parser
           self.fail("expected parameter name")
           more = false
         elsif variadic
-          # `*name` collects the remaining arguments into an Array: no type,
-          # no default, and only a `&block` may follow it.
+          # Only a `&block` may follow `*name`.
           names.push(self.token_text(@current))
-          types.push(nil)
           defaults.push(nil)
           variadic_index = names.length() - 1
           self.advance_token()
+          type_name = nil
           if @current.kind() == :colon
-            self.fail("a variadic parameter cannot have a type annotation")
-            return nil
+            self.advance_token()
+            type_name = self.parse_type_annotation()
+            return nil if @failed
           end
+          types.push(type_name)
           if @current.kind() == :equal
             self.fail("a variadic parameter cannot have a default value")
             return nil

@@ -1011,15 +1011,13 @@ static void parse_definition_parameters(Compiler *compiler,DiamondFunction *func
     size_t declared_parameter_count=0;bool saw_default=false;
     bool has_block_parameter=false;
     uint16_t variadic_parameter=0,variadic_fixed_count=0;
+    int32_t variadic_type=-1;
+    DiamondSpan variadic_type_span={},variadic_name={};
     int block_parameter_type=-1;DiamondSpan block_parameter_type_span={};
     skip_newlines(compiler);
     if (compiler->current.kind != DIAMOND_TOKEN_RIGHT_PAREN) {
         do {
-            /* `*name` -- a trailing variadic parameter, bare name only
-             * (no type annotation, no default -- neither makes sense for
-             * a collected Array), and must be the last parameter (no
-             * comma may follow it). See docs/design.md's "Splat/variadic
-             * parameters" section. */
+            /* A variadic annotation describes each element of the collected Array. */
             bool is_variadic=false;
             bool is_block_parameter=false;
             if(compiler->current.kind==DIAMOND_TOKEN_AMPERSAND) {
@@ -1062,10 +1060,14 @@ static void parse_definition_parameters(Compiler *compiler,DiamondFunction *func
             function->arity++;
             advance_token(compiler);
             if(is_variadic) {
+                variadic_name=compiler->locals[compiler->local_count-1].name;
                 if(compiler->current.kind==DIAMOND_TOKEN_COLON) {
-                    fail(compiler,compiler->current.span,
-                         "a variadic parameter cannot have a type annotation");
-                    break;
+                    advance_token(compiler);
+                    variadic_type_span=compiler->current.span;
+                    const int element_type=parse_type_annotation(compiler);
+                    if(compiler->failed)break;
+                    variadic_type=collection_type_set(compiler,DIAMOND_TYPE_ARRAY,
+                        element_type,-1);
                 }
                 if(compiler->current.kind==DIAMOND_TOKEN_EQUAL) {
                     fail(compiler,compiler->current.span,
@@ -1164,9 +1166,17 @@ static void parse_definition_parameters(Compiler *compiler,DiamondFunction *func
             if(compiler->current.kind==DIAMOND_TOKEN_RIGHT_PAREN) break;
         } while (!compiler->failed);
     }
-    if(function->has_variadic&&!compiler->failed)
+    if(function->has_variadic&&!compiler->failed) {
         emit_instruction(compiler,DIAMOND_OP_COLLECT_VARIADIC,
             variadic_parameter,variadic_fixed_count,has_block_parameter?1:0,3);
+        if(variadic_type>=0) {
+            emit_type_check(compiler,variadic_parameter,(uint16_t)variadic_type,
+                variadic_type_span);
+            compiler->known_type_sets[variadic_parameter]=variadic_type;
+            compiler->known_types[variadic_parameter]=DIAMOND_TYPE_ARRAY;
+            record_scope_type_fact(compiler,variadic_parameter,variadic_name.start);
+        }
+    }
     function->has_block_parameter=has_block_parameter;
     if(block_parameter_type>=0&&!compiler->failed)
         emit_block_parameter_type_check(compiler,block_parameter_type,block_parameter_type_span);
