@@ -1042,6 +1042,7 @@ static bool run_compile_pass(const char *source, DiamondProgram *program,
         fail(&compiler,compiler.current.span,
             diamond_lexer_error_message(source,compiler.current.span));
 
+    if(!compiler.failed)collect_type_aliases(&compiler);
     const uint16_t result = compile_sequence(&compiler);
     if (!compiler.failed && compiler.current.kind != DIAMOND_TOKEN_EOF) {
         fail(&compiler, compiler.current.span, "unexpected block terminator");
@@ -1093,6 +1094,7 @@ static bool run_compile_pass(const char *source, DiamondProgram *program,
     if(!compiler.failed)
         rewrite_cyclic_tail_calls(program,compiler.tail_call_candidates,
             compiler.tail_call_candidate_count);
+    free(compiler.type_aliases);
     free(compiler.tail_call_candidates);
     free(compiler.generated_struct_functions);
     return !compiler.failed;

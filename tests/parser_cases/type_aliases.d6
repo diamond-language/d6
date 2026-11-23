@@ -1,0 +1,26 @@
+type ResultValue = String | ScalarValue
+type ScalarValue = Int | Nil
+type ResultMap = Hash[String, Array[ResultValue]]
+type RootPayload = Payload
+
+def retain(data: ResultMap) -> ResultMap = data
+
+class Payload
+end
+
+module Wrapped
+  class Payload
+  end
+  def self.retain(value: RootPayload) -> RootPayload = value
+end
+
+def generic[ScalarValue](value: ScalarValue) -> ScalarValue = value
+
+def type_alias_results()
+  type = 1
+  payload = retain({"key" => [4, "ok", nil]})
+  [payload["key"][0], payload["key"][1], type, Wrapped.retain(Payload.new()) is Payload,
+   generic[ResultValue]("generic")]
+end
+
+type_alias_results()

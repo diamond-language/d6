@@ -13,9 +13,11 @@
 #include "analysis_cache.h"
 #include "compiler.h"
 #include "loader.h"
+#include "lexer.h"
 #include "receiver.h"
 #include "vm.h"
 
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -42,6 +44,26 @@ static bool push_item(JsonValue *items,const char *name,int kind) {
     json_object_set(item,"label",json_string_z(name));
     json_object_set(item,"kind",json_number(kind));
     return json_array_push(items,item);
+}
+
+static bool push_type_aliases(JsonValue *items,const char *source) {
+    DiamondLexer lexer;
+    diamond_lexer_init(&lexer,source);
+    for(DiamondToken token=diamond_lexer_next(&lexer);
+        token.kind!=DIAMOND_TOKEN_EOF&&token.kind!=DIAMOND_TOKEN_ERROR;
+        token=diamond_lexer_next(&lexer)) {
+        if(!diamond_lexer_type_alias_start(&lexer,token))continue;
+        DiamondLexer after=lexer;
+        const DiamondToken name=diamond_lexer_next(&after);
+        if(name.span.length>=DIAMOND_MAX_FUNCTION_NAME||
+           !isupper((unsigned char)source[name.span.start])||
+           diamond_lexer_next(&after).kind!=DIAMOND_TOKEN_EQUAL)continue;
+        char label[DIAMOND_MAX_FUNCTION_NAME];
+        memcpy(label,source+name.span.start,name.span.length);
+        label[name.span.length]='\0';
+        if(!push_item(items,label,COMPLETION_KIND_CLASS))return false;
+    }
+    return true;
 }
 
 /* A raw byte offset into `text` for 1-based `line`/`column` -- only
@@ -225,6 +247,7 @@ JsonValue *completion_compute_with_resolver(DiamondSourceOverride resolver,
         okay=push_item(items,chunk.interfaces[index]->name,COMPLETION_KIND_INTERFACE);
     for(size_t index=0;okay&&!member&&index<chunk.module_count;index++)
         okay=push_item(items,chunk.modules[index]->name,COMPLETION_KIND_MODULE);
+    if(okay&&!member)okay=push_type_aliases(items,combined);
     if(okay&&cursor_offset!=SIZE_MAX) {
         if(!member) {
             okay=push_scope_locals(items,&scratch->entry,cursor_offset);

@@ -597,3 +597,10 @@ DiamondToken diamond_lexer_next(DiamondLexer *lexer) {
     lexer->previous = scanned.kind;
     return scanned;
 }
+
+bool diamond_lexer_type_alias_start(const DiamondLexer *lexer, DiamondToken token) {
+    if (token.kind != DIAMOND_TOKEN_IDENTIFIER || token.span.length != 4 ||
+        memcmp(lexer->source + token.span.start, "type", 4) != 0) return false;
+    DiamondLexer lookahead = *lexer;
+    return diamond_lexer_next(&lookahead).kind == DIAMOND_TOKEN_IDENTIFIER;
+}

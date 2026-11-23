@@ -27,6 +27,15 @@
     "definitions": {
       "patterns": [
         {
+          "comment": "Contextual type alias declaration",
+          "match": "^\\s*(type)[ \\t]+([A-Z][A-Za-z0-9_]*)[ \\t]*(=)",
+          "captures": {
+            "1": { "name": "storage.type.diamond" },
+            "2": { "name": "entity.name.type.diamond" },
+            "3": { "name": "keyword.operator.diamond" }
+          }
+        },
+        {
           "comment": "class/module/interface Name, including a qualified Outer::Name and an optional < Superclass",
           "match": "\\b(class|module|interface)\\b(\\s+)([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)(?:(\\s*<\\s*)([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*))?",
           "captures": {

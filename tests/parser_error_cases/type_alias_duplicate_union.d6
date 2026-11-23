@@ -1,0 +1,2 @@
+type Maybe = Int | Nil
+def rejected(a: Int | Maybe) = a

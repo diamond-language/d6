@@ -178,6 +178,8 @@ typedef struct DiamondLexer {
 
 void diamond_lexer_init(DiamondLexer *lexer, const char *source);
 DiamondToken diamond_lexer_next(DiamondLexer *lexer);
+/* A contextual keyword so existing variables and methods named type can still be used. */
+bool diamond_lexer_type_alias_start(const DiamondLexer *lexer, DiamondToken token);
 /* The diagnostic for an error token: a heredoc without its closing line gets its own. */
 const char *diamond_lexer_error_message(const char *source, DiamondSpan span);
 
