@@ -147,6 +147,7 @@ bool run_git_capture(char *const argv[], const char *context, char *out,
 
 /* facet_new.c */
 int cmd_new(int argc, char **argv);
+void print_new_kind_names(void);
 
 /* facet_resolve.c */
 bool resolve_full_graph(const FacetManifest *manifest, FacetResolution *resolution,

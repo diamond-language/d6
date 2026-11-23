@@ -1148,7 +1148,9 @@ static int cmd_add(int argc, char **argv) {
 static void print_usage(void) {
     fputs("usage: facet install\n"
           "       facet update [<name>...]\n"
-          "       facet new <kind> <path>     (kinds: cli, web, tcp, udp, lib)\n"
+          "       facet new <kind> <path>     (kinds: ", stderr);
+    print_new_kind_names();
+    fputs(")\n"
           "       facet init [name]\n"
           "       facet check <cut-directory> [--files]\n"
           "       facet pack <cut-directory> <output.tar>\n"
