@@ -2347,7 +2347,7 @@ void publish_instance_return_type(Compiler *compiler,uint16_t reg,
          * -- subtract the base to get the plain class index Phase 10/11's
          * own ivar_known_class/NEW-class-index terminals already use. */
         compiler->function->register_known_class[reg]=
-            known>=DIAMOND_TYPE_CLASS_BASE&&known<DIAMOND_TYPE_VARIABLE_BASE?
+            known>=DIAMOND_TYPE_CLASS_BASE&&known<DIAMOND_TYPE_CLASS_LIMIT?
                 (uint16_t)(known-DIAMOND_TYPE_CLASS_BASE):DIAMOND_NO_CLASS;
     }
     publish_collection_method_return_type(compiler,reg,receiver_set_index,name);
