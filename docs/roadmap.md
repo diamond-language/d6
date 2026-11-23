@@ -201,9 +201,21 @@ Areas worth considering:
 - calendar helpers that fit the existing UTC/local/fixed-offset model;
 - explicit metaprogramming operations with inspectable behavior;
 - better ways to express common typed callback and data-shaping patterns;
-- recursion headroom for tree-walking interpreters: a block-based evaluator spends about 19
-  d6 frames per level, so quarry's jq-level recursion stops near 500 levels of the ~9,600
-  the main thread allows. A larger or configurable main stack would cover it.
+
+Recursion headroom for callback-heavy interpreters remains worth watching.
+The CLI and standalone builds allow about 9,600 d6 calls at the default
+512 MiB stack size. `DIAMOND_MAIN_STACK_MB` adjusts that budget. See
+[callables](callables.md#tail-call-optimization) for the limits on other stacks.
+
+Quarry's original recursive evaluator handled 340 nested arrays when counting
+values with `reduce recurse as $x (0; . + 1)`. Its heap-backed traversal handled
+4,000 levels at the default stack size for `..`, plain `recurse`, and
+`recurse(.[]?)`. On the same input, peak resident memory for a standalone
+build running `reduce path(..) as $p (0; $p | length)` fell from about
+159 MiB to 42 MiB after Quarry switched to one mutable path and copied it
+on output. These results describe the tested workload. Custom child
+filters that use the general recursive evaluator still depend on d6's
+call-depth budget.
 
 ### Non-x86_64 architecture validation
 
