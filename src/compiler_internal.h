@@ -372,7 +372,7 @@ typedef struct Compiler {
     bool positional_spread_literal;
     size_t positional_spread_first;
     size_t positional_spread_count;
-    uint16_t positional_spread_elements[DIAMOND_MAX_ARGUMENTS];
+    uint16_t positional_spread_elements[DIAMOND_MAX_LITERAL_ENTRIES];
     size_t positional_spread_fixed_count;
     size_t positional_spread_index;
     uint16_t positional_spread_fixed[DIAMOND_MAX_DECLARED_PARAMETERS];

@@ -108,6 +108,13 @@ enum {
      * buffers this same call ultimately flows through (src/vm.c) -- one
      * shared cap so the two sides can't drift out of sync with each other. */
     DIAMOND_MAX_ARGUMENTS = 255,
+    /* ARRAY and HASH encode the literal count as a uint16_t. Keep parser
+     * bookkeeping bounded independently of call arity and the VM's
+     * per-function register and bytecode budgets. */
+    DIAMOND_MAX_LITERAL_ENTRIES = 512,
+    /* BUILD_SPREAD_ARGS reserves the high bit of the suffix count for a
+     * forwarded block. Larger array literals emit multiple builders. */
+    DIAMOND_MAX_SPREAD_SUFFIX = 127,
     /* Distinct from DIAMOND_MAX_ARGUMENTS above on purpose: a *call*
      * argument list only ever needs register-range bookkeeping (cheap to
      * widen fully, see that constant's own comment), but a *declared*

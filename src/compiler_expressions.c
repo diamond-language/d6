@@ -47,7 +47,7 @@ uint16_t parse_with_expected_set(Compiler *compiler,
 uint16_t parse_array_literal(Compiler *compiler,
         const DiamondFunction *expected_function,size_t first_parameter,
         size_t parameter_count) {
-    uint16_t elements[DIAMOND_MAX_ARGUMENTS];
+    uint16_t elements[DIAMOND_MAX_LITERAL_ENTRIES];
     size_t count=0;
     uint16_t expected_element=DIAMOND_NO_TYPE_SET;
     if(compiler->expected_expression_type_set>=0&&
@@ -64,7 +64,7 @@ uint16_t parse_array_literal(Compiler *compiler,
     size_t spread_at=SIZE_MAX;
     if(compiler->current.kind!=DIAMOND_TOKEN_RIGHT_BRACKET) {
         do {
-            if(count==DIAMOND_MAX_ARGUMENTS) {
+            if(count==DIAMOND_MAX_LITERAL_ENTRIES) {
                 fail(compiler,compiler->current.span,"array literal has too many elements");
                 return 0;
             }
@@ -103,14 +103,35 @@ uint16_t parse_array_literal(Compiler *compiler,
         return 0;
     }
     advance_token(compiler);
+    if(compiler->failed)return 0;
     if(spread_at!=SIZE_MAX) {
-        /* The same builder a call's `f(a, *rest, z)` uses: fixed prefix,
-         * one spread Array (TypeError if it isn't one), fixed suffix. */
-        const uint16_t destination=emit_build_spread_arguments(compiler,elements,
-            spread_at,elements[spread_at],elements+spread_at+1,
-            count-spread_at-1,false);
+        /* Elements have already been evaluated in source order. Start with
+         * the chunk closest to the splat on each side, then prepend earlier
+         * prefix chunks and append later suffix chunks. */
+        const size_t suffix_count=count-spread_at-1;
+        const uint16_t *suffix=elements+spread_at+1;
+        size_t prefix_at=spread_at>UINT8_MAX?spread_at-UINT8_MAX:0;
+        size_t suffix_at=suffix_count>DIAMOND_MAX_SPREAD_SUFFIX?
+            DIAMOND_MAX_SPREAD_SUFFIX:suffix_count;
+        uint16_t destination=emit_build_spread_arguments(compiler,
+            elements+prefix_at,spread_at-prefix_at,elements[spread_at],
+            suffix,suffix_at,false);
+        while(prefix_at>0&&!compiler->failed) {
+            const size_t batch=prefix_at>UINT8_MAX?UINT8_MAX:prefix_at;
+            prefix_at-=batch;
+            destination=emit_build_spread_arguments(compiler,elements+prefix_at,
+                batch,destination,nullptr,0,false);
+        }
+        while(suffix_at<suffix_count&&!compiler->failed) {
+            const size_t remaining=suffix_count-suffix_at;
+            const size_t batch=remaining>DIAMOND_MAX_SPREAD_SUFFIX?
+                DIAMOND_MAX_SPREAD_SUFFIX:remaining;
+            destination=emit_build_spread_arguments(compiler,nullptr,0,destination,
+                suffix+suffix_at,batch,false);
+            suffix_at+=batch;
+        }
         publish_array_spread_tooling_type(compiler,destination,elements,spread_at,
-            elements[spread_at],elements+spread_at+1,count-spread_at-1);
+            elements[spread_at],suffix,suffix_count);
         return destination;
     }
     const uint16_t base=allocate_register(compiler);
@@ -118,7 +139,7 @@ uint16_t parse_array_literal(Compiler *compiler,
     for(size_t i=0;i<count;i++) emit_instruction(compiler,DIAMOND_OP_MOVE,
         (uint16_t)(base+i),elements[i],0,2);
     const uint16_t destination=allocate_register(compiler);
-    emit_instruction(compiler,DIAMOND_OP_ARRAY,destination,base,(uint8_t)count,3);
+    emit_instruction(compiler,DIAMOND_OP_ARRAY,destination,base,(uint16_t)count,3);
     compiler->known_types[destination]=DIAMOND_TYPE_ARRAY;
     record_collection_type_set(compiler,destination,DIAMOND_TYPE_ARRAY,
         joined_value_type_set(compiler,elements,count),-1);
@@ -138,7 +159,7 @@ static uint16_t parse_array(Compiler *compiler) {
 }
 
 static uint16_t parse_hash(Compiler *compiler) {
-    uint16_t keys[DIAMOND_MAX_ARGUMENTS],values[DIAMOND_MAX_ARGUMENTS];
+    uint16_t keys[DIAMOND_MAX_LITERAL_ENTRIES],values[DIAMOND_MAX_LITERAL_ENTRIES];
     size_t count=0;
     uint16_t expected_key=DIAMOND_NO_TYPE_SET;
     uint16_t expected_value=DIAMOND_NO_TYPE_SET;
@@ -155,7 +176,7 @@ static uint16_t parse_hash(Compiler *compiler) {
     skip_newlines(compiler);
     if(compiler->current.kind!=DIAMOND_TOKEN_RIGHT_BRACE) {
         do {
-            if(count==DIAMOND_MAX_ARGUMENTS) {
+            if(count==DIAMOND_MAX_LITERAL_ENTRIES) {
                 fail(compiler,compiler->current.span,"hash literal has too many entries");
                 return 0;
             }

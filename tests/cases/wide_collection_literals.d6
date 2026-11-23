@@ -1,0 +1,3 @@
+require "../parser_cases/wide_collection_literals"
+
+wide_collection_results()

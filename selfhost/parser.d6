@@ -5677,6 +5677,10 @@ class Parser
   # prefix + spread + suffix as one Array. With optional_block the last
   # suffix value is a forwarded `&block`, dropped when it is nil.
   def emit_build_spread_arguments(prefix, spread, suffix, optional_block)
+    if prefix.length() > 255 || suffix.length() > 127
+      self.fail("too many fixed elements around a spread")
+      return 0
+    end
     prefix_base = if prefix.length() > 0
       self.move_contiguous(prefix)
     else
@@ -9664,8 +9668,8 @@ class Parser
     spread_at = nil
     self.skip_newlines()
     while !@failed && @current.kind() != :right_bracket
-      # DIAMOND_MAX_ARGUMENTS, as in compiler_expressions.c's parse_array.
-      if elements.length() == 255
+      # DIAMOND_MAX_LITERAL_ENTRIES, as in compiler_expressions.c.
+      if elements.length() == 512
         self.fail("array literal has too many elements")
       elsif @current.kind() == :star
         if spread_at != nil
@@ -9698,12 +9702,26 @@ class Parser
     else
       self.advance_token() unless @failed
     end
+    return 0 if @failed
     if spread_at != nil
-      # The builder a call's `f(a, *rest, z)` uses: TypeError unless the
-      # splat is an Array.
-      return 0 if @failed
-      return self.emit_build_spread_arguments(elements.slice(0, spread_at), elements[spread_at],
-        elements.slice(spread_at + 1, elements.length() - spread_at - 1), false)
+      # Match the native compiler's prefix byte and seven-bit suffix count.
+      prefix_at = spread_at > 255 ? spread_at - 255 : 0
+      suffix_count = elements.length() - spread_at - 1
+      suffix_at = suffix_count > 127 ? 127 : suffix_count
+      destination = self.emit_build_spread_arguments(elements.slice(prefix_at, spread_at - prefix_at),
+        elements[spread_at], elements.slice(spread_at + 1, suffix_at), false)
+      while prefix_at > 0 && !@failed
+        batch = prefix_at > 255 ? 255 : prefix_at
+        prefix_at = prefix_at - batch
+        destination = self.emit_build_spread_arguments(elements.slice(prefix_at, batch), destination, [], false)
+      end
+      while suffix_at < suffix_count && !@failed
+        remaining = suffix_count - suffix_at
+        batch = remaining > 127 ? 127 : remaining
+        destination = self.emit_build_spread_arguments([], destination, elements.slice(spread_at + 1 + suffix_at, batch), false)
+        suffix_at = suffix_at + batch
+      end
+      return destination
     end
     base = self.allocate_register()
     index = 1
@@ -9732,7 +9750,7 @@ class Parser
     values = []
     self.skip_newlines()
     while !@failed && @current.kind() != :right_brace
-      if keys.length() == 255
+      if keys.length() == 512
         self.fail("hash literal has too many entries")
       else
         keys.push(self.parse_expression())
