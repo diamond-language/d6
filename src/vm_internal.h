@@ -550,6 +550,15 @@ DIAMOND_INTERNAL DiamondVmStatus udp_socket_helper(DiamondVm *vm,bool bind_socke
 DIAMOND_INTERNAL DiamondListenerHandle *allocate_listener_handle(DiamondVm *vm,int fd, bool nonblocking);
 DIAMOND_INTERNAL DiamondSocketHandle *allocate_socket_handle(DiamondVm *vm,int fd);
 DIAMOND_INTERNAL DiamondUdpSocketHandle *allocate_udp_socket_handle(DiamondVm *vm,int fd);
+typedef struct DiamondPollChannel {
+    DiamondChannel *channel;
+    bool writable;
+    bool ready;
+} DiamondPollChannel;
+
+DIAMOND_INTERNAL DiamondVmStatus poll_with_channels(DiamondVm *vm,
+    const DiamondValue *cancellations,DiamondValue deadline,struct pollfd *fds,
+    nfds_t fd_count,DiamondPollChannel *channels,size_t channel_count,bool immediate);
 DIAMOND_INTERNAL DiamondVmStatus cancellable_wait_helper(DiamondVm *vm,DiamondChannel *target, bool writable,DiamondValue cancellations,DiamondValue deadline_value, struct pollfd *fds,nfds_t fd_count,const bool *select_drained);
 DIAMOND_INTERNAL int connect_with_timeout(int fd,const struct addrinfo *candidate, int64_t timeout_ms);
 DIAMOND_INTERNAL DiamondVmStatus dispatch_pending_signals(DiamondVm *vm,const DiamondChunk *chunk, size_t depth,bool *any_invoked);

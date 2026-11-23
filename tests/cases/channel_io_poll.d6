@@ -1,0 +1,27 @@
+def publish(channel)
+  pause = Channel.new(1)
+  pause.wait_readable([], Time.monotonic() + 0.02)
+  channel.send("work")
+end
+
+channel = Channel.new(1)
+puts(IO.poll([channel], [channel, STDOUT], 0))
+worker = Thread.new(publish, channel)
+puts(IO.poll([channel, channel], [], 1000)["readable"])
+worker.join()
+puts(IO.poll([channel], [channel, STDOUT], 0))
+puts(channel.try_receive())
+puts(IO.poll([channel], [], 5)["readable"])
+
+cancel = Channel.new(1)
+cancel.close()
+puts(IO.poll([channel], [], {"cancellations": [cancel]})["readable"])
+channel.close()
+puts(IO.poll([channel], [channel], -1))
+puts(channel.try_receive())
+
+child = Process.spawn(["sh", "-c", "printf ready"])
+empty = Channel.new(1)
+puts(IO.poll([empty, child.stdout()], [], 1000)["readable"])
+puts(child.stdout().read(5))
+child.wait()

@@ -7,6 +7,12 @@ come only in minor releases, marked **Breaking** here.
 
 ## Unreleased
 
+### Added
+
+- `IO.poll` waits on channels and sockets together. Put a channel in either
+  readiness list to wait for a value, available capacity, or closure without
+  consuming data or reserving space.
+
 ## 1.5.0 — 2026-11-22
 
 ### Added

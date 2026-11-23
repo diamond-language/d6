@@ -1480,29 +1480,42 @@ typedef struct ChannelWaitRegistration {
     ChannelWaitLink link;
 } ChannelWaitRegistration;
 
+/* The caller holds the channel lock. Closure wakes both directions so the
+ * subsequent operation can observe EOF or the closed-channel error. */
+static bool poll_channel_ready(const DiamondPollChannel *interest) {
+    const DiamondChannel *channel=interest->channel;
+    return channel->closed || (interest->writable?
+        channel->count<channel->capacity &&
+            (!channel->rendezvous||channel->receivers_waiting>0):
+        channel->count>0);
+}
+
 /* A readiness wait does not consume data or reserve capacity. The caller
  * retries its operation after waking. Registration and readiness checks share
  * each channel's lock: a transition either precedes the check or writes to
  * the already-registered pipe. This closes the check/sleep lost-wakeup gap.
  * Receiver/argument registers keep all handles alive for this entire call.
  * fds has room for one extra descriptor after fd_count. target is NULL for
- * IO.poll, which waits on its supplied fds plus cancellation channels.
+ * IO.poll, which waits on its supplied fds, interests and cancellations.
  * select_drained is non-NULL only for Channel.select and
  * Channel.select_send: the Array's channels are then candidates rather than
  * cancellation sources, ready when they hold a value (or, with `writable`,
  * have room) or close, except entries the caller already saw closed and drained
  * (select_drained[i]) -- those can never become ready again and would
  * otherwise spin the wait. */
-DiamondVmStatus cancellable_wait_helper(DiamondVm *vm,DiamondChannel *target,
-        bool writable,DiamondValue cancellations,DiamondValue deadline_value,
-        struct pollfd *fds,nfds_t fd_count,const bool *select_drained) {
-    if(cancellations.kind!=DIAMOND_VALUE_OBJECT ||
-       cancellations.as.object->kind!=DIAMOND_OBJECT_ARRAY) {
+static DiamondVmStatus wait_with_channels(DiamondVm *vm,DiamondChannel *target,
+        bool writable,const DiamondValue *cancellations,DiamondValue deadline_value,
+        struct pollfd *fds,nfds_t fd_count,const bool *select_drained,
+        DiamondPollChannel *interests,size_t interest_count,bool immediate) {
+    const bool mixed=interest_count>0;
+    if(cancellations!=nullptr&&(cancellations->kind!=DIAMOND_VALUE_OBJECT ||
+       cancellations->as.object->kind!=DIAMOND_OBJECT_ARRAY)) {
         snprintf(vm->error,sizeof vm->error,"channel wait cancellations must be an Array of Channels");
         return DIAMOND_VM_TYPE_ERROR;
     }
-    const DiamondArray *array=(const DiamondArray *)cancellations.as.object;
-    for(size_t i=0;i<array->count;i++) {
+    const DiamondArray *array=cancellations==nullptr?nullptr:(const DiamondArray *)cancellations->as.object;
+    const size_t cancellation_count=array==nullptr?0:array->count;
+    for(size_t i=0;i<cancellation_count;i++) {
         if(array->values[i].kind!=DIAMOND_VALUE_OBJECT ||
            array->values[i].as.object->kind!=DIAMOND_OBJECT_CHANNEL) {
             snprintf(vm->error,sizeof vm->error,"channel wait cancellations must be an Array of Channels");
@@ -1518,10 +1531,11 @@ DiamondVmStatus cancellable_wait_helper(DiamondVm *vm,DiamondChannel *target,
         }
         deadline=deadline_value.as.real;
     }
-    if(array->count>=SIZE_MAX/sizeof(ChannelWaitRegistration)-1)
+    if(cancellation_count>=SIZE_MAX/sizeof(ChannelWaitRegistration)-interest_count-1)
         return DIAMOND_VM_OUT_OF_MEMORY;
     const size_t target_count=target==nullptr?0:1;
-    const size_t count=array->count+target_count;
+    const size_t interest_start=cancellation_count+target_count;
+    const size_t count=interest_start+interest_count;
     ChannelWaitRegistration *registrations=calloc(count==0?1:count,sizeof *registrations);
     if(registrations==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
     int descriptors[2];
@@ -1540,9 +1554,10 @@ DiamondVmStatus cancellable_wait_helper(DiamondVm *vm,DiamondChannel *target,
         }
     }
     fds[fd_count]=(struct pollfd){.fd=descriptors[0],.events=POLLIN};
-    bool ready=false;
+    bool ready=immediate;
     for(size_t i=0;i<count;i++) {
-        DiamondChannel *channel=i<target_count?target:
+        DiamondPollChannel *interest=i<interest_start?nullptr:&interests[i-interest_start];
+        DiamondChannel *channel=interest!=nullptr?interest->channel:i<target_count?target:
             ((DiamondChannelHandle *)array->values[i-target_count].as.object)->channel;
         ChannelWaitRegistration *registration=&registrations[i];
         registration->channel=channel;
@@ -1550,7 +1565,9 @@ DiamondVmStatus cancellable_wait_helper(DiamondVm *vm,DiamondChannel *target,
         pthread_mutex_lock(&channel->lock);
         registration->link.next=channel->waiters;
         channel->waiters=&registration->link;
-        if(select_drained!=nullptr)
+        if(interest!=nullptr)
+            ready=ready||poll_channel_ready(interest);
+        else if(select_drained!=nullptr)
             ready=ready||(writable?channel->count<channel->capacity&&!channel->closed&&
                     (!channel->rendezvous||channel->receivers_waiting>0):
                     channel->count>0) ||
@@ -1561,27 +1578,33 @@ DiamondVmStatus cancellable_wait_helper(DiamondVm *vm,DiamondChannel *target,
                     (!channel->rendezvous||channel->receivers_waiting>0):channel->count>0));
         pthread_mutex_unlock(&channel->lock);
     }
-    /* Trapped signals are dispatched at VM instruction boundaries. Only
-     * VMs that installed handlers need a bounded return to that dispatcher;
-     * ordinary worker waits have no periodic timeout. EINTR also returns
-     * immediately, after unlinking, so handlers can safely close channels. */
+    /* Keep the bounded-return contract of the existing cancellation waits.
+     * Mixed polls use poll_watching_signals to return on a pending trap.
+     * Both paths unlink before handlers can run. */
     bool signal_aware=false;
-    for(size_t i=0;i<DIAMOND_SIGNAL_COUNT;i++)
-        if(vm->trapped_signal_handlers[i].kind==DIAMOND_VALUE_OBJECT)
-            signal_aware=true;
+    if(!mixed) {
+        for(size_t i=0;i<DIAMOND_SIGNAL_COUNT;i++)
+            if(vm->trapped_signal_handlers[i].kind==DIAMOND_VALUE_OBJECT)
+                signal_aware=true;
+    }
     int wait_error=0;
     DiamondVmStatus budget_status=DIAMOND_VM_OK;
-    while(!ready) {
-        int milliseconds=-1;
-        if(timed) {
+    while(!ready||mixed) {
+        int milliseconds=ready?0:-1;
+        if(timed&&!ready) {
             struct timespec now;
             if(clock_gettime(CLOCK_MONOTONIC,&now)!=0) {wait_error=errno;break;}
             const double remaining=deadline-(double)now.tv_sec-(double)now.tv_nsec/1e9;
-            if(remaining<=0)break;
-            const double rounded=ceil(remaining*1000);
-            milliseconds=rounded>INT_MAX?INT_MAX:(int)rounded;
+            if(remaining<=0) {
+                if(!mixed)break;
+                ready=true;
+                milliseconds=0;
+            } else {
+                const double rounded=ceil(remaining*1000);
+                milliseconds=rounded>INT_MAX?INT_MAX:(int)rounded;
+            }
         }
-        if(signal_aware&&(milliseconds<0||milliseconds>10))milliseconds=10;
+        if(!mixed&&signal_aware&&(milliseconds<0||milliseconds>10))milliseconds=10;
         bool budget_bounded=false;
         milliseconds=bound_wait_by_wall_budget(vm,milliseconds,&budget_bounded);
         /* A supervised attempt wakes every slice to look at its interrupt
@@ -1591,7 +1614,11 @@ DiamondVmStatus cancellable_wait_helper(DiamondVm *vm,DiamondChannel *target,
             if(milliseconds<0||milliseconds>DIAMOND_INTERRUPT_SLICE_MS)
                 milliseconds=DIAMOND_INTERRUPT_SLICE_MS;
         }
-        const int result=poll(fds,fd_count+1,milliseconds);
+        const int result=mixed?
+            (ready?poll_interruptible(vm,fds,fd_count+1,milliseconds,&budget_status):
+                poll_watching_signals(vm,fds,fd_count+1,milliseconds,&budget_status)):
+            poll(fds,fd_count+1,milliseconds);
+        if(budget_status!=DIAMOND_VM_OK)break;
         if(result==0&&budget_bounded) {
             budget_status=wall_budget_after_wait(vm);
             if(budget_status!=DIAMOND_VM_OK)break;
@@ -1605,7 +1632,7 @@ DiamondVmStatus cancellable_wait_helper(DiamondVm *vm,DiamondChannel *target,
             for(nfds_t i=0;i<fd_count;i++)fds[i].revents=0;
             break;
         }
-        if(signal_aware)break;
+        if(ready||(!mixed&&signal_aware))break;
         /* Timeout: recompute against the absolute monotonic deadline.
          * Long deadlines may need more than one INT_MAX-millisecond wait. */
     }
@@ -1615,6 +1642,10 @@ DiamondVmStatus cancellable_wait_helper(DiamondVm *vm,DiamondChannel *target,
         ChannelWaitLink **link=&registration->channel->waiters;
         while(*link!=&registration->link)link=&(*link)->next;
         *link=registration->link.next;
+        if(i>=interest_start) {
+            DiamondPollChannel *interest=&interests[i-interest_start];
+            interest->ready=poll_channel_ready(interest);
+        }
         pthread_mutex_unlock(&registration->channel->lock);
     }
     close(descriptors[0]);close(descriptors[1]);free(registrations);
@@ -1623,4 +1654,18 @@ DiamondVmStatus cancellable_wait_helper(DiamondVm *vm,DiamondChannel *target,
         return DIAMOND_VM_IO_ERROR;
     }
     return budget_status;
+}
+
+DiamondVmStatus cancellable_wait_helper(DiamondVm *vm,DiamondChannel *target,
+        bool writable,DiamondValue cancellations,DiamondValue deadline,
+        struct pollfd *fds,nfds_t fd_count,const bool *select_drained) {
+    return wait_with_channels(vm,target,writable,&cancellations,deadline,fds,
+        fd_count,select_drained,nullptr,0,false);
+}
+
+DiamondVmStatus poll_with_channels(DiamondVm *vm,const DiamondValue *cancellations,
+        DiamondValue deadline,struct pollfd *fds,nfds_t fd_count,
+        DiamondPollChannel *channels,size_t channel_count,bool immediate) {
+    return wait_with_channels(vm,nullptr,false,cancellations,deadline,fds,
+        fd_count,nullptr,channels,channel_count,immediate);
 }
