@@ -9,6 +9,8 @@ come only in minor releases, marked **Breaking** here.
 
 ### Added
 
+- Program-level type aliases give existing types and unions a reusable name in
+  annotations and type arguments.
 - `IO.poll` waits on channels and sockets together. Put a channel in either
   readiness list to wait for a value, available capacity, or closure without
   consuming data or reserving space.

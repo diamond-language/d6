@@ -23,6 +23,27 @@ annotations, pipe-separated unions, generics (`Array[T]`, `Hash[K, V]`),
 `is` for runtime type tests, and structural interfaces (`Sized`,
 `Callable[n]`-style).
 
+### Type aliases
+
+Declare an alias at program scope with `type Name = Type`. Aliases expand
+where an annotation or a type argument is resolved, including when the
+declaration appears later in the program.
+
+```ruby
+type JsonValue = Int | Float | String | Bool | Nil | Array | Hash
+type JsonObject = Hash[String, JsonValue]
+
+def check(value: JsonObject) -> JsonObject = value
+puts(check({"count" => 2})["count"])  # => 2
+```
+
+Aliases can name unions, instantiated generics, or other aliases.
+Names start with a capital letter and share the program-level type
+namespace. Names on the right resolve at program scope. Alias declarations
+take no type parameters, and cycles are compile errors. Use annotations
+and type arguments for aliases. Runtime predicates and class inheritance
+take nominal type names.
+
 Classes can declare one or two type parameters, inferred at construction or supplied explicitly:
 
 ```ruby

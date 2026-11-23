@@ -1848,6 +1848,23 @@ count=$((count + 1))
 send '{"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":"'"$type_symbol_uri"'"}}}'
 read_message >/dev/null
 
+# Type aliases are suggested as types and their expanded receiver facts
+# are available to member completion.
+alias_uri="file:///type_alias_completion.d6"
+alias_source='class Payload\n  def points() -> Int = 1\nend\ntype Message = Payload\ndef read_message(value: Message)\n  value.points()\nend\n'
+send '{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"'"$alias_uri"'","text":"'"$alias_source"'"}}}'
+read_message >/dev/null
+send '{"jsonrpc":"2.0","id":126,"method":"textDocument/completion","params":{"textDocument":{"uri":"'"$alias_uri"'"},"position":{"line":4,"character":24}}}'
+response="$(read_message)"
+[[ "$response" == *'"label":"Message","kind":7'* ]]
+count=$((count + 1))
+send '{"jsonrpc":"2.0","id":127,"method":"textDocument/completion","params":{"textDocument":{"uri":"'"$alias_uri"'"},"position":{"line":5,"character":8}}}'
+response="$(read_message)"
+[[ "$response" == *'"label":"points","kind":3'* ]]
+count=$((count + 1))
+send '{"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":"'"$alias_uri"'"}}}'
+read_message >/dev/null
+
 # --- completion suggests locals actually in scope at the cursor (real
 # lexical scoping, not name-matching): a rescue-bound name only shows
 # up inside its own clause, a name declared after the cursor doesn't

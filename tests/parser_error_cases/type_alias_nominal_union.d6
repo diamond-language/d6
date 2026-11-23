@@ -1,0 +1,4 @@
+type AliasPayload = Payload
+def rejected(value: AliasPayload | Payload) = value
+class Payload
+end

@@ -172,11 +172,21 @@ typedef struct PendingSingletonKey {
     size_t index;
 } PendingSingletonKey;
 
+typedef struct TypeAlias {
+    DiamondSpan name;
+    DiamondLexer body;
+    bool expanding;
+} TypeAlias;
+
 typedef struct Compiler {
     const char *source;
     DiamondLexer lexer;
     DiamondToken current;
     DiamondToken previous;
+    TypeAlias *type_aliases;
+    size_t type_alias_count;
+    size_t type_alias_depth;
+    size_t sequence_depth;
     DiamondProgram *program;
     DiamondFunction *function;
     /* >0 anywhere lexically inside a begin/rescue/ensure block of the
@@ -847,6 +857,7 @@ DIAMOND_INTERNAL bool consume_qualified_name(Compiler *compiler,char *buffer,
 DIAMOND_INTERNAL int resolve_type_name(Compiler *compiler,const char *name,
                              DiamondSpan diagnostic);
 DIAMOND_INTERNAL int parse_type_annotation(Compiler *compiler);
+DIAMOND_INTERNAL bool collect_type_aliases(Compiler *compiler);
 DIAMOND_INTERNAL int field_index(Compiler *compiler, DiamondSpan name, bool create);
 DIAMOND_INTERNAL int class_variable_owner(Compiler *compiler, DiamondSpan name);
 DIAMOND_INTERNAL int class_variable_index(Compiler *compiler, DiamondSpan name, bool create);

@@ -1,0 +1,2 @@
+type Items = Array[Int | String]
+def rejected(value: Items | Array[String | Int]) = value

@@ -702,6 +702,9 @@ class Parser
     @lexer = Lexer.new(source)
     @current = @lexer.next_token()
     @previous = @current
+    @type_aliases = {}
+    @expanding_aliases = []
+    @sequence_depth = 0
     @code_count = 0
     @next_register = 0
     # Bytes prepended to `source` by a caller before it reached this
@@ -923,7 +926,9 @@ class Parser
   # Returns true on success; on failure, error_message() explains why and
   # no .run() should be attempted against a partially-emitted program.
   def compile()
+    self.collect_type_aliases()
     result = self.compile_sequence()
+    self.check_type_alias_names() unless @failed
     if !@failed && @current.kind() != :eof
       self.fail("unexpected block terminator")
     end
@@ -1345,6 +1350,7 @@ class Parser
   end
 
   def find_interface(name)
+    name = name.slice(2, name.length()) if name.start_with?("::")
     index = @interfaces.length() - 1
     result = nil
     while index >= 0 && result == nil
@@ -1491,10 +1497,102 @@ class Parser
     outer
   end
 
+  def type_alias_start?(lexer, token)
+    token.kind() == :identifier && self.token_text(token) == "type" &&
+      lexer.clone().next_token().kind() == :identifier
+  end
+
+  def collect_type_aliases()
+    return unless @source.match?(/\btype[ \t\r]+[A-Za-z_]/)
+    lexer = @lexer.clone()
+    token = @current
+    while token.kind() != :eof && token.kind() != :error && !@failed
+      if self.type_alias_start?(lexer, token)
+        lookahead = lexer.clone()
+        name_token = lookahead.next_token()
+        name = self.token_text(name_token)
+        if lookahead.next_token().kind() == :equal
+          if @type_aliases.include_key?(name)
+            self.fail_at(name_token.start(), name_token.line(), name_token.column(), "duplicate type alias")
+          else
+            @type_aliases[name] = [lookahead, name_token]
+          end
+        end
+      end
+      token = lexer.next_token()
+    end
+  end
+
+  def check_type_alias_names()
+    @type_aliases.each() do |name, entry|
+      if name == "Self" || self.find_type_name(name) != nil || self.find_forward_module(name, nil) != nil
+        token = entry[1]
+        self.fail_at(token.start(), token.line(), token.column(), "type alias name is already defined")
+      end
+    end
+  end
+
+  def compile_type_alias()
+    self.advance_token()
+    name = self.token_text(@current)
+    if @sequence_depth != 1 || @current_function_index != -1 || @current_module_index != nil || @current_class_index != nil
+      self.fail("type aliases must be declared at top level")
+      return
+    end
+    if name.bytesize() >= 64 || !name.match?(/^[A-Z]/)
+      self.fail("expected capitalized type alias name")
+      return
+    end
+    self.advance_token()
+    if @current.kind() != :equal
+      self.fail("expected '=' after type alias name")
+      return
+    end
+    self.advance_token()
+    self.skip_newlines()
+    @expanding_aliases.push(name)
+    annotation = self.parse_type_annotation()
+    @expanding_aliases.pop()
+    self.declare_annotation(annotation) unless @failed
+    if @current.kind() != :newline && @current.kind() != :eof
+      self.fail("expected newline after type alias")
+    end
+    self.skip_newlines()
+  end
+
+  def expand_type_alias(name)
+    if @expanding_aliases.include?(name)
+      self.fail("cyclic type alias")
+      return []
+    end
+    if @expanding_aliases.length() >= 64
+      self.fail("type alias nesting exceeds 64")
+      return []
+    end
+    lexer = @lexer
+    current = @current
+    previous = @previous
+    @expanding_aliases.push(name)
+    @lexer = @type_aliases[name][0].clone()
+    self.advance_token()
+    self.skip_newlines()
+    members = self.parse_type_annotation()
+    @lexer = lexer
+    @current = current
+    @previous = previous
+    @expanding_aliases.pop()
+    members
+  end
+
   def compile_sequence()
+    @sequence_depth = @sequence_depth + 1
     self.skip_newlines()
     result = self.allocate_register()
     while !@failed && !self.at_block_end?()
+      if self.type_alias_start?(@lexer, @current)
+        self.compile_type_alias()
+        next
+      end
       self.mark_locals_captured() if self.statement_may_capture?()
       postfix = self.postfix_modifier_ahead()
       postfix_loop = postfix == :while || postfix == :until
@@ -1547,7 +1645,7 @@ class Parser
       if has_postfix
         if @current.kind() != postfix
           self.fail("expected postfix condition")
-          return result
+          break
         end
         self.advance_token()
         # `i += 1 while i < 5`: the condition runs first and the loop is nil.
@@ -1578,6 +1676,7 @@ class Parser
         self.fail("expected newline after expression")
       end
     end
+    @sequence_depth = @sequence_depth - 1
     result
   end
 
@@ -2149,6 +2248,62 @@ class Parser
     end
   end
 
+  # The internal leading :: marks an alias RHS as program-scoped.
+  def annotation_name(name)
+    if @expanding_aliases.empty?() || self.builtin_annotation_type(name) != nil
+      return name
+    end
+    "::" + name
+  end
+
+  def same_annotation_name?(left, right)
+    return true if left == right
+    left_type = self.find_type_name(left)
+    right_type = self.find_type_name(right)
+    return left_type == right_type if left_type != nil || right_type != nil
+    if @current_module_name == nil
+      left = left.slice(2, left.length()) if left.start_with?("::")
+      right = right.slice(2, right.length()) if right.start_with?("::")
+    end
+    left == right
+  end
+
+  def same_annotation?(left, right)
+    return left == right if left == nil || right == nil
+    return false if left.length() != right.length()
+    left.all?() do |member|
+      right.any?() do |other| self.same_annotation_member?(member, other) end
+    end
+  end
+
+  def same_annotation_member?(left, right)
+    return false unless self.same_annotation_name?(left[0], right[0]) && left[3] == right[3] &&
+      self.same_annotation?(left[1], right[1]) && self.same_annotation?(left[2], right[2]) &&
+      self.same_annotation?(left[4], right[4])
+    a = left[5]
+    b = right[5]
+    return a == b if a == nil || b == nil
+    return false if a.length() != b.length()
+    index = 0
+    while index < a.length()
+      return false unless self.same_annotation?(a[index], b[index])
+      index = index + 1
+    end
+    true
+  end
+
+  def append_annotation_member(members, member)
+    return if @failed
+    if members.length() == 8
+      self.fail("too many types in union")
+    elsif members.include?(member) || (!@type_aliases.empty?() &&
+        members.any?() do |known| self.same_annotation_member?(known, member) end)
+      self.fail("duplicate type in union")
+    else
+      members.push(member)
+    end
+  end
+
   def parse_type_annotation()
     members = []
     parsing = true
@@ -2168,8 +2323,14 @@ class Parser
             self.advance_token()
           end
         end
-        if members.length() == 8
-          self.fail("too many types in union")
+        if @type_aliases.include_key?(name) && self.find_type_name(self.annotation_name(name)) == nil
+          if @current.kind() == :left_bracket
+            self.fail("type aliases do not accept arguments")
+          else
+            self.expand_type_alias(name).each() do |member|
+              self.append_annotation_member(members, member)
+            end
+          end
         else
           argument = nil
           second_argument = nil
@@ -2225,11 +2386,11 @@ class Parser
             # Unparameterized collections remain valid dynamic contracts.
           end
           if !@failed
-            member = [name, argument, second_argument, callable_arity,
+            rooted = self.annotation_name(name)
+            member = [rooted, argument, second_argument, callable_arity,
                       callable_return, callable_parameters]
-            self.fail("duplicate type in union") if members.include?(member)
-            @type_name_tokens[name] = name_token unless @type_name_tokens.include_key?(name)
-            members.push(member)
+            @type_name_tokens[rooted] = name_token unless @type_name_tokens.include_key?(rooted)
+            self.append_annotation_member(members, member)
           end
         end
         if !@failed && @current.kind() == :pipe
@@ -2305,7 +2466,7 @@ class Parser
   # An annotation may name a type declared later, which matches no known type.
   def annotation_type_id(name) = self.find_type_name(name) || Type::UNDECLARED
 
-  def find_type_name(name)
+  def builtin_annotation_type(name)
     return Type::INT if name == "Int"
     return Type::FLOAT if name == "Float"
     return Type::STRING if name == "String"
@@ -2316,8 +2477,15 @@ class Parser
     return Type::ARRAY if name == "Array"
     return Type::HASH if name == "Hash"
     return Type::CALLABLE if name == "Callable"
+    nil
+  end
+
+  def find_type_name(name)
+    root = name.start_with?("::")
+    intrinsic = self.builtin_annotation_type(name)
+    return intrinsic if intrinsic != nil
     variable = 0
-    while variable < @current_type_variables.length()
+    while !root && variable < @current_type_variables.length()
       return Type::VARIABLE_BASE + variable if @current_type_variables[variable] == name
       variable = variable + 1
     end
@@ -2330,8 +2498,7 @@ class Parser
       return Type::CLASS_BASE + class_entry[1]
     end
     # Native types come after classes, so a program's own Channel still wins.
-    native = @builder.native_type_id(name)
-    native
+    @builder.native_type_id(root ? name.slice(2, name.length()) : name)
   end
 
   # A type set can name a class or interface declared later, as compiler.c's
@@ -4747,6 +4914,7 @@ class Parser
   # The class a forward reference names, looked up the way parse_name
   # does: the bare name, then qualified by the module it appeared in.
   def find_forward_class(name, module_name)
+    return self.find_class(name.slice(2, name.length())) if name.start_with?("::")
     # The innermost enclosing module first, as compiler.c's
     # find_class_qualified_or_scoped.
     scope = module_name

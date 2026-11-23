@@ -3010,8 +3010,7 @@ bool consume_qualified_name(Compiler *compiler,char *buffer,
     return true;
 }
 
-int resolve_type_name(Compiler *compiler,const char *name,
-                             DiamondSpan diagnostic) {
+static int known_annotation_type(const Compiler *compiler,const char *name) {
     static const struct {const char *name;uint16_t type;} builtins[]={
         {"Int",DIAMOND_TYPE_INT},{"Float",DIAMOND_TYPE_FLOAT},
         {"String",DIAMOND_TYPE_STRING},
@@ -3021,12 +3020,12 @@ int resolve_type_name(Compiler *compiler,const char *name,
         {"Symbol",DIAMOND_TYPE_SYMBOL}};
     for(size_t index=0;index<sizeof builtins/sizeof builtins[0];index++)
         if(strcmp(name,builtins[index].name)==0)return builtins[index].type;
-    for(size_t index=0;index<compiler->function->type_variable_count;index++)
+    for(size_t index=0;compiler->type_alias_depth==0&&index<compiler->function->type_variable_count;index++)
         if(strcmp(name,compiler->function->type_variables[index])==0)
             return DIAMOND_TYPE_VARIABLE_BASE+(int)index;
     int found=find_interface_name(compiler,name);
     if(found>=0)return DIAMOND_TYPE_INTERFACE_BASE+found;
-    found=find_class_qualified_or_scoped(compiler,name);
+    found=compiler->type_alias_depth>0?find_class_name(compiler,name):find_class_qualified_or_scoped(compiler,name);
     if(found>=0)return DIAMOND_TYPE_CLASS_BASE+found;
     /* Native types come after classes, so a program's own class named
      * Channel or Statement still wins. Encoded above every real id; see
@@ -3034,6 +3033,12 @@ int resolve_type_name(Compiler *compiler,const char *name,
     uint8_t native_kind=0;
     if(diamond_native_type_kind(name,&native_kind))
         return DIAMOND_NATIVE_TYPE_OPERAND_BASE+native_kind;
+    return -1;
+}
+
+int resolve_type_name(Compiler *compiler,const char *name,DiamondSpan diagnostic) {
+    const int found=known_annotation_type(compiler,name);
+    if(found>=0)return found;
     /* During diamond_compile's own discovery pass only: a type annotation
      * naming a class/interface declared *later* in the source hasn't
      * been discovered yet by this point in discovery's own walk (that's
@@ -3068,6 +3073,134 @@ static bool consume_self_return_member(Compiler *compiler,const char *name,
     return true;
 }
 
+bool collect_type_aliases(Compiler *compiler) {
+    if(strstr(compiler->source,"type")==nullptr)return true;
+    DiamondLexer lexer=compiler->lexer;
+    DiamondToken token=compiler->current;
+    size_t capacity=0;
+    while(token.kind!=DIAMOND_TOKEN_EOF&&token.kind!=DIAMOND_TOKEN_ERROR) {
+        if(diamond_lexer_type_alias_start(&lexer,token)) {
+            DiamondLexer after=lexer;
+            const DiamondToken name=diamond_lexer_next(&after);
+            if(diamond_lexer_next(&after).kind==DIAMOND_TOKEN_EQUAL) {
+                if(compiler->type_alias_count==capacity) {
+                    const size_t next=capacity==0?8:capacity*2;
+                    TypeAlias *aliases=realloc(compiler->type_aliases,next*sizeof *aliases);
+                    if(aliases==nullptr) {
+                        fail(compiler,name.span,"out of memory recording type aliases");
+                        return false;
+                    }
+                    compiler->type_aliases=aliases;
+                    capacity=next;
+                }
+                compiler->type_aliases[compiler->type_alias_count++]=
+                    (TypeAlias){.name=name.span,.body=after};
+            }
+        }
+        token=diamond_lexer_next(&lexer);
+    }
+    return true;
+}
+
+static TypeAlias *find_type_alias(Compiler *compiler,const char *name) {
+    if(compiler->type_alias_count==0||known_annotation_type(compiler,name)>=0)return nullptr;
+    const size_t length=strlen(name);
+    for(size_t i=0;i<compiler->type_alias_count;i++) {
+        TypeAlias *alias=&compiler->type_aliases[i];
+        if(alias->name.length==length&&
+           memcmp(compiler->source+alias->name.start,name,length)==0)return alias;
+    }
+    return nullptr;
+}
+
+static bool append_annotation_member(Compiler *compiler,size_t set_index,
+        DiamondTypeMember member,DiamondSpan span) {
+    DiamondFunction *function=compiler->function;
+    DiamondTypeSet *set=&function->type_sets[set_index];
+    if(set->count==DIAMOND_MAX_UNION_TYPES) {
+        fail(compiler,span,"too many types in union");
+        return false;
+    }
+    for(size_t index=0;!compiler->discovery_pass&&index<set->count;index++) {
+        if(type_members_structurally_equal(&set->members[index],function->type_sets,
+           function->type_set_count,&member,function->type_sets,function->type_set_count,0)) {
+            fail(compiler,span,"duplicate type in union");
+            return false;
+        }
+    }
+    if(!diamond_function_reserve_type_members(function,set_index,set->count+1)) {
+        fail(compiler,span,"out of memory storing union");
+        return false;
+    }
+    set->members[set->count++]=member;
+    return true;
+}
+
+/* Replay the declaration's type syntax into the caller's type-set graph.
+ * Its nominal names resolve at program scope, including inside a generic
+ * or a module with its own names. The caller's lexer is restored before
+ * parsing any continuation of the annotation. */
+static bool expand_type_alias(Compiler *compiler,TypeAlias *alias,
+        size_t destination,DiamondSpan reference) {
+    if(alias->expanding) {
+        fail(compiler,reference,"cyclic type alias");return false;
+    }
+    if(compiler->type_alias_depth>=64) {
+        fail(compiler,reference,"type alias nesting exceeds 64");return false;
+    }
+    const DiamondLexer lexer=compiler->lexer;
+    const DiamondToken current=compiler->current,previous=compiler->previous;
+    alias->expanding=true;
+    compiler->type_alias_depth++;
+    compiler->lexer=alias->body;
+    advance_token(compiler);
+    skip_newlines(compiler);
+    const size_t expanded=(size_t)parse_type_annotation(compiler);
+    compiler->lexer=lexer;
+    compiler->current=current;
+    compiler->previous=previous;
+    compiler->type_alias_depth--;
+    alias->expanding=false;
+    if(compiler->failed)return false;
+    const DiamondTypeSet members=DIAMOND_TYPE_SET_COPY(compiler->function->type_sets[expanded]);
+    for(size_t i=0;i<members.count;i++)
+        if(!append_annotation_member(compiler,destination,members.members[i],reference))return false;
+    return true;
+}
+
+static void compile_type_alias(Compiler *compiler) {
+    advance_token(compiler);
+    const DiamondSpan name=compiler->current.span;
+    char buffer[DIAMOND_MAX_FUNCTION_NAME];
+    if(compiler->sequence_depth!=1||compiler->function!=&compiler->program->entry||
+       compiler->current_class>=0||compiler->current_module>=0) {
+        fail(compiler,name,"type aliases must be declared at top level");return;
+    }
+    if(name.length>=sizeof buffer||!isupper((unsigned char)compiler->source[name.start])) {
+        fail(compiler,name,"expected capitalized type alias name");return;
+    }
+    memcpy(buffer,compiler->source+name.start,name.length);
+    buffer[name.length]='\0';
+    if(known_annotation_type(compiler,buffer)>=0||strcmp(buffer,"Self")==0||
+       find_module_name(compiler,buffer)>=0) {
+        fail(compiler,name,"type alias name is already defined");return;
+    }
+    const TypeAlias *first=find_type_alias(compiler,buffer);
+    if(first!=nullptr&&first->name.start!=name.start) {
+        fail(compiler,name,"duplicate type alias");return;
+    }
+    advance_token(compiler);
+    if(compiler->current.kind!=DIAMOND_TOKEN_EQUAL) {
+        fail(compiler,compiler->current.span,"expected '=' after type alias name");return;
+    }
+    advance_token(compiler);
+    skip_newlines(compiler);
+    (void)parse_type_annotation(compiler);
+    if(compiler->current.kind!=DIAMOND_TOKEN_NEWLINE&&compiler->current.kind!=DIAMOND_TOKEN_EOF)
+        fail(compiler,compiler->current.span,"expected newline after type alias");
+    skip_newlines(compiler);
+}
+
 int parse_type_annotation(Compiler *compiler) {
     /* Nested annotations (Array[Self], a Callable's return) never see this. */
     const bool self_allowed=compiler->self_return_allowed;
@@ -3093,6 +3226,16 @@ int parse_type_annotation(Compiler *compiler) {
                member_span,&annotation_continues)) {
             if(annotation_continues)continue;
             break;
+        }
+        TypeAlias *alias=find_type_alias(compiler,type_name_buffer);
+        if(alias!=nullptr) {
+            if(compiler->current.kind==DIAMOND_TOKEN_LEFT_BRACKET) {
+                fail(compiler,member_span,"type aliases do not accept arguments");break;
+            }
+            if(!expand_type_alias(compiler,alias,set_index,member_span))break;
+            if(compiler->current.kind!=DIAMOND_TOKEN_PIPE)break;
+            advance_token(compiler);
+            continue;
         }
         const int resolved=resolve_type_name(compiler,type_name_buffer,member_span);
         const bool native=diamond_type_operand_is_native(resolved);
@@ -3199,23 +3342,9 @@ int parse_type_annotation(Compiler *compiler) {
             .callable_parameters_typed=callable_parameters_typed};
         for(size_t index=0;index<16;index++)
             parsed.callable_parameter_sets[index]=callable_parameter_sets[index];
-        set=&compiler->function->type_sets[set_index];
-        /* Discovery resolves a not-yet-declared class to Nil (see
-         * resolve_type_name), so `Later | Nil` would look duplicated here;
-         * the real pass, with every declaration known, checks for real. */
-        for(size_t index=0;!compiler->discovery_pass&&index<set->count;index++)
-            if(type_members_structurally_equal(&set->members[index],
-                    compiler->function->type_sets,
-                    compiler->function->type_set_count,&parsed,
-                    compiler->function->type_sets,
-                    compiler->function->type_set_count,0)) {
-                fail(compiler,member_span,"duplicate type in union");break;
-            }
-        if(compiler->failed)break;
-        if(!diamond_function_reserve_type_members(compiler->function,set_index,set->count+1)) {
-            fail(compiler,member_span,"out of memory storing union");break;
-        }
-        set->members[set->count++]=parsed;
+        /* Discovery can resolve a forward name to Nil. The real pass
+         * checks duplicate members after every nominal type is known. */
+        if(compiler->failed||!append_annotation_member(compiler,set_index,parsed,member_span))break;
         if(compiler->current.kind!=DIAMOND_TOKEN_PIPE)break;
         advance_token(compiler);
     }
@@ -3528,6 +3657,7 @@ void settle_block_copies(Compiler *compiler,size_t block_start,size_t pending_be
 }
 
 uint16_t compile_sequence(Compiler *compiler) {
+    compiler->sequence_depth++;
     skip_newlines(compiler);
     uint16_t result = allocate_register(compiler);
     /* No NIL here: `result` is a sole writer for an empty block (still
@@ -3538,6 +3668,10 @@ uint16_t compile_sequence(Compiler *compiler) {
     bool last_statement_diverges = false;
 
     while (!compiler->failed && !at_block_end(compiler)) {
+        if(diamond_lexer_type_alias_start(&compiler->lexer,compiler->current)) {
+            compile_type_alias(compiler);
+            continue;
+        }
         /* A narrowing belongs to the condition that produced it. One left over from the
          * previous statement (or the previous function body, whose last expression
          * was `v is String`) is keyed by a register number the next statement can
@@ -3773,5 +3907,6 @@ uint16_t compile_sequence(Compiler *compiler) {
         }
     }
     compiler->sequence_diverges = last_statement_diverges;
+    compiler->sequence_depth--;
     return result;
 }
