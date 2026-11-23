@@ -51,28 +51,38 @@ static uint16_t argument_expectation(Compiler *compiler,const DiamondFunction *t
 static uint16_t compile_callable_value_block(Compiler *compiler,
         int32_t callable_set_index);
 
-bool call_arguments_have_keyword(Compiler *compiler) {
-    Compiler probe=*compiler;size_t nesting=0;bool argument_start=true;
-    while(!probe.failed&&probe.current.kind!=DIAMOND_TOKEN_EOF) {
-        const DiamondTokenKind kind=probe.current.kind;
+/* A call probe needs only its token stream. Copying Compiler here would
+ * also copy every local and register fact before each prospective call. */
+static bool call_arguments_have_marker(const Compiler *compiler,bool keyword) {
+    if(compiler->failed)return false;
+    DiamondLexer lexer=compiler->lexer;
+    DiamondTokenKind kind=compiler->current.kind;
+    size_t nesting=0;
+    bool argument_start=true;
+    while(kind!=DIAMOND_TOKEN_EOF&&kind!=DIAMOND_TOKEN_ERROR) {
         if(nesting==0&&kind==DIAMOND_TOKEN_RIGHT_PAREN)return false;
-        if(nesting==0&&argument_start&&kind==DIAMOND_TOKEN_IDENTIFIER) {
-            DiamondLexer lookahead=probe.lexer;
-            if(diamond_lexer_next(&lookahead).kind==DIAMOND_TOKEN_COLON)
-                return true;
+        if(nesting==0&&argument_start) {
+            if(!keyword&&kind==DIAMOND_TOKEN_STAR)return true;
+            if(keyword&&kind==DIAMOND_TOKEN_IDENTIFIER) {
+                DiamondLexer peek=lexer;
+                if(diamond_lexer_next(&peek).kind==DIAMOND_TOKEN_COLON)return true;
+            }
         }
         if(kind==DIAMOND_TOKEN_LEFT_PAREN||kind==DIAMOND_TOKEN_LEFT_BRACKET||
            kind==DIAMOND_TOKEN_LEFT_BRACE)nesting++;
         else if(kind==DIAMOND_TOKEN_RIGHT_PAREN||
                 kind==DIAMOND_TOKEN_RIGHT_BRACKET||
                 kind==DIAMOND_TOKEN_RIGHT_BRACE) {if(nesting>0)nesting--;}
-        /* A newline after a comma (or the call's open paren) leaves the next
-         * token at the start of an argument. */
+        /* Newlines after a comma or the opening paren keep argument_start. */
         if(kind==DIAMOND_TOKEN_COMMA)argument_start=nesting==0;
         else if(kind!=DIAMOND_TOKEN_NEWLINE)argument_start=false;
-        advance_token(&probe);
+        kind=diamond_lexer_next(&lexer).kind;
     }
     return false;
+}
+
+bool call_arguments_have_keyword(Compiler *compiler) {
+    return call_arguments_have_marker(compiler,true);
 }
 
 uint16_t emit_argument_array(Compiler *compiler,const uint16_t *values,
@@ -194,26 +204,7 @@ uint16_t parse_dynamic_keyword_arguments(Compiler *compiler,
 }
 
 bool call_arguments_have_spread(Compiler *compiler) {
-    Compiler probe=*compiler;
-    size_t nesting=0;bool argument_start=true;
-    while(!probe.failed&&probe.current.kind!=DIAMOND_TOKEN_EOF) {
-        const DiamondTokenKind kind=probe.current.kind;
-        if(nesting==0&&kind==DIAMOND_TOKEN_RIGHT_PAREN)return false;
-        if(nesting==0&&argument_start&&kind==DIAMOND_TOKEN_STAR)return true;
-        if(kind==DIAMOND_TOKEN_LEFT_PAREN||kind==DIAMOND_TOKEN_LEFT_BRACKET||
-           kind==DIAMOND_TOKEN_LEFT_BRACE)nesting++;
-        else if(kind==DIAMOND_TOKEN_RIGHT_PAREN||
-                kind==DIAMOND_TOKEN_RIGHT_BRACKET||
-                kind==DIAMOND_TOKEN_RIGHT_BRACE) {
-            if(nesting>0)nesting--;
-        }
-        /* A newline after a comma (or the call's open paren) leaves the next
-         * token at the start of an argument. */
-        if(kind==DIAMOND_TOKEN_COMMA)argument_start=nesting==0;
-        else if(kind!=DIAMOND_TOKEN_NEWLINE)argument_start=false;
-        advance_token(&probe);
-    }
-    return false;
+    return call_arguments_have_marker(compiler,false);
 }
 
 static int32_t homogeneous_spread_expectation(Compiler *compiler,
@@ -1820,6 +1811,24 @@ uint16_t parse_call(Compiler *compiler, DiamondSpan name) {
  * the actual receiver rather than owner_class. A module call's slot stays
  * zero-inited (DIAMOND_VALUE_NIL) exactly as before -- modules have no
  * `self` story and nothing reads that slot as one. */
+static uint16_t stage_singleton_call_arguments(Compiler *compiler,
+        const DiamondMethod *method,int receiver_class_index,
+        const uint16_t *arguments,size_t argument_count,size_t call_count) {
+    if(!method->needs_receiver)
+        return stage_call_arguments(compiler,arguments,argument_count);
+    const uint16_t base=allocate_register(compiler);
+    for(size_t index=1;index<call_count;index++)(void)allocate_register(compiler);
+    /* A module export leaves its receiver slot nil. A class singleton
+     * loads the literal receiver class into the same slot. */
+    if(receiver_class_index>=0) {
+        emit_opcode(compiler,DIAMOND_OP_LOAD_CLASS);
+        emit_register(compiler,base);
+        emit_register(compiler,(uint16_t)receiver_class_index);
+    }
+    emit_call_argument_moves(compiler,(uint16_t)(base+1),arguments,argument_count);
+    return base;
+}
+
 /* Shared tail of an ordinary `Namespace.method(args)` call and a bare
  * `Namespace.method` *reference* (parse_singleton_reference, below) --
  * arity-checks `argument_count` against `method`'s own (with the same
@@ -1839,26 +1848,8 @@ static uint16_t emit_singleton_call(Compiler *compiler,const DiamondMethod *meth
         fail(compiler,name,"wrong number of arguments");return 0;
     }
     const size_t call_count=argument_count+(method->needs_receiver?1:0);
-    uint16_t base;
-    if(!method->needs_receiver) {
-        base=stage_call_arguments(compiler,arguments,argument_count);
-    } else {
-        base=allocate_register(compiler);
-        for(size_t index=1;index<call_count;index++)(void)allocate_register(compiler);
-        /* No NIL for `base` when there's no literal class (a module
-         * call): sole writer, already zero-inited by run_chunk's
-         * [0, register_count) init. A class singleton call instead loads
-         * the literal receiver class right here, the one place this slot
-         * gets a real value instead of relying on zero-init. */
-        if(receiver_class_index>=0) {
-            emit_opcode(compiler,DIAMOND_OP_LOAD_CLASS);
-            emit_register(compiler,base);
-            emit_register(compiler,(uint16_t)receiver_class_index);
-        }
-        for(size_t index=0;index<argument_count;index++)
-            emit_instruction(compiler,DIAMOND_OP_MOVE,(uint16_t)(base+index+1),
-                             arguments[index],0,2);
-    }
+    const uint16_t base=stage_singleton_call_arguments(compiler,method,
+        receiver_class_index,arguments,argument_count,call_count);
     const uint16_t destination=allocate_register(compiler);
     emit_opcode(compiler,type_argument_count==0?DIAMOND_OP_CALL:
                 DIAMOND_OP_CALL_TYPED);
@@ -2422,22 +2413,8 @@ static uint16_t parse_singleton_call_body(Compiler *compiler,
         fail(compiler,name,"wrong number of arguments");return 0;
     }
     const size_t call_count=argument_count+(method->needs_receiver?1:0);
-    const uint16_t base=allocate_register(compiler);
-    for(size_t index=1;index<call_count;index++)(void)allocate_register(compiler);
-    /* No NIL for `base` when needs_receiver and there's no literal class
-     * (a module call): sole writer, already zero-inited by run_chunk's
-     * [0, register_count) init. A class singleton call instead loads the
-     * literal receiver class right here, the one place this slot gets a
-     * real value instead of relying on zero-init. */
-    if(method->needs_receiver&&receiver_class_index>=0) {
-        emit_opcode(compiler,DIAMOND_OP_LOAD_CLASS);
-        emit_register(compiler,base);
-        emit_register(compiler,(uint16_t)receiver_class_index);
-    }
-    for(size_t index=0;index<argument_count;index++)
-        emit_instruction(compiler,DIAMOND_OP_MOVE,
-                         (uint16_t)(base+index+(method->needs_receiver?1:0)),
-                         arguments[index],0,2);
+    const uint16_t base=stage_singleton_call_arguments(compiler,method,
+        receiver_class_index,arguments,argument_count,call_count);
     const uint16_t destination=allocate_register(compiler);
     emit_opcode(compiler,type_argument_count==0?DIAMOND_OP_CALL:
                 DIAMOND_OP_CALL_TYPED);

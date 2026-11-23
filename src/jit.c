@@ -2840,6 +2840,7 @@ static bool opcode_dest_is_first_u16(DiamondOpCode opcode) {
         case DIAMOND_OP_NIL:
         case DIAMOND_OP_BOOL:
         case DIAMOND_OP_MOVE:
+        case DIAMOND_OP_MOVE_PAIR:
         case DIAMOND_OP_CONSTANT:
         case DIAMOND_OP_ADD_INT:
         case DIAMOND_OP_SUBTRACT_INT:
@@ -3030,6 +3031,12 @@ static bool decode_instruction_operands(const DiamondFunction *fn, size_t *pc,
             if (!decode_u16(fn, pc, &left) || !decode_u16(fn, pc, &scratch) ||
                 !decode_u16(fn, pc, &constant)) return false;
             *second_dest = scratch;
+            return true;
+        }
+        case DIAMOND_OP_MOVE_PAIR: {
+            uint16_t first=0,second=0;
+            if(!decode_u16(fn,pc,&first)||!decode_u16(fn,pc,&second))return false;
+            *second_dest=(int32_t)destination+1;
             return true;
         }
         case DIAMOND_OP_BOOL: case DIAMOND_OP_MOVE: case DIAMOND_OP_CONSTANT:
@@ -3305,6 +3312,7 @@ static int32_t register_new_class_or_move_src(const DiamondFunction *fn,
     uint16_t first = 0;
     switch ((DiamondOpCode)fn->code[writer_start]) {
         case DIAMOND_OP_MOVE:
+        case DIAMOND_OP_MOVE_PAIR:
             if (!decode_u16(fn, &operands, &first)) return -1;
             *move_src = first;
             return -2;
@@ -4238,6 +4246,13 @@ static bool record_landing_call(JitCompiler *jc, size_t index) {
     return true;
 }
 
+static void emit_copy_register(JitCompiler *jc,uint16_t dest,uint16_t src) {
+    emit_load_r64(&jc->buf, REG_RAX, JIT_REGISTERS_BASE, reg_disp(src, 0));
+    emit_store_r64(&jc->buf, JIT_REGISTERS_BASE, reg_disp(dest, 0), REG_RAX);
+    emit_load_r64(&jc->buf, REG_RAX, JIT_REGISTERS_BASE, reg_disp(src, 8));
+    emit_store_r64(&jc->buf, JIT_REGISTERS_BASE, reg_disp(dest, 8), REG_RAX);
+}
+
 /* Opcode group: loads, moves, arithmetic, comparisons, ivars, type checks and collections. Returns false, emitting nothing, for an opcode outside the group; otherwise
  * advances *pc_ref past the operands, or sets jc->bailed. Part of compile_body. */
 static bool compile_value_instruction(JitCompiler *jc, DiamondOpCode opcode, size_t instruction_start,
@@ -4315,13 +4330,17 @@ static bool compile_value_instruction(JitCompiler *jc, DiamondOpCode opcode, siz
             emit_store_r64(&jc->buf, JIT_REGISTERS_BASE, reg_disp(dest, AS_OFF), REG_RAX);
             break;
         }
-        case DIAMOND_OP_MOVE: {
-            uint16_t dest = 0, src = 0;
-            if (!decode_u16(fn, &pc, &dest) || !decode_u16(fn, &pc, &src)) { jc->bailed = true; return true; }
-            emit_load_r64(&jc->buf, REG_RAX, JIT_REGISTERS_BASE, reg_disp(src, 0));
-            emit_store_r64(&jc->buf, JIT_REGISTERS_BASE, reg_disp(dest, 0), REG_RAX);
-            emit_load_r64(&jc->buf, REG_RAX, JIT_REGISTERS_BASE, reg_disp(src, 8));
-            emit_store_r64(&jc->buf, JIT_REGISTERS_BASE, reg_disp(dest, 8), REG_RAX);
+        case DIAMOND_OP_MOVE:
+        case DIAMOND_OP_MOVE_PAIR: {
+            const bool pair=opcode==DIAMOND_OP_MOVE_PAIR;
+            uint16_t dest=0,src=0,second=0;
+            if(!decode_u16(fn,&pc,&dest)||!decode_u16(fn,&pc,&src)||
+               (pair&&(!decode_u16(fn,&pc,&second)||(size_t)dest+1>=fn->register_count||
+                        src>=fn->register_count||second>=fn->register_count))) {
+                jc->bailed=true;return true;
+            }
+            emit_copy_register(jc,dest,src);
+            if(pair)emit_copy_register(jc,(uint16_t)(dest+1),second);
             break;
         }
         case DIAMOND_OP_CONSTANT: {

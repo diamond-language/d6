@@ -15,9 +15,17 @@ come only in minor releases, marked **Breaking** here.
 - Array and hash literals support up to 512 entries, subject to the existing
   per-function register and bytecode budgets.
 
+### Changed
+
+- Functions support up to 128 named locals, including their parameters.
+- Generated functions have more register headroom, and adjacent argument
+  copies use less bytecode.
+
 ### Fixed
 
 - Array splats preserve every element when 128 or more entries follow the splat.
+- The self-hosted parser rejects a forwarded block followed by another
+  argument and reports the reserved-keyword error for `loop = value`.
 
 ## 1.5.0 — 2026-11-22
 

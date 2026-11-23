@@ -484,6 +484,16 @@ static bool disassemble_arithmetic(DisassemblyWalk *walk) {
         case DIAMOND_OP_MOVE:
             offset = two_registers(stream, chunk, "MOVE", offset, &valid);
             break;
+        case DIAMOND_OP_MOVE_PAIR:
+            if(!require_bytes(stream,chunk,offset,7)) {
+                valid=false;offset=chunk->code_count;break;
+            }
+            out_printf(stream,"%-18s r%u, r%u, r%u\n","MOVE_PAIR",
+                checked_register_range(chunk,stream,read_operand(chunk,offset+1),2,&valid),
+                checked_register(chunk,stream,read_operand(chunk,offset+3),&valid),
+                checked_register(chunk,stream,read_operand(chunk,offset+5),&valid));
+            offset+=7;
+            break;
         case DIAMOND_OP_ADD:
             offset = three_registers(stream, chunk, "ADD", offset, &valid);
             break;
