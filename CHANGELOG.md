@@ -7,6 +7,8 @@ come only in minor releases, marked **Breaking** here.
 
 ## Unreleased
 
+## 1.5.0 — 2026-11-22
+
 ### Added
 
 - `File.touch(path, time = nil)` creates a file if it is missing and sets its modification time,
