@@ -1,0 +1,11 @@
+{readable: [false], writable: [true, true]}
+[true, true]
+{readable: [true], writable: [false, true]}
+work
+[false]
+[false]
+{readable: [true], writable: [true]}
+nil
+[false, true]
+ready
+0

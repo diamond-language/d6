@@ -2035,9 +2035,6 @@ DiamondVmStatus outlined_channel_select_send(DiamondVm *vm,const DiamondChunk *c
     HELPER_DONE;
 }
 
-/* DIAMOND_OP_IO_POLL, moved out of run_chunk's switch (see HELPER_DONE below): the case body is
- * unchanged apart from its macros, so it keeps the operand decoding, sandbox check and error
- * returns it had. The caller applies VM_PROPAGATE to the status. */
 __attribute__((noinline))
 static int64_t io_poll_monotonic_ms(void) {
     struct timespec now;
@@ -2066,18 +2063,28 @@ DiamondVmStatus outlined_io_poll(DiamondVm *vm,const DiamondChunk *chunk,Diamond
     if(readable_array->count>DIAMOND_MAX_POLL_FDS||
        writable_array->count>DIAMOND_MAX_POLL_FDS) {
         snprintf(vm->error,sizeof vm->error,
-            "IO.poll supports at most %d fds per list",DIAMOND_MAX_POLL_FDS);
+            "IO.poll supports at most %d entries per list",DIAMOND_MAX_POLL_FDS);
         VM_RETURN(DIAMOND_VM_TYPE_ERROR);
     }
     /* Reserve a separate slot for the cancellation notification pipe. */
     struct pollfd fds[DIAMOND_MAX_POLL_FDS+1];
     nfds_t fd_count=0;
+    DiamondPollChannel channels[DIAMOND_MAX_POLL_FDS*2];
+    size_t channel_count=0;
     size_t read_slot[DIAMOND_MAX_POLL_FDS];
     size_t write_slot[DIAMOND_MAX_POLL_FDS];
     for(size_t index=0;index<readable_array->count;index++) {
+        const DiamondValue value=readable_array->values[index];
+        if(value.kind==DIAMOND_VALUE_OBJECT&&value.as.object->kind==DIAMOND_OBJECT_CHANNEL) {
+            read_slot[index]=DIAMOND_MAX_POLL_FDS+channel_count;
+            channels[channel_count++]=(DiamondPollChannel){
+                .channel=((DiamondChannelHandle *)value.as.object)->channel,
+                .writable=false
+            };
+            continue;
+        }
         int fd=-1;
-        const DiamondVmStatus fd_status=
-            pollable_fd(vm,readable_array->values[index],&fd);
+        const DiamondVmStatus fd_status=pollable_fd(vm,value,&fd);
         VM_PROPAGATE(fd_status);
         if(!poll_register_fd(fds,&fd_count,DIAMOND_MAX_POLL_FDS,fd,
                 POLLIN,&read_slot[index])) {
@@ -2087,9 +2094,17 @@ DiamondVmStatus outlined_io_poll(DiamondVm *vm,const DiamondChunk *chunk,Diamond
         }
     }
     for(size_t index=0;index<writable_array->count;index++) {
+        const DiamondValue value=writable_array->values[index];
+        if(value.kind==DIAMOND_VALUE_OBJECT&&value.as.object->kind==DIAMOND_OBJECT_CHANNEL) {
+            write_slot[index]=DIAMOND_MAX_POLL_FDS+channel_count;
+            channels[channel_count++]=(DiamondPollChannel){
+                .channel=((DiamondChannelHandle *)value.as.object)->channel,
+                .writable=true
+            };
+            continue;
+        }
         int fd=-1;
-        const DiamondVmStatus fd_status=
-            pollable_fd(vm,writable_array->values[index],&fd);
+        const DiamondVmStatus fd_status=pollable_fd(vm,value,&fd);
         VM_PROPAGATE(fd_status);
         if(!poll_register_fd(fds,&fd_count,DIAMOND_MAX_POLL_FDS,fd,
                 POLLOUT,&write_slot[index])) {
@@ -2108,7 +2123,7 @@ for(size_t index=0;index<readable_array->count;index++) {
     any_buffered=any_buffered||buffered[index];
 }
 const DiamondValue timeout=registers[timeout_reg];
-if(any_buffered&&(timeout.kind==DIAMOND_VALUE_INT||(timeout.kind==DIAMOND_VALUE_OBJECT&&
+if(channel_count==0&&any_buffered&&(timeout.kind==DIAMOND_VALUE_INT||(timeout.kind==DIAMOND_VALUE_OBJECT&&
    timeout.as.object->kind==DIAMOND_OBJECT_HASH))) {
     for(nfds_t slot=0;slot<fd_count;slot++)fds[slot].revents=0;
     errno=0;
@@ -2138,8 +2153,26 @@ if(any_buffered&&(timeout.kind==DIAMOND_VALUE_INT||(timeout.kind==DIAMOND_VALUE_
         }
         /* Unlink before returning to the VM's signal dispatcher:
          * handlers can close sockets or cancellation sources. */
-        const DiamondVmStatus wait_status=cancellable_wait_helper(vm,
-            nullptr,false,cancellations,deadline,fds,fd_count,nullptr);
+        const DiamondVmStatus wait_status=channel_count>0?
+            poll_with_channels(vm,&cancellations,deadline,fds,fd_count,channels,channel_count,
+                any_buffered):
+            cancellable_wait_helper(vm,nullptr,false,cancellations,deadline,fds,fd_count,nullptr);
+        VM_PROPAGATE(wait_status);
+    } else if(timeout.kind==DIAMOND_VALUE_INT&&channel_count>0) {
+        const int64_t milliseconds=timeout.as.integer;
+        DiamondValue deadline=DIAMOND_NIL;
+        if(milliseconds>=0) {
+            struct timespec now;
+            if(clock_gettime(CLOCK_MONOTONIC,&now)!=0) {
+                snprintf(vm->error,sizeof vm->error,"poll clock: %s",strerror(errno));
+                VM_RETURN(DIAMOND_VM_IO_ERROR);
+            }
+            const int64_t bounded=milliseconds>INT_MAX?INT_MAX:milliseconds;
+            deadline=DIAMOND_FLOAT((double)now.tv_sec+(double)now.tv_nsec/1e9+
+                (double)bounded/1000.0);
+        }
+        const DiamondVmStatus wait_status=poll_with_channels(vm,nullptr,deadline,
+            fds,fd_count,channels,channel_count,any_buffered);
         VM_PROPAGATE(wait_status);
     } else if(timeout.kind==DIAMOND_VALUE_INT) {
         const int64_t timeout_value=registers[timeout_reg].as.integer;
@@ -2204,13 +2237,23 @@ if(any_buffered&&(timeout.kind==DIAMOND_VALUE_INT||(timeout.kind==DIAMOND_VALUE_
      * dead connection will never produce. */
     DiamondValue readable_results[DIAMOND_MAX_POLL_FDS];
     for(size_t index=0;index<readable_array->count;index++) {
-        const short revents=fds[read_slot[index]].revents;
+        const size_t slot=read_slot[index];
+        if(slot>=DIAMOND_MAX_POLL_FDS) {
+            readable_results[index]=DIAMOND_BOOL(channels[slot-DIAMOND_MAX_POLL_FDS].ready);
+            continue;
+        }
+        const short revents=fds[slot].revents;
         readable_results[index]=
             DIAMOND_BOOL(buffered[index]||(revents&(POLLIN|POLLHUP|POLLERR|POLLNVAL))!=0);
     }
     DiamondValue writable_results[DIAMOND_MAX_POLL_FDS];
     for(size_t index=0;index<writable_array->count;index++) {
-        const short revents=fds[write_slot[index]].revents;
+        const size_t slot=write_slot[index];
+        if(slot>=DIAMOND_MAX_POLL_FDS) {
+            writable_results[index]=DIAMOND_BOOL(channels[slot-DIAMOND_MAX_POLL_FDS].ready);
+            continue;
+        }
+        const short revents=fds[slot].revents;
         writable_results[index]=
             DIAMOND_BOOL((revents&(POLLOUT|POLLHUP|POLLERR|POLLNVAL))!=0);
     }

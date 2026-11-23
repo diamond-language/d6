@@ -228,6 +228,29 @@ the same way `TCPServer.listen`/`TCPSocket.connect` are (`IO.poll`
 mirroring `TCPSocket.connect`'s 3-argument shape, since neither is a
 class with real dispatch — see above).
 
+### Wait for sockets and channels together
+
+A `Channel` can appear alongside descriptors in either readiness list.
+
+```ruby
+ready = IO.poll([listener, results], [outbox], -1)
+# ready["readable"][0] is the listener's readiness.
+# ready["readable"][1] is the results channel's readiness.
+# ready["writable"][0] is the outbox channel's readiness.
+```
+
+A channel is readable when it has a value or is closed. It is writable when
+there is room to send, including a waiting receiver for a rendezvous channel,
+or when it is closed. Closure wakes both directions so the next operation can
+observe it. Ready entries are hints. A different thread may take the value or
+space first, so use `try_receive()` or `try_send(value)` and retry on
+`WouldBlockError`. Poll does not consume a value or reserve space.
+
+Duplicates are allowed and the result preserves both input lists' order.
+The integer timeout and cancellation/deadline options work with mixed lists.
+A channel state change or trapped signal may wake the call with all entries
+false. Recheck your conditions and poll again when needed.
+
 ### Cancellation and absolute deadlines
 
 `IO.poll(readables, writables, {"cancellations": channels, "deadline": deadline})`
@@ -243,8 +266,9 @@ it does not raise a cancellation exception or reserve/consume socket data.
 Readiness arrays may contain only `false` after a wakeup. Recheck cancellation
 and retry nonblocking operations. An expired deadline or already closed
 cancellation source returns immediately. Signals return to the VM dispatcher
-after the waiter has unregistered; VMs with signal handlers retain bounded
-10 ms returns. Other VMs have no periodic polling timer.
+after the waiter has unregistered. With descriptor-only lists, VMs with signal
+handlers retain bounded 10 ms returns. Mixed lists return early when a trapped
+signal is pending. Other VMs have no periodic polling timer.
 
 The [cancellation cut](../packages/cancellation/README.md) wraps this as
 `token.poll(readables, writables)`, checking the token before and after each
