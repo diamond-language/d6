@@ -25,6 +25,10 @@ An array literal can splat one Array into place: `[head, *rest]`,
 non-Array operand raises `TypeError`). Only one splat per literal is
 supported; join more with `concat`.
 
+Array and hash literals can contain up to 512 entries, subject to the
+enclosing function's register and bytecode limits. An array splat takes
+one entry in the literal and can expand to more than 512 values.
+
 A hash literal also accepts Ruby's rocket separator, `{"a" => 1, 3 => "three"}`, which means exactly the same as
 `{"a": 1}`; the two can be mixed in one literal. The key is an expression either way, so `{a => 1}` uses the
 value of `a`, and a bare `name: value` is not a symbol-key shorthand.

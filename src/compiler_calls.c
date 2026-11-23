@@ -95,7 +95,7 @@ uint16_t parse_dynamic_keyword_arguments(Compiler *compiler,
     uint16_t fixed[DIAMOND_MAX_DECLARED_PARAMETERS];size_t fixed_count=0,spread_index=0;
     uint16_t spread=0;bool saw_spread=false,seen_keyword=false;
     bool literal_positions=false;size_t literal_first=0,literal_count=0;
-    uint16_t literal_elements[DIAMOND_MAX_ARGUMENTS];
+    uint16_t literal_elements[DIAMOND_MAX_LITERAL_ENTRIES];
     compiler->positional_spread_literal=false;
     compiler->positional_spread_first=0;
     compiler->positional_spread_count=0;
@@ -256,7 +256,7 @@ uint16_t parse_spread_argument_array(Compiler *compiler,
     uint16_t spread=0;bool saw_spread=false,seen_keyword=false;
     bool optional_block=false;
     bool literal_positions=false;size_t literal_first=0,literal_count=0;
-    uint16_t literal_elements[DIAMOND_MAX_ARGUMENTS];
+    uint16_t literal_elements[DIAMOND_MAX_LITERAL_ENTRIES];
     compiler->positional_spread_literal=false;
     compiler->positional_spread_first=0;
     compiler->positional_spread_count=0;

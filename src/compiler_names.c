@@ -1105,6 +1105,10 @@ static uint16_t emit_invoke_keywords(Compiler *compiler,uint16_t receiver,
 uint16_t emit_build_spread_arguments(Compiler *compiler,
         const uint16_t *prefix,size_t prefix_count,uint16_t spread,
         const uint16_t *suffix,size_t suffix_count,bool optional_block) {
+    if(prefix_count>UINT8_MAX||suffix_count>DIAMOND_MAX_SPREAD_SUFFIX) {
+        fail(compiler,compiler->previous.span,"too many fixed elements around a spread");
+        return 0;
+    }
     uint16_t prefix_base=spread,suffix_base=spread;
     if(prefix_count>0) {
         prefix_base=allocate_register(compiler);

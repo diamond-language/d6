@@ -12,6 +12,12 @@ come only in minor releases, marked **Breaking** here.
 - `IO.poll` waits on channels and sockets together. Put a channel in either
   readiness list to wait for a value, available capacity, or closure without
   consuming data or reserving space.
+- Array and hash literals support up to 512 entries, subject to the existing
+  per-function register and bytecode budgets.
+
+### Fixed
+
+- Array splats preserve every element when 128 or more entries follow the splat.
 
 ## 1.5.0 — 2026-11-22
 
