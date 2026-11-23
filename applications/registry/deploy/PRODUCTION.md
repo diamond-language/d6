@@ -188,6 +188,15 @@ sha256 `9dc2cd0dcf3796761659482fe9362074619d6708301aa9a7dda849f2a5eba1f4` matche
 `docs/registry-launch-inventory.json`, and `tools/verify_registry_launch.d6` passed for all 27
 public cuts. No redeploy: the registry doesn't use cancellation.
 
+HTTP 0.2.9 was published on 2026-11-23 UTC from `v1.5.0` (`046e79b4`).
+The pre-publication snapshot `~/diamond-registry-backups/pre-d6-1.5.0-http-0.2.9`
+passed restore verification. The published archive SHA-256
+`555518640d0934762be0933de3e256c8bb3adf5c42bc07afa45f6662e9da9eec`
+matches the reviewed inventory. Credential 53 had a 30-minute lifetime and
+the `publish:http` scope. It was revoked after publication and its local file
+was removed. Public verification resolved, digest-checked, loaded, and
+reinstalled all 27 cuts from an unchanged lockfile.
+
 Previously `0e482f26c56854c4c41c6c82d093ad04f6569a21` (v1.0.0-rc4, deployed 2026-11-12 UTC (2026-11-11 Pacific)
 with `tools/deploy_registry.sh --revision=v1.0.0-rc4 --force` after its dry run).
 The fresh snapshot at
