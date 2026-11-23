@@ -11,8 +11,15 @@ was a workload to validate against, which is what this directory is for.
 
 ```
 make release
+bash tools/install_local_cuts.sh .
 bash bench/burn_in/run.sh [duration_seconds] [concurrency]
 ```
+
+Before tagging a release, burn in the unpacked candidate with `DIAMOND_BIN`.
+The 1.6.0-rc1 run used the standard workload for 600 seconds at concurrency 20.
+Use `FACET_BIN` to install the local cuts with the candidate's packaged Facet
+as well. Save the log and check the request failures, tail latency, and RSS
+trend before publishing.
 
 For anything beyond `server.d6`'s documented 20000-session-per-worker
 config -- a bigger live set, specifically -- use `run_hard.sh` instead,
