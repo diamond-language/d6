@@ -1,0 +1,25 @@
+def check_milliseconds(date: String, offset: String)
+  1000.times() do |millis|
+    input = date + "." + millis.to_s().rjust(3, "0") + offset
+    value = Time.parse(input)
+    output = value.iso8601(3)
+    if output != input || Time.parse(output) != value
+      raise StandardError.new("ISO-8601 round trip for #{input} gave #{output}")
+    end
+  end
+end
+
+check_milliseconds("0001-01-01T00:00:00", "Z")
+check_milliseconds("1969-12-31T23:59:59", "Z")
+check_milliseconds("1970-01-01T00:00:00", "Z")
+check_milliseconds("2026-01-31T09:30:00", "+05:30:01")
+check_milliseconds("9999-12-31T23:59:59", "-08:00")
+
+[
+  Time.parse("0001-01-01T00:00:00Z").iso8601(),
+  Time.parse("2026-01-31T09:30:00.123+05:30").months_from_now(1).iso8601(3),
+  Time.parse("2026-01-31T09:30:00.123999+05:30").iso8601(3),
+  Time.parse("2026-01-31T09:30:59.9999Z").iso8601(3),
+  Time.at(-0.000000000001).utc().iso8601(3),
+  Time.parse("1970-01-01T00:00:00.123456789Z").iso8601(9)
+]

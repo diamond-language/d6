@@ -9,6 +9,9 @@ come only in minor releases, marked **Breaking** here.
 
 ### Fixed
 
+- `Time#iso8601` preserves parsed decimal fractions at their requested
+  precision and zero-pads years such as `0001`.
+
 - The JIT dispatches calls on native objects such as `Time` through the
   native method lookup when a typed accessor supplies the receiver.
 - Facet lists `graphql` among the project kinds in its top-level usage.

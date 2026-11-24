@@ -151,6 +151,18 @@ bool time_struct_tm(const DiamondTime *target,struct tm *out) {
     return true;
 }
 
+static double parse_time_fraction(const char *chars,size_t length,size_t *end) {
+    size_t index=0;
+    double value=0.0,scale=0.1;
+    while(index<length&&chars[index]>='0'&&chars[index]<='9') {
+        value+=(double)(chars[index]-'0')*scale;
+        scale*=0.1;
+        index++;
+    }
+    *end=index;
+    return value;
+}
+
 /* Strict ISO-8601 calendar timestamps with an explicit zone only:
  * YYYY-MM-DDTHH:MM:SS[.fraction](Z|+HH:MM[:SS]|-HH:MM[:SS]). Parsing the calendar
  * portion through timegm keeps this independent of process-local TZ state;
@@ -180,11 +192,11 @@ DiamondVmStatus time_parse_helper(DiamondVm *vm,DiamondValue input,
         hour>=0&&hour<=23&&minute>=0&&minute<=59&&second>=0&&second<=59;
     size_t zone_start=19;double fraction=0.0;
     if(valid&&zone_start<length&&chars[zone_start]=='.') {
-        zone_start++;const size_t fraction_start=zone_start;double scale=0.1;
-        while(zone_start<length&&chars[zone_start]>='0'&&chars[zone_start]<='9') {
-            fraction+=(double)(chars[zone_start]-'0')*scale;scale*=0.1;zone_start++;
-        }
-        if(zone_start==fraction_start)valid=false;
+        zone_start++;
+        size_t digits=0;
+        fraction=parse_time_fraction(chars+zone_start,length-zone_start,&digits);
+        zone_start+=digits;
+        if(digits==0)valid=false;
     }
     const bool in_range=valid;
     int32_t utc_offset=0;
@@ -1135,24 +1147,39 @@ bool format_time_default(const DiamondTime *target,StringBuilder *builder) {
     return builder_append(builder,buffer,length);
 }
 
+static bool append_time_iso_fraction(StringBuilder *builder,double epoch,int precision) {
+    uint64_t scale=1;
+    for(int index=0;index<precision;index++)scale*=10;
+    const double whole=floor(epoch);
+    const double scaled=(epoch-whole)*(double)scale;
+    const uint64_t lower=scaled>=(double)scale?scale-1:(uint64_t)scaled;
+    char buffer[16];
+    /* A parsed decimal may sit just below its decimal boundary in the
+     * epoch double. Use the closer boundary when parsing it gives exactly
+     * this instant. Otherwise keep truncation at the requested precision. */
+    if(lower+1<scale&&scaled>=(double)lower+0.5) {
+        const int length=snprintf(buffer,sizeof buffer,".%0*" PRIu64,precision,lower+1);
+        size_t digits;
+        if(length>0&&whole+parse_time_fraction(buffer+1,(size_t)length-1,&digits)==epoch)
+            return builder_append(builder,buffer,(size_t)length);
+    }
+    const int length=snprintf(buffer,sizeof buffer,".%0*" PRIu64,precision,lower);
+    return length>0&&builder_append(builder,buffer,(size_t)length);
+}
+
 bool format_time_iso8601(const DiamondTime *target,int precision,
         StringBuilder *builder) {
     struct tm parts;
     if(!time_struct_tm(target,&parts))return false;
     char calendar[32];
-    const size_t calendar_length=strftime(calendar,sizeof calendar,
-        "%Y-%m-%dT%H:%M:%S",&parts);
-    if(calendar_length==0||!builder_append(builder,calendar,calendar_length))return false;
-    if(precision>0) {
-        uint64_t scale=1;
-        for(int index=0;index<precision;index++)scale*=10;
-        const double whole=floor(target->epoch);
-        const uint64_t fraction=(uint64_t)((target->epoch-whole)*(double)scale);
-        char fraction_buffer[16];
-        const int length=snprintf(fraction_buffer,sizeof fraction_buffer,".%0*" PRIu64,
-            precision,fraction);
-        if(length<0||!builder_append(builder,fraction_buffer,(size_t)length))return false;
-    }
+    const int64_t year=(int64_t)parts.tm_year+1900;
+    const int calendar_length=snprintf(calendar,sizeof calendar,
+        "%s%04" PRId64 "-%02d-%02dT%02d:%02d:%02d",
+        year<0?"-":"",year<0?-year:year,parts.tm_mon+1,parts.tm_mday,
+        parts.tm_hour,parts.tm_min,parts.tm_sec);
+    if(calendar_length<=0||(size_t)calendar_length>=sizeof calendar||
+       !builder_append(builder,calendar,(size_t)calendar_length))return false;
+    if(precision>0&&!append_time_iso_fraction(builder,target->epoch,precision))return false;
     if(target->zone_mode==DIAMOND_TIME_UTC)return builder_append(builder,"Z",1);
     const int64_t offset=target->zone_mode==DIAMOND_TIME_FIXED_OFFSET?
         target->utc_offset:(int64_t)parts.tm_gmtoff;

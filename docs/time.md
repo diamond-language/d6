@@ -80,8 +80,9 @@ t.iso8601()   # => "2026-08-30T12:30:00+05:30"
 t.iso8601(3)  # => "2026-08-30T12:30:00.125+05:30"
 ```
 
-Precision must be an `Int` from 0 through 9. Non-minute offsets include their
-seconds so parsing the result does not lose offset information.
+Precision must be an `Int` from 0 through 9. Use enough digits for the
+fraction you want to preserve. Calendar years from 1 through 9999 have four
+digits. Non-minute offsets include their seconds.
 
 ## Changing the display zone
 
