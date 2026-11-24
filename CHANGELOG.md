@@ -7,6 +7,11 @@ come only in minor releases, marked **Breaking** here.
 
 ## Unreleased
 
+### Fixed
+
+- Standalone builds refresh cached runtime objects when the runtime content
+  changes, even if existing objects have newer timestamps.
+
 ## 1.6.0-rc2
 
 ### Fixed

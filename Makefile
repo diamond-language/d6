@@ -901,22 +901,33 @@ AOT_LTO_DIR := $(AOT_CACHE_DIR)/lto
 AOT_LTO_OBJECTS := $(AOT_RUNTIME_OBJECTS:$(AOT_CACHE_DIR)/%.o=$(AOT_LTO_DIR)/%.o)
 AOT_LTO_LIB := $(AOT_CACHE_DIR)/libdiamond-aot-lto.a
 
-.PHONY: aot-config-check
-aot-config-check:
-
-$(AOT_CONFIG): aot-config-check $(AOT_FINGERPRINT_INPUTS)
+.PHONY: aot-config-check aot-runtime aot-runtime-archives
+aot-config-check: $(AOT_FINGERPRINT_INPUTS)
 	@mkdir -p $(AOT_CACHE_DIR)
 	@fingerprint="$$(tools/aot_fingerprint.sh $(AOT_FINGERPRINT_INPUTS))" || { echo "tools/aot_fingerprint.sh failed" >&2; exit 1; }; \
 	[ -n "$$fingerprint" ] || { echo "tools/aot_fingerprint.sh printed nothing" >&2; exit 1; }; \
 	printf '%s\n' '$(CC)' '$(CPPFLAGS)' '$(AOT_CFLAGS)' '$(AOT_LTO_CFLAGS)' '$(shell $(CC) -dumpversion)' \
-		"$$fingerprint" > $@.tmp
-	@cmp -s $@.tmp $@ && rm $@.tmp || mv $@.tmp $@
+		"$$fingerprint" > $(AOT_CONFIG).tmp
+	@if cmp -s $(AOT_CONFIG).tmp $(AOT_CONFIG); then \
+		rm $(AOT_CONFIG).tmp; \
+	else \
+		rm -f $(AOT_RUNTIME_OBJECTS) $(AOT_RUNTIME_OBJECTS:.o=.d) $(AOT_RUNTIME_LIB) \
+			$(AOT_LTO_OBJECTS) $(AOT_LTO_OBJECTS:.o=.d) $(AOT_LTO_LIB) && \
+		mv $(AOT_CONFIG).tmp $(AOT_CONFIG); \
+	fi
 
-$(AOT_CACHE_DIR)/%.o: src/%.c $(AOT_CONFIG)
+# Check the fingerprint before make inspects the cached targets. Even a
+# changed stamp can have the same mtime as an existing object or archive.
+aot-runtime: aot-config-check
+	$(MAKE) -o $(PRELUDE_BIN) aot-runtime-archives
+
+aot-runtime-archives: $(AOT_RUNTIME_LIB) $(if $(AOT_LTO),$(AOT_LTO_LIB))
+
+$(AOT_CACHE_DIR)/%.o: src/%.c
 	@mkdir -p $(AOT_CACHE_DIR)
 	$(CC) $(CPPFLAGS) $(AOT_CFLAGS) -MMD -MP -c $< -o $@
 
-$(AOT_CACHE_DIR)/runtime_main.o: tools/aot_runtime_main.c $(AOT_CONFIG)
+$(AOT_CACHE_DIR)/runtime_main.o: tools/aot_runtime_main.c
 	@mkdir -p $(AOT_CACHE_DIR)
 	$(CC) $(CPPFLAGS) $(AOT_CFLAGS) -MMD -MP -c $< -o $@
 
@@ -925,11 +936,11 @@ $(AOT_CACHE_DIR)/compiled_prelude_data.o: $(PRELUDE_BIN)
 $(AOT_RUNTIME_LIB): $(AOT_RUNTIME_OBJECTS)
 	$(AR) rcs $@ $^
 
-$(AOT_LTO_DIR)/%.o: src/%.c $(AOT_CONFIG)
+$(AOT_LTO_DIR)/%.o: src/%.c
 	@mkdir -p $(AOT_LTO_DIR)
 	$(CC) $(CPPFLAGS) $(AOT_LTO_CFLAGS) -MMD -MP -c $< -o $@
 
-$(AOT_LTO_DIR)/runtime_main.o: tools/aot_runtime_main.c $(AOT_CONFIG)
+$(AOT_LTO_DIR)/runtime_main.o: tools/aot_runtime_main.c
 	@mkdir -p $(AOT_LTO_DIR)
 	$(CC) $(CPPFLAGS) $(AOT_LTO_CFLAGS) -MMD -MP -c $< -o $@
 
@@ -939,7 +950,7 @@ $(AOT_LTO_LIB): $(AOT_LTO_OBJECTS)
 	$(AR) rcs $@ $^
 
 .PHONY: aot-build
-aot-build: $(AOT_RUNTIME_LIB)
+aot-build: aot-runtime
 	$(CC) $(CPPFLAGS) $(AOT_CFLAGS) $(AOT_EMBED) \
 	    $(AOT_RUNTIME_LIB) $(LDLIBS) -o $(AOT_OUTPUT)
 
@@ -954,7 +965,7 @@ AOT_KIT_LINK_ARGS := $(LDFLAGS_EXTRA) -lm $(OPTIONAL_LIBS) $(LDLIBS_DL) \
 DIAMOND_VERSION := $(shell sed -n 's/.*DIAMOND_VERSION\[\] = "\(.*\)";/\1/p' src/main.c)
 
 .PHONY: aot-kit
-aot-kit: $(AOT_RUNTIME_LIB) $(if $(AOT_LTO),$(AOT_LTO_LIB)) $(REGINOLD_LIB)
+aot-kit: aot-runtime $(REGINOLD_LIB)
 	@rm -rf $(AOT_KIT_DIR)
 	@mkdir -p $(AOT_KIT_DIR)
 	cp $(AOT_RUNTIME_LIB) $(REGINOLD_LIB) $(AOT_KIT_DIR)/
