@@ -7,10 +7,41 @@ come only in minor releases, marked **Breaking** here.
 
 ## Unreleased
 
+## 1.6.0
+
+### Added
+
+- Variadic parameters accept element annotations such as `*args: String`.
+  Both compilers check the collected arguments, including values passed by spread.
+- Program-level type aliases give existing types and unions a reusable name in
+  annotations and type arguments.
+- `IO.poll` waits on channels and sockets together. Put a channel in either
+  readiness list to wait for a value, available capacity, or closure without
+  consuming data or reserving space.
+- Array and hash literals support up to 512 entries, subject to the existing
+  per-function register and bytecode budgets.
+
+### Changed
+
+- Functions support up to 128 named locals, including their parameters.
+- Generated functions have more register headroom, and adjacent argument
+  copies use less bytecode.
+
 ### Fixed
 
 - Standalone builds refresh cached runtime objects when the runtime content
   changes, even if existing objects have newer timestamps.
+- `Time#iso8601` preserves parsed decimal fractions at their requested
+  precision and zero-pads years such as `0001`. UTC and fixed-offset
+  calendar conversions support years before 1900 on macOS.
+- The compiler handles unions whose nested aliases grow the type table.
+
+- The JIT dispatches calls on native objects such as `Time` through the
+  native method lookup when a typed accessor supplies the receiver.
+- Facet lists `graphql` among the project kinds in its top-level usage.
+- Array splats preserve every element when 128 or more entries follow the splat.
+- The self-hosted parser rejects a forwarded block followed by another
+  argument and reports the reserved-keyword error for `loop = value`.
 
 ## 1.6.0-rc2
 
