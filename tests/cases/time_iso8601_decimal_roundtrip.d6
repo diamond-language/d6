@@ -17,6 +17,11 @@ check_milliseconds("9999-12-31T23:59:59", "-08:00")
 
 [
   Time.parse("0001-01-01T00:00:00Z").iso8601(),
+  Time.utc(1, 1, 1, 0, 0, 0).to_i(),
+  Time.fixed("+05:30", 1, 1, 1, 0, 0, 0).days_from_now(1).iso8601(),
+  Time.utc(400, 2, 28, 0, 0, 0).days_from_now(1).iso8601(),
+  Time.utc(100, 2, 28, 0, 0, 0).days_from_now(1).iso8601(),
+  Time.utc(1899, 12, 15, 0, 0, 0).end_of_month().iso8601(),
   Time.parse("2026-01-31T09:30:00.123+05:30").months_from_now(1).iso8601(3),
   Time.parse("2026-01-31T09:30:00.123999+05:30").iso8601(3),
   Time.parse("2026-01-31T09:30:59.9999Z").iso8601(3),

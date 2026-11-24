@@ -151,6 +151,35 @@ bool time_struct_tm(const DiamondTime *target,struct tm *out) {
     return true;
 }
 
+static bool calendar_leap_year(int64_t year) {
+    return year%4==0&&(year%100!=0||year%400==0);
+}
+
+/* Gregorian UTC calendar arithmetic, including overflow in the day or
+ * month from a calendar shift. Darwin's timegm rejects years before 1900. */
+static int64_t calendar_utc_epoch(const struct tm *parts) {
+    static const int month_starts[]={0,31,59,90,120,151,181,212,243,273,304,334};
+    int month=parts->tm_mon%12;
+    int64_t year=(int64_t)parts->tm_year+1900+parts->tm_mon/12;
+    if(month<0) { month+=12;year--; }
+    const int64_t prior=year-1;
+    const int64_t era=(prior<0?prior-399:prior)/400;
+    const int64_t in_era=prior-era*400;
+    /* 719162 days from 0001-01-01 to the Unix epoch. */
+    const int64_t days=era*146097+in_era*365+in_era/4-in_era/100-719162+
+        month_starts[month]+(month>1&&calendar_leap_year(year)?1:0)+parts->tm_mday-1;
+    return days*86400+parts->tm_hour*3600+parts->tm_min*60+parts->tm_sec;
+}
+
+static int64_t calendar_epoch_in_zone(struct tm *parts,const DiamondTime *target) {
+    if(target->zone_mode==DIAMOND_TIME_LOCAL) {
+        parts->tm_isdst=-1;
+        return mktime(parts);
+    }
+    return calendar_utc_epoch(parts)-
+        (target->zone_mode==DIAMOND_TIME_FIXED_OFFSET?target->utc_offset:0);
+}
+
 static double parse_time_fraction(const char *chars,size_t length,size_t *end) {
     size_t index=0;
     double value=0.0,scale=0.1;
@@ -164,9 +193,8 @@ static double parse_time_fraction(const char *chars,size_t length,size_t *end) {
 }
 
 /* Strict ISO-8601 calendar timestamps with an explicit zone only:
- * YYYY-MM-DDTHH:MM:SS[.fraction](Z|+HH:MM[:SS]|-HH:MM[:SS]). Parsing the calendar
- * portion through timegm keeps this independent of process-local TZ state;
- * the round trip rejects dates libc would otherwise normalize (Feb 30, etc.). */
+ * YYYY-MM-DDTHH:MM:SS[.fraction](Z|+HH:MM[:SS]|-HH:MM[:SS]). Validate the
+ * calendar date before converting it independently of the process timezone. */
 DiamondVmStatus time_parse_helper(DiamondVm *vm,DiamondValue input,
         DiamondValue *out_result) {
     if(input.kind!=DIAMOND_VALUE_OBJECT||
@@ -203,14 +231,9 @@ DiamondVmStatus time_parse_helper(DiamondVm *vm,DiamondValue input,
     if(valid&&!parse_time_utc_offset_chars(chars+zone_start,length-zone_start,&utc_offset))
         valid=false;
     const bool zone_ok=valid;
+    if(valid&&day>days_in_calendar_month(year,month))valid=false;
     struct tm calendar={.tm_year=year-1900,.tm_mon=month-1,.tm_mday=day,
         .tm_hour=hour,.tm_min=minute,.tm_sec=second,.tm_isdst=0};
-    const time_t calendar_epoch=valid?timegm(&calendar):(time_t)0;
-    struct tm round_trip={};
-    if(valid&&(gmtime_r(&calendar_epoch,&round_trip)==nullptr||
-       round_trip.tm_year!=year-1900||round_trip.tm_mon!=month-1||
-       round_trip.tm_mday!=day||round_trip.tm_hour!=hour||
-       round_trip.tm_min!=minute||round_trip.tm_sec!=second))valid=false;
     if(!valid) {
         /* The right type with the wrong contents: ArgumentError, as for any
          * other bad value. */
@@ -227,7 +250,7 @@ DiamondVmStatus time_parse_helper(DiamondVm *vm,DiamondValue input,
         return DIAMOND_VM_ARITY_ERROR;
     }
     const bool explicit_utc=length-zone_start==1;
-    DiamondTime *time=allocate_time(vm,(double)calendar_epoch-(double)utc_offset+fraction,
+    DiamondTime *time=allocate_time(vm,(double)(calendar_utc_epoch(&calendar)-utc_offset)+fraction,
         explicit_utc?DIAMOND_TIME_UTC:DIAMOND_TIME_FIXED_OFFSET,utc_offset);
     if(time==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
     *out_result=DIAMOND_OBJECT(time);return DIAMOND_VM_OK;
@@ -426,15 +449,16 @@ DiamondVmStatus time_build_helper(DiamondVm *vm,const DiamondValue *arguments,
     struct tm calendar={.tm_year=(int)year-1900,.tm_mon=(int)month-1,
         .tm_mday=(int)day,.tm_hour=(int)hour,.tm_min=(int)minute,
         .tm_sec=(int)second,.tm_isdst=0};
-    const time_t calendar_epoch=valid?
-        (mode==2?(calendar.tm_isdst=-1,mktime(&calendar)):timegm(&calendar)):(time_t)0;
-    struct tm round_trip={};
-    struct tm *round_trip_result=mode==2?
-        localtime_r(&calendar_epoch,&round_trip):gmtime_r(&calendar_epoch,&round_trip);
-    if(valid&&(round_trip_result==nullptr||(mode!=2&&(
-       round_trip.tm_year!=(int)year-1900||round_trip.tm_mon!=(int)month-1||
-       round_trip.tm_mday!=(int)day||round_trip.tm_hour!=(int)hour||
-       round_trip.tm_min!=(int)minute||round_trip.tm_sec!=(int)second))))valid=false;
+    int64_t calendar_epoch=0;
+    if(valid&&mode==2) {
+        calendar.tm_isdst=-1;
+        const time_t local_epoch=mktime(&calendar);
+        struct tm round_trip;
+        valid=localtime_r(&local_epoch,&round_trip)!=nullptr;
+        calendar_epoch=local_epoch;
+    } else if(valid) {
+        calendar_epoch=calendar_utc_epoch(&calendar);
+    }
     if(!valid) {
         snprintf(vm->error,sizeof vm->error,
             "no such date or time: %04" PRId64 "-%02" PRId64 "-%02" PRId64
@@ -453,7 +477,7 @@ DiamondVmStatus time_build_helper(DiamondVm *vm,const DiamondValue *arguments,
 /* Calendar-aware movement. Unlike numeric day/week durations, this preserves
  * wall-clock fields in the receiver's display zone; month/year shifts also
  * clamp the day to the target month's end. Local mode delegates DST resolution
- * to mktime; UTC/fixed modes remain process-state-independent through timegm. */
+ * to mktime. UTC and fixed modes use Gregorian arithmetic. */
 static DiamondVmStatus time_calendar_shift_helper(DiamondVm *vm,
         const DiamondTime *target,int64_t amount,uint8_t unit,bool future,
         DiamondValue *out_result) {
@@ -473,14 +497,7 @@ static DiamondVmStatus time_calendar_shift_helper(DiamondVm *vm,
     }
     if(unit==TIME_SHIFT_DAYS||unit==TIME_SHIFT_WEEKS) {
         parts.tm_mday+=(int)(delta*(unit==TIME_SHIFT_WEEKS?7:1));
-        time_t shifted_epoch;
-        if(target->zone_mode==DIAMOND_TIME_LOCAL) {
-            parts.tm_isdst=-1;shifted_epoch=mktime(&parts);
-        } else {
-            shifted_epoch=timegm(&parts);
-            if(target->zone_mode==DIAMOND_TIME_FIXED_OFFSET)
-                shifted_epoch-=(time_t)target->utc_offset;
-        }
+        const int64_t shifted_epoch=calendar_epoch_in_zone(&parts,target);
         const double fraction=target->epoch-floor(target->epoch);
         const DiamondTime shifted={.epoch=(double)shifted_epoch+fraction,
             .utc_offset=target->utc_offset,.zone_mode=target->zone_mode};
@@ -513,14 +530,7 @@ static DiamondVmStatus time_calendar_shift_helper(DiamondVm *vm,
     const int last_day=days_in_calendar_month((int)shifted_year,shifted_month);
     if(parts.tm_mday>last_day)parts.tm_mday=last_day;
     parts.tm_year=(int)shifted_year-1900;parts.tm_mon=shifted_month-1;
-    time_t shifted_epoch;
-    if(target->zone_mode==DIAMOND_TIME_LOCAL) {
-        parts.tm_isdst=-1;shifted_epoch=mktime(&parts);
-    } else {
-        shifted_epoch=timegm(&parts);
-        if(target->zone_mode==DIAMOND_TIME_FIXED_OFFSET)
-            shifted_epoch-=(time_t)target->utc_offset;
-    }
+    const int64_t shifted_epoch=calendar_epoch_in_zone(&parts,target);
     const double fraction=target->epoch-floor(target->epoch);
     DiamondTime *result=allocate_time(vm,(double)shifted_epoch+fraction,
         target->zone_mode,target->utc_offset);
@@ -557,14 +567,7 @@ static DiamondVmStatus time_boundary_helper(DiamondVm *vm,const DiamondTime *tar
     } else if(boundary==TIME_END_OF_QUARTER) {
         parts.tm_mon=(parts.tm_mon/3)*3+3;parts.tm_mday=1;
     }
-    time_t epoch;
-    if(target->zone_mode==DIAMOND_TIME_LOCAL) {
-        parts.tm_isdst=-1;epoch=mktime(&parts);
-    } else {
-        epoch=timegm(&parts);
-        if(target->zone_mode==DIAMOND_TIME_FIXED_OFFSET)
-            epoch-=(time_t)target->utc_offset;
-    }
+    const int64_t epoch=calendar_epoch_in_zone(&parts,target);
     DiamondTime *result=allocate_time(vm,(double)epoch-(end?0.000001:0.0),
         target->zone_mode,target->utc_offset);
     if(result==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
@@ -1085,7 +1088,7 @@ int days_in_calendar_month(int year,int month);
 int days_in_calendar_month(int year,int month) {
     static const int days[]={31,28,31,30,31,30,31,31,30,31,30,31};
     if(month!=2)return days[month-1];
-    return days[1]+((year%4==0&&year%100!=0)||year%400==0?1:0);
+    return days[1]+(calendar_leap_year(year)?1:0);
 }
 
 /* Number of calendar days needed to move `count` Monday-Friday days. The
