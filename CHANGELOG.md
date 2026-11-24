@@ -7,6 +7,8 @@ come only in minor releases, marked **Breaking** here.
 
 ## Unreleased
 
+## 1.6.0-rc2
+
 ### Fixed
 
 - `Time#iso8601` preserves parsed decimal fractions at their requested
