@@ -3207,10 +3207,10 @@ int parse_type_annotation(Compiler *compiler) {
     compiler->self_return_allowed=false;
     if(!reserve_type_sets(compiler,1))return 0;
     const size_t set_index=compiler->function->type_set_count++;
-    DiamondTypeSet *set=&compiler->function->type_sets[set_index];
     /* Failed advisory proofs rewind the count and can leave a populated slot
      * behind. A new annotation must not inherit those discarded alternatives. */
-    set->count=0;set->inferred=false;
+    compiler->function->type_sets[set_index].count=0;
+    compiler->function->type_sets[set_index].inferred=false;
     while(!compiler->failed) {
         if(compiler->current.kind!=DIAMOND_TOKEN_IDENTIFIER) {
             fail(compiler,compiler->current.span,"expected type annotation");break;
@@ -3240,7 +3240,8 @@ int parse_type_annotation(Compiler *compiler) {
         const int resolved=resolve_type_name(compiler,type_name_buffer,member_span);
         const bool native=diamond_type_operand_is_native(resolved);
         const uint16_t type=native?DIAMOND_TYPE_NATIVE:(uint16_t)resolved;
-        if(set->count==DIAMOND_MAX_UNION_TYPES) {
+        /* Alias expansion and nested annotations can grow the table. */
+        if(compiler->function->type_sets[set_index].count==DIAMOND_MAX_UNION_TYPES) {
             fail(compiler,compiler->current.span,"too many types in union");break;
         }
         uint16_t argument_set=DIAMOND_NO_TYPE_SET,second_argument_set=DIAMOND_NO_TYPE_SET;
