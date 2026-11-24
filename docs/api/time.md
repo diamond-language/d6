@@ -97,8 +97,10 @@ not a `Time`; subtract two readings to measure elapsed time.
 
 ### `iso8601(digits = 0) -> String`
 
-The ISO-8601 text, with `digits` (0 to 9) of fractional seconds. `Time.parse`
-reads it back exactly.
+Formats ISO-8601 text with `digits` (0 to 9) of fractional seconds. Calendar
+years from 1 through 9999 have four digits. The result preserves a decimal
+fraction at the requested precision when it represents the same instant.
+Reducing precision can discard fractional digits.
 
 ```ruby
 Time.at(0.125).utc().iso8601(3)   # => "1970-01-01T00:00:00.125Z"
