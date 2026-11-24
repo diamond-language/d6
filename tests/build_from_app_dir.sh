@@ -33,12 +33,20 @@ fi
 # A persistent cache may outlive the source copy that populated it. Prove that
 # changing content invalidates the runtime archive even when its mtime is put
 # back, as happens when an older-timestamped checkout replaces a newer one.
+# Leave one cached object newer than any new stamp to force the timestamp
+# ordering that could otherwise hide a fingerprint change from make.
+cache_objects=("$AOT_CACHE_ROOT"-*/runtime_main.o)
+test "${#cache_objects[@]}" -eq 1
+cached_runtime="${cache_objects[0]}"
+test -f "$cached_runtime"
+touch -t 203701010000 "$test_dir/newer-cache-time"
+touch -r "$test_dir/newer-cache-time" "$cached_runtime"
 touch -r "$fingerprint_extra" "$test_dir/original-mtime"
 printf '%s\n' 'runtime ABI v2' > "$fingerprint_extra"
 touch -r "$test_dir/original-mtime" "$fingerprint_extra"
 "$diamond_bin" build app.d6 -o app-after-abi-change > "$test_dir/third-build.log"
 test "$("$test_dir/app-after-abi-change")" = "100"
-if ! grep -Eq ' -c src/|ar rcs ' "$test_dir/third-build.log"; then
+if ! [[ -f "$cached_runtime" && "$cached_runtime" -ot "$test_dir/newer-cache-time" ]]; then
     echo "content change with preserved mtime did not rebuild the cached runtime" >&2
     exit 1
 fi
