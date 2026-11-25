@@ -1,4 +1,4 @@
-# d6 1.6.0 and 1.6.1
+# d6 1.6 release notes
 
 d6 1.6 adds reusable type aliases, typed variadic parameters, and a way to
 poll channels alongside sockets.
@@ -26,10 +26,16 @@ poll channels alongside sockets.
   content, including inputs restored with older modification times.
 - Facet's top-level help lists the `graphql` starter.
 
+## 1.6.2 patch release
+
+Garbage collection can continue while a worker with an unreachable thread
+handle is still running. The collector reaps the worker after it finishes,
+so the collecting VM can still send a message or signal the worker needs.
+
 ## 1.6.1 patch release
 
 The live-thread-limit regression test keeps child handles alive through the
 release signal. This prevents the test from getting stuck in garbage
 collection while it waits for a worker to report.
 
-[Release and downloads](https://github.com/diamond-language/d6/releases/tag/v1.6.1)
+[Release and downloads](https://github.com/diamond-language/d6/releases/tag/v1.6.2)

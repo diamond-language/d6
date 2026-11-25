@@ -242,7 +242,8 @@ the PR's actual base before merging and updates that release branch.
    depends on, one merged ahead of it still needs a rebase and a fresh green
    run. The first CI run on `main` after the merges is the check on the
    combination.
-6. Tag a release only after CI is green on the merged `main` commit.
+6. Tag a release after CI is green on the merged commit on `main` or its
+   maintained release branch.
    Follow the [stable website release procedure](docs/site-release.md) to publish
    the matching documentation, downloads, and browser runtime.
 
