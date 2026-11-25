@@ -519,7 +519,7 @@ static void sweep_list(DiamondVm *vm, DiamondObject **list_head,
             free(builder->program);
         } else if(unreached->kind==DIAMOND_OBJECT_THREAD) {
             size=sizeof(DiamondThreadHandle);
-            free_thread(((DiamondThreadHandle *)unreached)->thread);
+            defer_thread_reap(vm,((DiamondThreadHandle *)unreached)->thread);
         } else if(unreached->kind==DIAMOND_OBJECT_CHANNEL) {
             size=sizeof(DiamondChannelHandle);
             free_channel_reference(((DiamondChannelHandle *)unreached)->channel);
@@ -777,6 +777,7 @@ static void diamond_vm_collect_impl(DiamondVm *vm) {
     vm->remembered_count = kept_remembered;
     sweep_list(vm, &vm->young_objects, nullptr);
     sweep_list(vm, &vm->old_objects, nullptr);
+    reap_finished_threads(vm);
     vm->next_gc = vm->bytes_allocated < 1024
         ? 2048 : vm->bytes_allocated * 2;
     vm->bytes_allocated_at_last_minor_gc = vm->bytes_allocated;
@@ -795,6 +796,7 @@ static void diamond_vm_collect_impl(DiamondVm *vm) {
 static void diamond_vm_collect_minor_impl(DiamondVm *vm) {
     mark_roots(vm, true);
     sweep_list(vm, &vm->young_objects, &vm->old_objects);
+    reap_finished_threads(vm);
     vm->bytes_allocated_at_last_minor_gc = vm->bytes_allocated;
 }
 
