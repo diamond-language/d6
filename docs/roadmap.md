@@ -1,18 +1,30 @@
 # d6 roadmap
 
-This roadmap lists potential directions for the project. None of it is a
-promise of future functionality: an item may change, wait indefinitely or be
-dropped. What 1.x does promise is in [compatibility](compatibility.md).
-What has landed is in the [changelog](../CHANGELOG.md), current behavior in the topic guides, and
-implementation rationale in design documents. A section here says what is not
-done yet; when something lands, delete it (see "Completion policy").
+This roadmap lists research and possible project work. Application needs and
+measurements can change the order. See the [compatibility policy](compatibility.md)
+for 1.x commitments and the [changelog](../CHANGELOG.md) for shipped changes.
 
-d6 is a research language. Priorities can change when measurements expose
-a more valuable runtime, language, or tooling question.
+- [Near-term work](#near-term-work)
+- [Candidate work](#candidate-work)
+- [Runtime research](#runtime-research)
+- [Language directions](#language-directions)
+- [Tooling and distribution](#tooling-and-distribution)
+- [Explicitly deferred](#explicitly-deferred)
+- [Completion policy](#completion-policy)
 
-Broader reliability work waits for usage beyond the current two users; existing verification
-remains required. Package development prioritizes Mjolnir, with ActiveRecord in the
-background. Further JIT work is optional and measurement-driven.
+---
+
+## Near-term work
+
+Make the public documentation easier to scan. Start with long reference pages.
+Give separate topics their own headings, split dense paragraphs at changes of
+subject, and use brief examples or lists when readers need to compare behavior.
+
+Broader reliability work waits for usage beyond the current two users. Keep
+running existing verification. Package work prioritizes Mjolnir, with
+ActiveRecord in the background. Let measurements guide further JIT work.
+
+---
 
 ## Candidate work
 
@@ -96,6 +108,8 @@ New package work should be driven by a concrete application or interoperability 
 - Avoid framework magic that hides database access or weakens d6's type and error
   contracts.
 
+---
+
 ## Runtime research
 
 ### Bound pause time further
@@ -121,13 +135,18 @@ at 1.00x (61 and 78 ms, same as YJIT), then loop and poly at 0.85x.
     block; `map` and `select` push into their result inline, calling C only to grow it).
     Setting up a native loop is still a C call per loop (`diamond_jit_loop_begin`: extension
     lookup, block prepare), 2% of nbody, which runs `each` over five bodies.
+
   - Compiled bodies keep every value in memory and re-check types the caller already proved
     (fib's `n < 2` reloads and re-tests the tag of a parameter the entry check just
     confirmed; an `Int` parameter can also be a BigInt object, so dropping the check needs
-    a second copy of the body). Reloads are cheap on Zen 3 as long as each load matches the
+    a second copy of the body).
+
+    Reloads are cheap on Zen 3 as long as each load matches the
     width of the store it reads: values are written as whole 8-byte kind and payload words
     and copied in 8-byte halves, because a load spanning a narrower or a second store waits
-    for both to retire (that alone was half of fib's cycles). Handing one op's result to the
+    for both to retire (that alone was half of fib's cycles).
+
+    Handing one op's result to the
     next in RAX instead of through the register file made loop 6% slower, so the remaining
     gain has to come from dropping tag checks and stores.
 - **Call machinery** -- about 300 of a fib call's ~450 instructions are call setup (prologue,
@@ -187,6 +206,8 @@ incremental compilation, but would add substantial complexity.
 Revisit only when at least one concrete consumer can state the required invariants and
 demonstrate that current bytecode/source metadata is insufficient.
 
+---
+
 ## Language directions
 
 ### Ergonomics without compatibility chasing
@@ -234,6 +255,8 @@ What 1.x promises is in [compatibility](compatibility.md). Left open:
   needs one; until then the C interfaces stay experimental;
 - a bytecode format that outlives one build, if distributing compiled programs without
   their source becomes a real need.
+
+---
 
 ## Tooling and distribution
 
@@ -335,6 +358,8 @@ built and tested in CI but no longer attached to releases.
 - Test each package in a clean container of its target before calling it supported, without
   upgrading the system first (that is how the 0.22 walkthrough found missing dependencies).
 
+---
+
 ## Explicitly deferred
 
 - Ruby compatibility as a goal;
@@ -355,6 +380,8 @@ built and tested in CI but no longer attached to releases.
   object-model tier. Not worth it without a
   type-tag redesign no concrete use case justifies; see
   [design](internal/design.md)'s `DIAMOND_VALUE_CLASS` section.
+
+---
 
 ## Completion policy
 

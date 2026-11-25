@@ -25,23 +25,26 @@ right.join()  # => 49
 same thread again returns the cached result. `alive?()` reports whether the
 thread is still running without blocking.
 
-d6 does not support detached or fire-and-forget threads. If an unjoined
-Thread becomes unreachable, its VM keeps ownership until the worker and
-its descendants finish. Garbage collection can continue while they run.
-A program that ends normally waits for every unjoined thread before
-exiting. A thread that is never joined has no one to
-re-raise its uncaught exception, so d6 prints it on stderr when the thread is
-reclaimed, as `d6: runtime error in unjoined thread: ...` with its backtrace.
-The exit status is unaffected, and a thread stopped by its supervisor is not
-reported. Join every thread whose failure should change what the program does,
-or run it under a `Supervisor`.
+### Dropped handles and shutdown
 
-The one exception is a program that fails: if the main program ends with an
-uncaught exception while any spawned thread or supervised child is still
-running, d6 reports the error and exits with status 70 immediately, the
-way `exit()` does, rather than waiting for workers that may never finish
-(for example, one blocked sending to a channel only the failed program
-would have drained).
+The VM owns every thread it starts. If an unjoined handle becomes unreachable,
+garbage collection can continue while the worker and its descendants run.
+Normal shutdown waits for them to finish.
+
+If the main program ends with an uncaught exception while a thread or supervised
+child is still running, d6 reports the exception and exits immediately with
+status 70. A worker may be blocked on a channel that only the failed program
+could drain.
+
+### Unjoined errors
+
+When d6 reclaims an unjoined thread with an uncaught exception, it writes
+`d6: runtime error in unjoined thread: ...` and the backtrace to stderr. The
+program keeps its exit status. The report omits threads stopped by their
+supervisor.
+
+Join a thread if its failure should change what the program does, or run it
+under a [Supervisor](#supervisors).
 
 ## Isolated heaps
 
@@ -341,20 +344,18 @@ sup.alive?(0)         # => true while child 0 is still running/restarting;
                        #    stopped
 ```
 
-`stop()` prevents any further restarts and blocks until every child's
-*current* attempt finishes -- there is no implicit native cancellation, so a
-worker parked in a blocking call (a `Channel#receive`, a socket read, an
-infinite loop with no exit condition) keeps `stop()` waiting until that
-call itself returns or raises. `join()` is the non-stopping counterpart: it
-blocks until every child has finished on its own, without disabling
-restarts -- a child that keeps crashing and restarting forever blocks
-`join()` forever too, exactly as joining a `Thread` that never returns
-already does. With the cancellation cut, cancel a shared source first and have
-workers catch expected cancellation and return normally before calling `stop()`.
+### Wait for workers or stop them
 
-When garbage collection finds an unreachable Supervisor, it disables restarts
-and lets the current attempts finish while the collecting VM continues to run.
-Normal VM shutdown waits for those attempts to finish.
+- `join()` waits for every child to finish on its own. A child in an infinite
+  crash-and-restart loop keeps it waiting.
+- `stop()` disables further restarts and waits for each current attempt.
+  A worker stuck in `Channel#receive`, a socket read, or an infinite loop
+  keeps `stop()` waiting. With the cancellation cut, cancel the shared source
+  first and have workers catch expected cancellation and return.
+- Garbage collection disables restarts for an unreachable Supervisor and
+  continues while the current attempts run. Normal VM shutdown waits for them.
+
+### Stop with a deadline
 
 `stop(timeout_ms)` bounds the explicit stop wait. It stops restarts, gives the current
 attempts up to `timeout_ms` milliseconds (`0` to `2147483647`) to finish by

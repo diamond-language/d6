@@ -18,501 +18,604 @@ repository already uses.
 
 ## Positions
 
-The compiler and lexer count a column in bytes within the line. The protocol counts a position's `character` in UTF-16 code units (the default encoding when a client negotiates none), and the two agree only on ASCII: an `é` is two bytes and one unit, an emoji four bytes and two. `lsp/position.h` converts at the edges. A cursor position from the editor becomes a byte column before anything looks at the source, and every range sent back (locations, symbols, references, rename edits, diagnostics, formatting edits) is converted using the text of the file the range is in, which for a definition, reference or dependency diagnostic in a `require`d file is that file's text, not the open document's.
+The compiler and lexer count byte columns. LSP counts UTF-16 code units by
+default. An `é` is two bytes and one UTF-16 unit. An emoji can take four bytes
+and two units.
+
+`lsp/position.h` converts editor positions to byte columns before source lookup.
+It converts each returned range using the text of the file that owns it. A
+definition, reference, or diagnostic in a required file uses that file's text.
 
 ## What it does today
 
-Diagnostics, hover/go-to-definition/document-symbols over a narrow,
-declaration-only symbol table, plus completion and workspace-wide symbol
-search over a real (if scoped) lexical symbol table:
+The server reports diagnostics, navigates declarations, completes names and
+methods, and searches symbols across the workspace.
 
-- `initialize` — advertises `textDocumentSync: Full` (1),
-  `hoverProvider: true`, `definitionProvider: true`,
-  `documentSymbolProvider: true`, `completionProvider: {}` (no
-  `triggerCharacters` — see completion below for why none are needed),
-  `workspaceSymbolProvider: true`, `referencesProvider: true`,
-  `renameProvider: true`, `documentFormattingProvider: true`, and
-  `documentRangeFormattingProvider: true`. Also
-  reads `workspaceFolders[0]`/
-  `rootUri` from the request's own params (the one place this server
-  reads anything from `initialize`'s params at all) to know what
-  directory `workspace/symbol` should search.
-- `textDocument/didOpen` / `didChange` / `didClose` — each recompiles the
-  document's current full text (full sync only; there's no incremental
-  edit application) and publishes a `textDocument/publishDiagnostics`
-  notification. d6's compiler stops at its first error, so there is
-  never more than one diagnostic per publish — an empty array means the
-  document currently compiles cleanly. If the one error is actually
-  inside a `require`d file rather than the open document itself, a
-  *second* `publishDiagnostics` notification also goes out, against
-  that file's own uri (resolved the same
-  `diamond_resolve_diagnostic_location` way go-to-definition resolves a
-  cross-file `Location` — see below) — this document's own publish
-  still correctly reports itself clean, since its own text has no
-  error. Only ever triggered by *this* document's own didOpen/didChange,
-  not by editing the dependency directly; see below.
-- `textDocument/hover` (`lsp/hover.c`), `textDocument/definition`
-  (`lsp/definition.c`), and `textDocument/documentSymbol`
-  (`lsp/document_symbol.c`) all resolve the same declaration kinds,
-  deliberately not a real general-purpose symbol table: a top-level
-  function name (`def foo`, unambiguous since a bare call always
-  resolves to exactly one top-level function by that name at compile
-  time — no overloading, no scoping to worry about), a class name
-  (always names exactly one class, single inheritance), a module name,
-  or an interface name. The compiler records each one's declaration-site position (1-based line/column
-  of its own name token, plus the matching byte offset in the compiled
-  buffer — `declaration_line`/`declaration_column`/`declaration_start`
-  on `DiamondFunction`/`DiamondClass`/`DiamondModule`/`DiamondInterface`,
-  `src/vm.h`) purely for these three
-  handlers to read; nothing else in the VM uses them.
-  - Hover shows the reconstructed signature (parameter types, return
-    type, which parameters are optional), `class Name`/`class Name <
-    Superclass`, `module Name`, or `interface Name`, reusing
-    `disassemble.c`'s own type-set formatting
-    (`diamond_print_type_set`).
-    Hovering a function or method's declaration name selects the signature at
-    that exact source position, including instance, singleton, module, nested,
-    setter, and reopened-class definitions. Names shared by other classes or
-    top-level functions do not override the declaration under the cursor.
-    Go-to-definition uses the same position matching at function and method
-    declarations, returning that declaration's name range in its own document.
-    Setter ranges include the trailing `=`, and imported declarations use the
-    current open buffer's source map.
-    At explicit receiver calls such as `pet.shared()`, hover and definition
-    resolve the method before any same-named top-level function or local.
-    Unknown receivers and missing methods return no result rather than the
-    unrelated global function. Bare function calls keep top-level lookup.
-    Lexical locals with compiler-recorded structural facts are also hoverable;
-    their position-sensitive type set is rendered from the owning function's
-    table, including Callable, collection, primitive, and union graphs.
-  - Go-to-definition returns a `Location`. A match can legitimately live
-    in a *different* file (something pulled in via `require`) — resolved
-    to the right file and line through `diamond_resolve_diagnostic_
-    location`'s segment table (`src/compiler.h`), the same machinery a
-    compile error's own position already goes through, since a
-    declaration's raw in-buffer line is only ever correct for the first
-    thing after the most recent `#line 1` reset (`diamond_load_program`
-    inserts one before *every* contiguous chunk it copies into the
-    bundle, not just before required-file content) and needs the same
-    segment-relative remap anywhere else.
-  - Document symbols lists every top-level function, class, module, and
-    interface declared *in
-    that document itself* — not lib/core.d6's prelude, and not anything
-    pulled in through `require` (each of those has its own outline, a
-    didOpen away). `range`/`selectionRange` are identical for each
-    entry (just the name token — nothing tracks a declaration's full
-    extent).
-  - Class member completion includes the intrinsic `new` constructor, except
-    for sealed classes. Go-to-definition on `ClassName.new(...)` selects the
-    instance `initialize` method, including an inherited or imported one.
-    Constructors without a source initializer (including generated struct
-    constructors) select the class declaration. Nested class targets select
-    the identifier written at that declaration, not the qualified lookup name.
-  - All three also fall back to `lsp/receiver.c` for a method name
-    reached through `receiver.method(...)`, for the receiver forms
-    resolvable without real type inference: a literal class name
-    (`Author.find`), `self` inside an instance method or a class-owned
-    `def self.x` (wall 2's `DIAMOND_VALUE_CLASS`, `docs/internal/design.md`), a
-    local variable known at the cursor position to hold
-    `ClassName.new(...)` — `DiamondScopeLocal.known_type` (`src/vm.h`),
-    the compiler's own `known_types[reg]`, supplemented by ordered
-    `DiamondScopeTypeFact` assignment snapshots so reassignment changes
-    resolution only after that assignment — or a parameter (or a
-    local initialized from one) given an explicit union annotation
-    (`pet: Dog | Cat`) or a representable control-flow join such as
-    `pet = flag ? Dog.new() : Cat.new()` — `DiamondScopeLocal.known_type_set`
-    (`src/vm.h`),
-    the same snapshot idea applied to the compiler's own
-    `known_type_sets[reg]`, decoded against the *owning function's own*
-    `type_sets[]` table (a set index means nothing against any other
-    function's). `self`'s own enclosing class comes from
-    `DiamondFunction.owner_class` via `DiamondFunction.body_end`
-    (`src/vm.h`, populated at every function-closing site alongside
-    `declaration_start` so even a zero-parameter, zero-local method — a
-    very common `self.foo()` one-liner shape — still has a real body
-    extent to locate `self` within); `receiver_lookup_method` then walks
-    each candidate class and its superclass chain by name, mirroring
-    `lookup_method`/`lookup_singleton_method` (`src/vm.c`) at the source
-    level. A union receiver resolves against *every* class-kind member
-    that defines the method: hover shows one signature when every match
-    agrees on it textually, or `ClassName#signature` per match when they
-    differ; go-to-definition returns a `Location[]` when there's more
-    than one match (single `Location` otherwise, unchanged); completion
-    lists every candidate's own methods, undeduplicated. Unions can come from
-    explicit source annotations or from compiler-synthesized `if`/`unless` and
-    ternary joins when every path has a representable known type. Synthesized
-    sets remain advisory: they can prove a compatible annotation and eliminate
-    its runtime check, but an incompatible set retains the historical runtime
-    check rather than turning formerly dynamic code into a compile error. A
-    class instance-variable
-    receiver also resolves when every assignment to that field agrees on one
-    concrete class; conflicting or unknown assignments deliberately erase the
-    candidate rather than guessing. Grouping parentheses around any otherwise
-    resolvable receiver are ignored. Repeated indexing from a local explicitly
-    typed as a nested `Array` resolves to its eventual class element type;
-    the same applies to a non-generic top-level, singleton, or single-class
-    instance-method call with a structurally known array return. Generic calls
-    also work when their class bindings can be inferred by the same exact-type-
-    variable rule used for direct chains, or supplied explicitly as class
-    unions or nested `Array` shapes ending in a class union. Inference also descends
-    through matching parameterized shapes such as `Array[T]` versus a local
-    `Array[Pet | Leaf]`, or `Hash[String, T]` versus
-    `Hash[String, Pet | Leaf]`. Constructor witnesses for a shared variable
-    can join representable class unions, including repeated parent parameters
-    such as `Point[T] < Pair[T, T]`. Conflicting invariant arguments and
-    unrepresentable editor shapes remain unresolved. Own constructors also
-    retain child-only parameters, including with fixed parents. An inherited
-    constructor missing a child binding stays unresolved unless explicit type
-    arguments supply it. Direct `Hash[K, V]`
-    indexing with `.` remains unresolved because its real result is `V | Nil`;
-    with safe navigation (`pets["rex"]&.`) the final lookup resolves to `V`,
-    since a missing key never reaches the method (see "Safe navigation" below). Saving a
-    declared or structurally inferred Hash lookup in a local preserves that
-    nullable type. Existing nil
-    comparisons now expose the compiler's branch-local proof to the editor:
-    after `pet = pets["name"]`, `if pet != nil` or `unless pet == nil` enables
-    completion, hover, and definition for `pet` inside the non-nil branch.
-    The non-nil `else` of `if pet == nil` and continuation after
-    `return if pet == nil` work too. Compound guards follow the compiler's
-    existing conjunction/disjunction rules. Nil and uncertain branches, joins,
-    and reassignment restore their own facts; a nullable or mixed primitive/class
-    local does not silently drop the unresolved alternatives. Truthiness guards
-    (`if pet`, `unless pet`, negation, and `return unless pet`) also publish
-    branch facts. Nil is removed from the truthy view; Bool stays
-    in both views because it includes true and false. The falsey view retains
-    only Nil and Bool, so a mixed `Pet | Bool | Nil` does not resolve as Pet
-    inside `if pet`. On a declared type these are checked compiler facts, as
-    with a `!= nil` guard (see docs/types-and-errors.md); on an inferred one
-    they stay editor-only. An imported factory
-    such as `def make_pets() = {"name": Pet.new()}` needs no return annotation:
-    `pet = make_pets()["name"]` retains `Pet | Nil` for the editor, and the
-    explicit nil guard resolves its non-nil receiver. Hash literals can also
-    combine known values and inferred factory values. Unknown key or value
-    graphs stay unresolved. These inferred facts never become checked compiler
-    types or remove runtime return checks. Unchanged non-nil/nil branch views
-    rejoin the original nullable editor graph, so repeated guards still work;
-    reassignment, unknown paths, and tracked alias writes discard stale graphs.
-    Short-circuit expressions also publish facts while compiling
-    the right operand: `pet && pet.bark()` uses the truthy view, and
-    `pet == nil || pet.bark()` uses the non-nil view. Nested expressions follow
-    the same rules. The surrounding facts are restored afterward; tracked
-    writes discard invalidated graphs instead of restoring stale proofs.
-    As with branch guards, a declared type gets checked facts for the right
-    operand and an inferred one only editor facts.
-    Indexing an inferred Array call result, directly or through a local, also
-    preserves its element graph when assigned to another local, including
-    repeated indexing through nested Arrays. These facts stay editor-only;
-    unknown element graphs and directly chained nullable Hash indexing remain
-    unresolved.
-    Safe navigation: left of `&.` the receiver resolves through its non-nil
-    view, for completion, hover and definition alike. A `T | Nil` local or
-    parameter, a call declared `-> T | Nil`, and a final Hash lookup all
-    resolve as T. Only that outermost receiver drops Nil: `a&.b()` is itself
-    nullable, so `a&.b().` stays unresolved while `a&.b()&.` resolves, and an
-    inner plain `.` link stays as strict as before. The formatter indents a
-    leading `&.` line as a chain link, like a leading `.`.
-    Array literals also carry inferred factory element graphs, including nested
-    literals and mixtures of known and inferred class results. Locals and
-    unannotated returns retain the richer editor graph alongside the compiler's
-    broader checked shape. An unknown element suppresses the graph; tracked
-    indexed writes and pushes discard it for the mutated local and its aliases.
-    A literal spread such as `[first, *make_pets(), last]` joins the prefix,
-    spread element, and suffix graphs by the same editor-only rules. Inferred
-    and checked Array shapes can mix, including nested Arrays and class unions;
-    an unknown prefix, spread element graph, or suffix leaves it unresolved.
-    Array `reverse`, `uniq`, `compact`, `take`, `drop`, `sort`, `sort_by`,
-    `select`, and `reject` also preserve these
-    inferred element graphs through direct chains, locals, and unannotated
-    wrappers, including nested Arrays and class unions. The copied result has
-    its own outer collection identity: replacing an element in the source does
-    not discard the copy's graph, while tracked writes or pushes to the copy
-    invalidate its graph and those of its aliases. These facts remain editor-only;
-    unknown source elements stay unresolved. A filter or sort callback cannot
-    change the element graph, so `select`, `reject`, and `sort_by` keep it,
-    including when written with a `do` block. `map` and `flat_map` over an Array
-    with a known element graph take their result elements from the `do` block's
-    own inferred result (`pets.map() do |pet| build_pet() end`); a block whose
-    result is unknown, declared, or varies by early `return`/`next` leaves the
-    result unresolved. A bare unannotated function name works the same way
-    (`pets.map(make_pet)`) through its inferred result. A block on a native collection method
-    (`each`, `map`, `select`, ...) over an Array or Hash whose element graph is
-    editor-only types its parameters from that graph, as tooling facts only:
-    `pets.each() do |pet| pet.bark() end` completes, and `map() do |pet| pet end`
-    keeps the graph. The checked block-parameter facts are used instead whenever
-    the receiver has any.
-    A union receiver may supply the array-valued method even when its candidates
-    return different element graphs. For example, if imported factories return
-    `Array[Pet]` and `Array[Leaf]`, `factory.pets()[0].` offers methods from both
-    `Pet` and `Leaf`. Nested indexing and the native Array transforms above keep
-    each candidate's graph, and generic methods substitute their own bindings
-    before combining the element classes. Every candidate must support the full
-    indexing chain: a missing method, unknown result, nullable result, or
-    incompatible nesting leaves it unresolved.
-    Call results can be receivers recursively:
-    `Branch.new().leaf().ping()`, a top-level `make_branch().leaf()`, and a
-    singleton factory such as `Factory.build().leaf()` resolve through each
-    link's return type, preferring an explicit class or class-union
-    annotation (`DiamondFunction.return_type_set`) and falling back to a
-    same-shaped *inferred* one (`DiamondFunction.inferred_return_type_set`)
-    when the function has no annotation at all but its own body is simple
-    enough to have a known type at compile time (a single-expression
-    `def make_branch() = Branch.new()`, say) -- the identical inference
-    `compile_block` already does for an unannotated block's own return
-    type, just also applied to `compile_definition`. This inferred field
-    exists purely for this resolution; unlike the explicit one, it plays
-    no part in real compile-time semantics (structural interface
-    conformance, generic instantiation) precisely so this stays a pure
-    tooling improvement with zero behavior-changing risk. `Class.new()` is
-    the one intrinsic return rule. Every arm of a union receiver must
-    define a link with a usable (explicit or inferred) class return, so
-    one uncertain arm makes the rest of the chain unresolved. A body whose
-    control flow branches into more than one class with no shared
-    annotation (an `if`/`case`) resolves as a union either way it's
-    expressed: a bare trailing `if`/`case` expression gets it from the
-    exact same per-branch merge (`merge_flow_types`) an assigned-to-a-
-    local `if`/ternary already synthesizes, since that merge writes
-    straight onto the expression's own destination register regardless of
-    what uses it afterward; a function using explicit `return` statements
-    across separate branches instead -- `body_result` alone can never see
-    those -- gets it from `compile_return`'s own accumulated union of
-    every `return value` it saw, merged in alongside the trailing-
-    expression case rather than replacing it. An inferred result also
-    survives a simple local assignment (`pet = build_pet(); pet.bark()`),
-    including for unannotated singleton and instance methods and when the
-    factory comes from `require`; this uses
-    a separate tooling-only scope fact and never enters the compiler facts
-    used for type checks or opcode selection. `if`/`unless`, `case`, and loop
-    joins preserve that fact only when every runtime path carries the same
-    fact (including structurally equivalent graphs independently inferred in
-    separate branches, and the zero-iteration and `break` exits of a loop);
-    conflicting paths clear it rather than retaining the last branch compiled.
-    An inferred union receiver can likewise publish an assigned method result
-    when every class arm defines the method with a usable declared or inferred
-    return; one missing or unknown arm makes the result unresolved.
-    Generic functions, instance methods, and singleton methods apply the same
-    tooling-only inference after substituting explicit or argument-inferred
-    type-variable bindings; if any binding remains unresolved, no receiver
-    fact is published. A directly chained generic function or method call also
-    resolves when its explicit bindings are class unions, optionally nested in
-    `Array`, or when each binding can be inferred from a parameter that is
-    exactly that type variable and a class-union receiver argument. Other
-    source-level type arguments and more complex inference shapes remain
-    deliberately unresolved.
-    An unannotated generated `attr_reader` also publishes a tooling-only class
-    return when every discovered write to its field has the same concrete class.
-    This works through `require`, chained calls, and assignment to a local. Unknown
-    or conflicting writes (including generated writers and later class reopenings)
-    suppress it. Inherited readers resolve against the call's receiver class,
-    including different sibling subclasses that initialize an otherwise unwritten
-    field. Every ancestor's final writes are checked, including late reopenings;
-    conflicting parent/child initializer writes remain unresolved even if the child
-    overrides `initialize`. Unions require a known result for every receiver arm.
-    Explicit reader annotations still take precedence; inferred reader results do
-    not add runtime checks or satisfy typed structural interfaces.
-    Unannotated factories and wrappers preserve those advisory call-result types
-    through their trailing expressions and explicit `return` statements, including
-    nested wrapper calls and imports. Every reachable return path must be known;
-    an unknown early return or trailing value suppresses inference. Declared return
-    annotations still win, and returns from nested definitions or blocks do not
-    leak into the enclosing function's facts. Nonlocal block returns remain
-    conservatively unresolved. These facts do not become runtime return contracts.
-    Completion, hover, definition, and references refine inferred forward-call
-    returns using completed compiler snapshots, so short factory/wrapper chains
-    can resolve even when their callees are declared later. Refinement stops when
-    return facts stabilize and is limited to eight additional passes. Unknown
-    return paths and unsupported recursive graphs remain unresolved; very long
-    chains may exceed the refinement budget. Runtime compilation, diagnostics,
-    and symbol indexing retain the ordinary two-pass compile.
-    Completion, hover, and definition share one cached analysis of the most
-    recently requested source bundle. Each request reloads imports and open
-    document overrides before comparing the complete source, so root edits,
-    unsaved import edits, and disk changes invalidate the cache. Requests keep
-    their own source maps. A failed compile never returns a stale cached result.
-    Capturing/boxing a local preserves the separate tooling fact through the
-    capture cell, including when the loaded value is assigned to another local.
-    Module-qualified class names work as receivers (`Shapes::Table.new().describe()`,
-    `Outer::Inner::Deep.new().dive()`), including explicit generic construction such
-    as `Records::Box[Models::Pet].new(...).value().`. Qualified names also work in
-    nested class/Array arguments and explicit function or method type arguments.
-    Inherited readers and indexed returns retain those bindings across imports;
-    whitespace around `::` is accepted, and names are matched by their full path.
-    Unsaved dependency edits refresh member lists and definition locations.
-    A module's singleton method
-    (`Shapes.build().describe()`, `def self.build` or `module_function`) publishes its
-    result class like a top-level function. A call on a module with no resolvable
-    return stays unresolved. Any other receiver this
-    can't resolve falls back to the ordinary "not found" result instead of
-    a guess. All three
-    require the *document* to currently compile cleanly — otherwise they return `null`/empty
-    rather than a stale result; the document's own diagnostics already
-    say why.
-- `textDocument/completion` (`lsp/completion.c`) suggests every
-  top-level function, class, module, and interface in the whole compiled program (not just this
-  document's own — `lib/core.d6`'s prelude and anything pulled in via
-  `require` are all valid to type) plus every local variable/parameter
-  actually *in scope at the cursor* — real lexical scoping, backed by a
-  genuine (if narrow) per-function symbol table the compiler now
-  builds as a side effect of compiling: `DiamondFunction.scope_locals`
-  (`src/vm.h`) records every local's own name and the exact byte range
-  (in the compiled buffer) it's valid for, taken directly from the
-  compiler's own `Local` bookkeeping at the two points a scope actually
-  closes (a function body finishing in `compile_definition`, a `rescue`
-  clause finishing in `compile_begin` — d6's `if`/`while`/`unless`/
-  `until` deliberately *don't* open their own scope, matching Ruby, so
-  those needed no extra handling). Mapping the cursor's own line/column
-  into that same compiled-buffer coordinate system needed a new inverse
-  of `diamond_resolve_diagnostic_location`: `diamond_resolve_source_
-  position` (`src/compiler.h`) walks the same segment table the other
-  direction. A name's valid range is checked directly against the
-  cursor's own offset — no lexical-nesting bookkeeping needed for a
-  nested `def` to see its enclosing function's own locals (real closure
-  capture visibility), since the outer function's own recorded range
-  already spans everything nested inside it, nested `def`s included.
-  Doesn't filter by whatever's already typed (every mainstream client
-  already does that client-side against the full list this returns) or
-  suggest language keywords; requires a clean compile, same rule as
-  hover/definition/documentSymbol. When the cursor sits right after
-  `receiver.` (method name partially typed or not yet typed at all),
-  also appends the receiver's own class's methods and its superclass
-  chain's, via the same `lsp/receiver.c` resolution hover/definition
-  use — not deduplicated against each other or the rest of the list, same
-  as nothing else here dedupes either.
-  When that receiver is a built-in value instead — a String, Integer or Float
-  literal, or a local or parameter whose known type is `String`, `Array`,
-  `Hash`, `Int` or `Float` — it appends that type's methods: the VM's native
-  names (`diamond_native_member_names`, `src/vm.c`) plus the prelude extension
-  functions the VM dispatches by name (`array_x`, `hash_x`, `string_x`,
-  `integer_x`/`float_x`/`numeric_x`, `enumerable_x`, each also under a
-  `diamond_` prefix), deduplicated, with `?` added to Bool-returning ones.
-  The receiver may also be an Array or Hash literal, or a call whose result type
-  is known: a native method with one fixed result type (`name.strip().`,
-  `value.to_s().`, `text.split(" ").`), a prelude extension function or top-level
-  function with a declared return type, applied to any receiver of those forms.
-  Element types (`items[0].`) and methods whose result varies are not resolved.
-  `tests/lsp_test.sh` calls every offered name on a real value, so a name the VM
-  does not implement fails CI.
-- `workspace/symbol` (`lsp/workspace_symbol.c`) recursively walks the
-  workspace root given via `initialize` (skipping dotfiles/dotdirs —
-  `.git` and friends), compiles every `*.d6` file it finds the same way
-  an open document is (an open file's own live, possibly-unsaved buffer
-  is preferred over disk, same as everywhere else `require` resolves),
-  and returns every top-level function, class, module, and interface actually declared *in that
-  file itself* whose name contains the query as a case-insensitive
-  substring. No caching across separate requests — real editors only
-  send this on an explicit "go to symbol in workspace" action, not on
-  every keystroke, so re-walking and re-compiling the whole workspace
-  each time is an accepted v1 tradeoff, not an oversight. One file that
-  fails to compile doesn't hide every other file's symbols — it's
-  silently skipped.
-- `textDocument/references` (`lsp/references.c`) finds every workspace
-  occurrence of the top-level function, class, module, or interface name
-  under the cursor — the same globally-unambiguous declaration kinds
-  hover/definition/documentSymbol already single out — by walking the
-  workspace the same way `workspace/symbol` does and tokenizing each
-  compiled file's own buffer for the name in a resolvable position: a
-  call/access site (immediately followed by `(` or `.`), a type position
-  (immediately preceded by `:`, `|`, or `<`), or a class/module/interface
-  declaration header (immediately preceded by `class`/`module`/
-  `interface`). A candidate is dropped if a lexical local of the same
-  name is in scope there (`receiver_name_is_local`, `lsp/receiver.h`),
-  ruling out a keyword-argument label, a hash key, or a shadowing local —
-  the same conservative bias every other receiver-aware feature here
-  already has. Explicit receiver calls and method or nested-function
-  declarations are excluded from the global scan. Selecting one of those
-  occurrences, or a shadowing local/parameter, returns no global references
-  or rename edits even when a reachable global shares the name.
-  This is deliberately name-based, not a full alias-aware
-  resolver: a bare-name reference with none of those three adjacent
-  shapes (a class passed as a first-class value, say) isn't found — a
-  known, deliberate under-approximation, not a bug (see `lsp/
-  references.h`). Results across files are deduplicated by resolved
-  uri/line/column, since a shared `require`d file's own content is
-  rediscovered once per requiring file scanned. Returns `null` when the
-  cursor isn't on such a name or the origin document doesn't currently
-  compile cleanly, matching hover/definition/completion's own rule.
-- `textDocument/rename` (`lsp/references.c`, sharing its scan with
-  `textDocument/references` directly — same file, same underlying
-  helper, differing only in how the results get built into JSON) runs
-  the exact same workspace scan described above, then returns a
-  `WorkspaceEdit` (`{"changes": {uri: TextEdit[], ...}}`) replacing
-  every occurrence found with `newName` instead of a `Location[]`
-  pointing at them. `newName` additionally has to lex as exactly one
-  identifier token consuming the whole string — a keyword, an empty
-  string, a qualified `A::B` name, or anything with embedded
-  whitespace is rejected outright (`null`), since accepting one would
-  hand back an edit guaranteed not to recompile. No collision detection
-  against an existing same-named symbol at the rename's own target
-  scope — same deliberately name-based, conservative-scope cut
-  `textDocument/references` itself already makes, not a gap specific
-  to rename. d6 enforces no class-vs-function naming-case
-  convention at the language level, so neither does this: renaming a
-  class to a lowercase name is accepted the same way declaring one
-  with a lowercase name already is. No `textDocument/prepareRename` --
-  a client without it just lets the user type a name unconditionally
-  and calls `rename` anyway, which still correctly returns `null` when
-  the position isn't renameable.
-- `textDocument/formatting` (`lsp/formatting.c`) normalizes every
-  physical line's own leading indentation to `depth * 2` spaces,
-  trims trailing whitespace, adds the spacing around commas and
-  operators described below, and collapses blank-line runs --
-  deliberately not a full AST-based
-  pretty-printer: the native compiler retains no AST at all (`docs/
-  roadmap.md`'s "Compiler representation"), so a real structural
-  formatter would need a whole new tree-building parser kept in sync
-  with the real grammar, a materially bigger undertaking than tracking
-  nesting from the same token stream every other handler here already
-  uses. `depth` counts open `def`/`class`/`module`/`interface`/
-  `struct`/`begin`/`case`/`loop`/`do` blocks, block-form
-  `if`/`unless`/`while`/`until` (never a postfix modifier --
-  determined by whether the keyword is the first token on its own
-  line or immediately preceded by something other than a value-end
-  token, e.g. an assignment, an open bracket, or a comma; a value-end
-  token directly before it means postfix instead, `return 1 if n <=
-  1`), and open brackets. `else`/`elsif`/`when`/`rescue`/`ensure` and
-  a line's own leading closers dedent that one line without changing
-  the running depth used for subsequent lines. Three shapes get their
-  own handling: an endless `def name(...) -> Type = expr` (or
-  `closure`, which shares `def`'s exact grammar) needs no `end` at
-  all; `loop`/`while`/`until`'s own optional trailing `do` is absorbed
-  syntax for the same one level, not a second nested block
-  (`src/compiler_flow.c`'s `consume_loop_start`); and a `def` signature
-  with no body at all is legal exactly inside an `interface`'s own
-  body. `value.class()` is the one keyword the compiler itself accepts
-  as a method name right after a dot (`src/compiler_names.c`'s own
-  `parse_invoke`), so it's excluded from opening a level there too.
-  Between two tokens on the same line, a comma takes no space before it
-  and one after it (unless a closing bracket follows), and an assignment,
-  compound-assignment, comparison (`==`, `!=`, `<=`, `>=`, `<=>`) or
-  logical (`&&`, `||`) operator gets a space on each side where it has
-  none: `x=1` becomes `x = 1`, `f(a,b)` becomes `f(a, b)`. Existing runs
-  of spaces are never collapsed, so aligned columns stay aligned; arithmetic
-  operators, block bars, unions and ranges are left alone because the same
-  token means a unary or non-spacing form elsewhere. Operators used as
-  method names (`def ==(other)`, `a.==(b)`) and the `=` of a setter header
-  (`def value=(v)`, `def []=(k, v)`) are recognized and untouched. Only
-  the whitespace between two tokens is ever edited, so no string, comment or
-  identifier changes. A run of two or more blank lines outside a string
-  literal collapses to one. `textDocument/rangeFormatting` returns the same
-  edits restricted to those starting on the requested lines; the nesting
-  depth still comes from the whole document, so a range that starts inside
-  a block indents correctly. A range ending at column 0 of a line does not
-  include that line.
-  `tests/formatting_test.c` checks the rules and, over every `.d6` file in the
-  tests, examples, packages and `lib` (2,500+ files), that the token stream
-  is unchanged apart from NEWLINE counts and that a second pass proposes
-  nothing. Lines that start (or whose newline falls) inside a
-  multi-line string literal are string content and are never re-indented
-  or trimmed. Returns `json_null()` rather than a guess
-  when the source contains a lexer error or the tracked depth doesn't
-  balance to exactly zero by EOF -- a real grammar shape this pass
-  doesn't model should mean no edits, not a corrupted one. No
-  on-type formatting, and no reflowing a long line or reordering
-  anything -- see `lsp/formatting.h`'s own doc comment for the full
-  contract.
-- `shutdown` / `exit` — the ordinary LSP lifecycle; `exit`'s process exit
-  code is 0 if `shutdown` was requested first, 1 otherwise, per spec.
-- Any other request gets a JSON-RPC `MethodNotFound` (-32601) error;
-  any other notification is silently ignored.
+### Initialization
+
+`initialize` — advertises `textDocumentSync: Full` (1),
+`hoverProvider: true`, `definitionProvider: true`,
+`documentSymbolProvider: true`, `completionProvider: {}` (no
+`triggerCharacters` — see completion below for why none are needed),
+`workspaceSymbolProvider: true`, `referencesProvider: true`,
+`renameProvider: true`, `documentFormattingProvider: true`, and
+`documentRangeFormattingProvider: true`. Also
+reads `workspaceFolders[0]`/
+`rootUri` from the request's own params (the one place this server
+reads anything from `initialize`'s params at all) to know what
+directory `workspace/symbol` should search.
+
+### Diagnostics
+
+`textDocument/didOpen` / `didChange` / `didClose` — each recompiles the
+document's current full text (full sync only; there's no incremental
+edit application) and publishes a `textDocument/publishDiagnostics`
+notification.
+
+d6's compiler stops at its first error, so there is
+never more than one diagnostic per publish — an empty array means the
+document currently compiles cleanly.
+
+If the error is inside a `require`d file rather than the open document itself, a
+*second* `publishDiagnostics` notification also goes out, against
+that file's own uri (resolved the same
+`diamond_resolve_diagnostic_location` way go-to-definition resolves a
+cross-file `Location` — see below) — this document's own publish
+still correctly reports itself clean, since its own text has no
+error. Only ever triggered by *this* document's own didOpen/didChange,
+not by editing the dependency directly; see below.
+
+### Hover, definition, and document symbols
+
+`textDocument/hover` (`lsp/hover.c`), `textDocument/definition`
+(`lsp/definition.c`), and `textDocument/documentSymbol`
+(`lsp/document_symbol.c`) all resolve the same declaration kinds,
+deliberately not a real general-purpose symbol table: a top-level
+function name (`def foo`, unambiguous since a bare call always
+resolves to exactly one top-level function by that name at compile
+time — no overloading, no scoping to worry about), a class name
+(always names exactly one class, single inheritance), a module name,
+or an interface name. The compiler records each one's declaration-site position (1-based line/column
+of its own name token, plus the matching byte offset in the compiled
+buffer — `declaration_line`/`declaration_column`/`declaration_start`
+on `DiamondFunction`/`DiamondClass`/`DiamondModule`/`DiamondInterface`,
+`src/vm.h`) purely for these three
+handlers to read; nothing else in the VM uses them.
+
+- Hover shows the reconstructed signature (parameter types, return
+  type, which parameters are optional), `class Name`/`class Name <
+  Superclass`, `module Name`, or `interface Name`, reusing
+  `disassemble.c`'s own type-set formatting
+  (`diamond_print_type_set`).
+  Hovering a function or method's declaration name selects the signature at
+  that exact source position, including instance, singleton, module, nested,
+  setter, and reopened-class definitions. Names shared by other classes or
+  top-level functions do not override the declaration under the cursor.
+  Go-to-definition uses the same position matching at function and method
+  declarations, returning that declaration's name range in its own document.
+  Setter ranges include the trailing `=`, and imported declarations use the
+  current open buffer's source map.
+  At explicit receiver calls such as `pet.shared()`, hover and definition
+  resolve the method before any same-named top-level function or local.
+  Unknown receivers and missing methods return no result rather than the
+  unrelated global function. Bare function calls keep top-level lookup.
+  Lexical locals with compiler-recorded structural facts are also hoverable;
+  their position-sensitive type set is rendered from the owning function's
+  table, including Callable, collection, primitive, and union graphs.
+- Go-to-definition returns a `Location`. A match can legitimately live
+  in a *different* file (something pulled in via `require`) — resolved
+  to the right file and line through `diamond_resolve_diagnostic_
+  location`'s segment table (`src/compiler.h`), the same machinery a
+  compile error's own position already goes through, since a
+  declaration's raw in-buffer line is only ever correct for the first
+  thing after the most recent `#line 1` reset (`diamond_load_program`
+  inserts one before *every* contiguous chunk it copies into the
+  bundle, not just before required-file content) and needs the same
+  segment-relative remap anywhere else.
+- Document symbols lists every top-level function, class, module, and
+  interface declared *in
+  that document itself* — not lib/core.d6's prelude, and not anything
+  pulled in through `require` (each of those has its own outline, a
+  didOpen away). `range`/`selectionRange` are identical for each
+  entry (just the name token — nothing tracks a declaration's full
+  extent).
+- Class member completion includes the intrinsic `new` constructor, except
+  for sealed classes. Go-to-definition on `ClassName.new(...)` selects the
+  instance `initialize` method, including an inherited or imported one.
+  Constructors without a source initializer (including generated struct
+  constructors) select the class declaration. Nested class targets select
+  the identifier written at that declaration, not the qualified lookup name.
+
+### Receiver resolution
+
+All three also fall back to `lsp/receiver.c` for a method name
+reached through `receiver.method(...)`, for the receiver forms
+resolvable without real type inference: a literal class name
+(`Author.find`), `self` inside an instance method or a class-owned
+`def self.x` (wall 2's `DIAMOND_VALUE_CLASS`, `docs/internal/design.md`), a
+local variable known at the cursor position to hold
+`ClassName.new(...)` — `DiamondScopeLocal.known_type` (`src/vm.h`),
+the compiler's own `known_types[reg]`, supplemented by ordered
+`DiamondScopeTypeFact` assignment snapshots so reassignment changes
+resolution only after that assignment — or a parameter (or a
+local initialized from one) given an explicit union annotation
+(`pet: Dog | Cat`) or a representable control-flow join such as
+`pet = flag ? Dog.new() : Cat.new()` — `DiamondScopeLocal.known_type_set`
+(`src/vm.h`),
+the same snapshot idea applied to the compiler's own
+`known_type_sets[reg]`, decoded against the *owning function's own*
+`type_sets[]` table (a set index means nothing against any other
+function's).
+
+`self`'s own enclosing class comes from
+`DiamondFunction.owner_class` via `DiamondFunction.body_end`
+(`src/vm.h`, populated at every function-closing site alongside
+`declaration_start` so even a zero-parameter, zero-local method — a
+very common `self.foo()` one-liner shape — still has a real body
+extent to locate `self` within).
+
+`receiver_lookup_method` walks
+each candidate class and its superclass chain by name, mirroring
+`lookup_method`/`lookup_singleton_method` (`src/vm.c`) at the source
+level.
+
+#### Union and field receivers
+
+A union receiver resolves against *every* class-kind member
+that defines the method: hover shows one signature when every match
+agrees on it textually, or `ClassName#signature` per match when they
+differ; go-to-definition returns a `Location[]` when there's more
+than one match (single `Location` otherwise, unchanged); completion
+lists every candidate's own methods, undeduplicated.
+
+Unions can come from explicit source annotations or from compiler-synthesized `if`/`unless` and
+ternary joins when every path has a representable known type. Synthesized
+sets remain advisory: they can prove a compatible annotation and eliminate
+its runtime check, but an incompatible set retains the historical runtime
+check rather than turning formerly dynamic code into a compile error.
+
+A class instance-variable receiver also resolves when every assignment to that field agrees on one
+concrete class; conflicting or unknown assignments deliberately erase the
+candidate rather than guessing. Grouping parentheses around any otherwise
+resolvable receiver are ignored. Repeated indexing from a local explicitly
+typed as a nested `Array` resolves to its eventual class element type;
+the same applies to a non-generic top-level, singleton, or single-class
+instance-method call with a structurally known array return.
+
+#### Generic receivers
+
+Generic calls also work when their class bindings can be inferred by the same exact-type-
+variable rule used for direct chains, or supplied explicitly as class
+unions or nested `Array` shapes ending in a class union. Inference also descends
+through matching parameterized shapes such as `Array[T]` versus a local
+`Array[Pet | Leaf]`, or `Hash[String, T]` versus
+`Hash[String, Pet | Leaf]`. Constructor witnesses for a shared variable
+can join representable class unions, including repeated parent parameters
+such as `Point[T] < Pair[T, T]`. Conflicting invariant arguments and
+unrepresentable editor shapes remain unresolved. Own constructors also
+retain child-only parameters, including with fixed parents. An inherited
+constructor missing a child binding stays unresolved unless explicit type
+arguments supply it.
+
+#### Nullable values and guards
+
+Direct `Hash[K, V]`
+indexing with `.` remains unresolved because its real result is `V | Nil`;
+with safe navigation (`pets["rex"]&.`) the final lookup resolves to `V`,
+since a missing key never reaches the method (see "Safe navigation" below). Saving a
+declared or structurally inferred Hash lookup in a local preserves that
+nullable type.
+
+Nil comparisons now expose the compiler's branch-local proof to the editor:
+after `pet = pets["name"]`, `if pet != nil` or `unless pet == nil` enables
+completion, hover, and definition for `pet` inside the non-nil branch.
+The non-nil `else` of `if pet == nil` and continuation after
+`return if pet == nil` work too. Compound guards follow the compiler's
+existing conjunction/disjunction rules. Nil and uncertain branches, joins,
+and reassignment restore their own facts; a nullable or mixed primitive/class
+local does not silently drop the unresolved alternatives.
+
+Truthiness guards
+(`if pet`, `unless pet`, negation, and `return unless pet`) also publish
+branch facts. Nil is removed from the truthy view; Bool stays
+in both views because it includes true and false. The falsey view retains
+only Nil and Bool, so a mixed `Pet | Bool | Nil` does not resolve as Pet
+inside `if pet`. On a declared type these are checked compiler facts, as
+with a `!= nil` guard (see docs/types-and-errors.md); on an inferred one
+they stay editor-only.
+
+An imported factory such as `def make_pets() = {"name": Pet.new()}` needs no return annotation:
+`pet = make_pets()["name"]` retains `Pet | Nil` for the editor, and the
+explicit nil guard resolves its non-nil receiver. Hash literals can also
+combine known values and inferred factory values. Unknown key or value
+graphs stay unresolved. These inferred facts never become checked compiler
+types or remove runtime return checks. Unchanged non-nil/nil branch views
+rejoin the original nullable editor graph, so repeated guards still work;
+reassignment, unknown paths, and tracked alias writes discard stale graphs.
+
+Short-circuit expressions also publish facts while compiling
+the right operand: `pet && pet.bark()` uses the truthy view, and
+`pet == nil || pet.bark()` uses the non-nil view. Nested expressions follow
+the same rules. The surrounding facts are restored afterward; tracked
+writes discard invalidated graphs instead of restoring stale proofs.
+As with branch guards, a declared type gets checked facts for the right
+operand and an inferred one only editor facts.
+
+Indexing an inferred Array call result, directly or through a local, also
+preserves its element graph when assigned to another local, including
+repeated indexing through nested Arrays. These facts stay editor-only;
+unknown element graphs and directly chained nullable Hash indexing remain
+unresolved.
+
+#### Safe navigation
+
+A receiver to the left of `&.` resolves through its non-nil
+view for completion, hover, and definition alike. A `T | Nil` local or
+parameter, a call declared `-> T | Nil`, and a final Hash lookup all
+resolve as T. Only that outermost receiver drops Nil: `a&.b()` is itself
+nullable, so `a&.b().` stays unresolved while `a&.b()&.` resolves, and an
+inner plain `.` link stays as strict as before. The formatter indents a
+leading `&.` line as a chain link, like a leading `.`.
+
+#### Collection results
+
+Array literals also carry inferred factory element graphs, including nested
+literals and mixtures of known and inferred class results. Locals and
+unannotated returns retain the richer editor graph alongside the compiler's
+broader checked shape. An unknown element suppresses the graph; tracked
+indexed writes and pushes discard it for the mutated local and its aliases.
+
+A literal spread such as `[first, *make_pets(), last]` joins the prefix,
+spread element, and suffix graphs by the same editor-only rules. Inferred
+and checked Array shapes can mix, including nested Arrays and class unions;
+an unknown prefix, spread element graph, or suffix leaves it unresolved.
+
+Array `reverse`, `uniq`, `compact`, `take`, `drop`, `sort`, `sort_by`,
+`select`, and `reject` also preserve these
+inferred element graphs through direct chains, locals, and unannotated
+wrappers, including nested Arrays and class unions. The copied result has
+its own outer collection identity: replacing an element in the source does
+not discard the copy's graph, while tracked writes or pushes to the copy
+invalidate its graph and those of its aliases. These facts remain editor-only;
+unknown source elements stay unresolved. A filter or sort callback cannot
+change the element graph, so `select`, `reject`, and `sort_by` keep it,
+including when written with a `do` block. `map` and `flat_map` over an Array
+with a known element graph take their result elements from the `do` block's
+own inferred result (`pets.map() do |pet| build_pet() end`); a block whose
+result is unknown, declared, or varies by early `return`/`next` leaves the
+result unresolved. A bare unannotated function name works the same way
+(`pets.map(make_pet)`) through its inferred result. A block on a native collection method
+(`each`, `map`, `select`, ...) over an Array or Hash whose element graph is
+editor-only types its parameters from that graph, as tooling facts only:
+`pets.each() do |pet| pet.bark() end` completes, and `map() do |pet| pet end`
+keeps the graph. The checked block-parameter facts are used instead whenever
+the receiver has any.
+
+A union receiver may supply the array-valued method even when its candidates
+return different element graphs. For example, if imported factories return
+`Array[Pet]` and `Array[Leaf]`, `factory.pets()[0].` offers methods from both
+`Pet` and `Leaf`. Nested indexing and the native Array transforms above keep
+each candidate's graph, and generic methods substitute their own bindings
+before combining the element classes. Every candidate must support the full
+indexing chain: a missing method, unknown result, nullable result, or
+incompatible nesting leaves it unresolved.
+
+#### Call results and factories
+
+Call results can be receivers recursively:
+`Branch.new().leaf().ping()`, a top-level `make_branch().leaf()`, and a
+singleton factory such as `Factory.build().leaf()` resolve through each
+link's return type, preferring an explicit class or class-union
+annotation (`DiamondFunction.return_type_set`) and falling back to a
+same-shaped *inferred* one (`DiamondFunction.inferred_return_type_set`)
+when the function has no annotation at all but its own body is simple
+enough to have a known type at compile time (a single-expression
+`def make_branch() = Branch.new()`, say) -- the identical inference
+`compile_block` already does for an unannotated block's own return
+type, just also applied to `compile_definition`. This inferred field
+exists purely for this resolution; unlike the explicit one, it plays
+no part in real compile-time semantics (structural interface
+conformance, generic instantiation) precisely so this stays a pure
+tooling improvement with zero behavior-changing risk. `Class.new()` is
+the one intrinsic return rule. Every arm of a union receiver must
+define a link with a usable (explicit or inferred) class return, so
+one uncertain arm makes the rest of the chain unresolved.
+
+A body whose
+control flow branches into more than one class with no shared
+annotation (an `if`/`case`) resolves as a union either way it's
+expressed: a bare trailing `if`/`case` expression gets it from the
+exact same per-branch merge (`merge_flow_types`) an assigned-to-a-
+local `if`/ternary already synthesizes, since that merge writes
+straight onto the expression's own destination register regardless of
+what uses it afterward; a function using explicit `return` statements
+across separate branches instead -- `body_result` alone can never see
+those -- gets it from `compile_return`'s own accumulated union of
+every `return value` it saw, merged in alongside the trailing-
+expression case rather than replacing it.
+
+An inferred result also
+survives a simple local assignment (`pet = build_pet(); pet.bark()`),
+including for unannotated singleton and instance methods and when the
+factory comes from `require`; this uses
+a separate tooling-only scope fact and never enters the compiler facts
+used for type checks or opcode selection. `if`/`unless`, `case`, and loop
+joins preserve that fact only when every runtime path carries the same
+fact (including structurally equivalent graphs independently inferred in
+separate branches, and the zero-iteration and `break` exits of a loop);
+conflicting paths clear it rather than retaining the last branch compiled.
+An inferred union receiver can likewise publish an assigned method result
+when every class arm defines the method with a usable declared or inferred
+return; one missing or unknown arm makes the result unresolved.
+
+Generic functions, instance methods, and singleton methods apply the same
+tooling-only inference after substituting explicit or argument-inferred
+type-variable bindings; if any binding remains unresolved, no receiver
+fact is published. A directly chained generic function or method call also
+resolves when its explicit bindings are class unions, optionally nested in
+`Array`, or when each binding can be inferred from a parameter that is
+exactly that type variable and a class-union receiver argument. Other
+source-level type arguments and more complex inference shapes remain
+deliberately unresolved.
+
+An unannotated generated `attr_reader` also publishes a tooling-only class
+return when every discovered write to its field has the same concrete class.
+This works through `require`, chained calls, and assignment to a local. Unknown
+or conflicting writes (including generated writers and later class reopenings)
+suppress it. Inherited readers resolve against the call's receiver class,
+including different sibling subclasses that initialize an otherwise unwritten
+field. Every ancestor's final writes are checked, including late reopenings;
+conflicting parent/child initializer writes remain unresolved even if the child
+overrides `initialize`. Unions require a known result for every receiver arm.
+Explicit reader annotations still take precedence; inferred reader results do
+not add runtime checks or satisfy typed structural interfaces.
+
+Unannotated factories and wrappers preserve those advisory call-result types
+through their trailing expressions and explicit `return` statements, including
+nested wrapper calls and imports. Every reachable return path must be known;
+an unknown early return or trailing value suppresses inference. Declared return
+annotations still win, and returns from nested definitions or blocks do not
+leak into the enclosing function's facts. Nonlocal block returns remain
+conservatively unresolved. These facts do not become runtime return contracts.
+
+#### Analysis and refresh
+
+Completion, hover, definition, and references refine inferred forward-call
+returns using completed compiler snapshots, so short factory/wrapper chains
+can resolve even when their callees are declared later. Refinement stops when
+return facts stabilize and is limited to eight additional passes. Unknown
+return paths and unsupported recursive graphs remain unresolved; very long
+chains may exceed the refinement budget. Runtime compilation, diagnostics,
+and symbol indexing retain the ordinary two-pass compile.
+
+Completion, hover, and definition share one cached analysis of the most
+recently requested source bundle. Each request reloads imports and open
+document overrides before comparing the complete source, so root edits,
+unsaved import edits, and disk changes invalidate the cache. Requests keep
+their own source maps. A failed compile never returns a stale cached result.
+
+Capturing/boxing a local preserves the separate tooling fact through the
+capture cell, including when the loaded value is assigned to another local.
+
+Module-qualified class names work as receivers (`Shapes::Table.new().describe()`,
+`Outer::Inner::Deep.new().dive()`), including explicit generic construction such
+as `Records::Box[Models::Pet].new(...).value().`. Qualified names also work in
+nested class/Array arguments and explicit function or method type arguments.
+Inherited readers and indexed returns retain those bindings across imports;
+whitespace around `::` is accepted, and names are matched by their full path.
+Unsaved dependency edits refresh member lists and definition locations.
+A module's singleton method
+(`Shapes.build().describe()`, `def self.build` or `module_function`) publishes its
+result class like a top-level function. A call on a module with no resolvable
+return stays unresolved. Any other receiver this
+can't resolve falls back to the ordinary "not found" result instead of
+a guess. All three
+require the *document* to currently compile cleanly — otherwise they return `null`/empty
+rather than a stale result; the document's own diagnostics already
+say why.
+
+### Completion
+
+`textDocument/completion` (`lsp/completion.c`) suggests every
+top-level function, class, module, and interface in the whole compiled program (not just this
+document's own — `lib/core.d6`'s prelude and anything pulled in via
+`require` are all valid to type) plus every local variable/parameter
+actually *in scope at the cursor* — real lexical scoping, backed by a
+genuine (if narrow) per-function symbol table the compiler now
+builds as a side effect of compiling: `DiamondFunction.scope_locals`
+(`src/vm.h`) records every local's own name and the exact byte range
+(in the compiled buffer) it's valid for, taken directly from the
+compiler's own `Local` bookkeeping at the two points a scope actually
+closes (a function body finishing in `compile_definition`, a `rescue`
+clause finishing in `compile_begin` — d6's `if`/`while`/`unless`/
+`until` deliberately *don't* open their own scope, matching Ruby, so
+those needed no extra handling).
+
+Mapping the cursor's own line/column
+into that same compiled-buffer coordinate system needed a new inverse
+of `diamond_resolve_diagnostic_location`: `diamond_resolve_source_
+position` (`src/compiler.h`) walks the same segment table the other
+direction. A name's valid range is checked directly against the
+cursor's own offset — no lexical-nesting bookkeeping needed for a
+nested `def` to see its enclosing function's own locals (real closure
+capture visibility), since the outer function's own recorded range
+already spans everything nested inside it, nested `def`s included.
+
+Doesn't filter by whatever's already typed (every mainstream client
+already does that client-side against the full list this returns) or
+suggest language keywords; requires a clean compile, same rule as
+hover/definition/documentSymbol.
+
+When the cursor sits right after
+`receiver.` (method name partially typed or not yet typed at all),
+also appends the receiver's own class's methods and its superclass
+chain's, via the same `lsp/receiver.c` resolution hover/definition
+use — not deduplicated against each other or the rest of the list, same
+as nothing else here dedupes either.
+
+When that receiver is a built-in value instead — a String, Integer or Float
+literal, or a local or parameter whose known type is `String`, `Array`,
+`Hash`, `Int` or `Float` — it appends that type's methods: the VM's native
+names (`diamond_native_member_names`, `src/vm.c`) plus the prelude extension
+functions the VM dispatches by name (`array_x`, `hash_x`, `string_x`,
+`integer_x`/`float_x`/`numeric_x`, `enumerable_x`, each also under a
+`diamond_` prefix), deduplicated, with `?` added to Bool-returning ones.
+
+The receiver may also be an Array or Hash literal, or a call whose result type
+is known: a native method with one fixed result type (`name.strip().`,
+`value.to_s().`, `text.split(" ").`), a prelude extension function or top-level
+function with a declared return type, applied to any receiver of those forms.
+Element types (`items[0].`) and methods whose result varies are not resolved.
+`tests/lsp_test.sh` calls every offered name on a real value, so a name the VM
+does not implement fails CI.
+
+### Workspace symbols
+
+`workspace/symbol` (`lsp/workspace_symbol.c`) recursively walks the
+workspace root given via `initialize` (skipping dotfiles/dotdirs —
+`.git` and friends), compiles every `*.d6` file it finds the same way
+an open document is (an open file's own live, possibly-unsaved buffer
+is preferred over disk, same as everywhere else `require` resolves),
+and returns every top-level function, class, module, and interface actually declared *in that
+file itself* whose name contains the query as a case-insensitive
+substring. No caching across separate requests — real editors only
+send this on an explicit "go to symbol in workspace" action, not on
+every keystroke, so re-walking and re-compiling the whole workspace
+each time is an accepted v1 tradeoff, not an oversight. One file that
+fails to compile doesn't hide every other file's symbols — it's
+silently skipped.
+
+### References
+
+`textDocument/references` (`lsp/references.c`) finds every workspace
+occurrence of the top-level function, class, module, or interface name
+under the cursor — the same globally-unambiguous declaration kinds
+hover/definition/documentSymbol already single out — by walking the
+workspace the same way `workspace/symbol` does and tokenizing each
+compiled file's own buffer for the name in a resolvable position: a
+call/access site (immediately followed by `(` or `.`), a type position
+(immediately preceded by `:`, `|`, or `<`), or a class/module/interface
+declaration header (immediately preceded by `class`/`module`/
+`interface`). A candidate is dropped if a lexical local of the same
+name is in scope there (`receiver_name_is_local`, `lsp/receiver.h`),
+ruling out a keyword-argument label, a hash key, or a shadowing local —
+the same conservative bias every other receiver-aware feature here
+already has. Explicit receiver calls and method or nested-function
+declarations are excluded from the global scan. Selecting one of those
+occurrences, or a shadowing local/parameter, returns no global references
+or rename edits even when a reachable global shares the name.
+This is deliberately name-based, not a full alias-aware
+resolver: a bare-name reference with none of those three adjacent
+shapes (a class passed as a first-class value, say) isn't found — a
+known, deliberate under-approximation, not a bug (see `lsp/
+references.h`). Results across files are deduplicated by resolved
+uri/line/column, since a shared `require`d file's own content is
+rediscovered once per requiring file scanned. Returns `null` when the
+cursor isn't on such a name or the origin document doesn't currently
+compile cleanly, matching hover/definition/completion's own rule.
+
+### Rename
+
+`textDocument/rename` (`lsp/references.c`, sharing its scan with
+`textDocument/references` directly — same file, same underlying
+helper, differing only in how the results get built into JSON) runs
+the exact same workspace scan described above, then returns a
+`WorkspaceEdit` (`{"changes": {uri: TextEdit[], ...}}`) replacing
+every occurrence found with `newName` instead of a `Location[]`
+pointing at them. `newName` additionally has to lex as exactly one
+identifier token consuming the whole string — a keyword, an empty
+string, a qualified `A::B` name, or anything with embedded
+whitespace is rejected outright (`null`), since accepting one would
+hand back an edit guaranteed not to recompile. No collision detection
+against an existing same-named symbol at the rename's own target
+scope — same deliberately name-based, conservative-scope cut
+`textDocument/references` itself already makes, not a gap specific
+to rename. d6 enforces no class-vs-function naming-case
+convention at the language level, so neither does this: renaming a
+class to a lowercase name is accepted the same way declaring one
+with a lowercase name already is. No `textDocument/prepareRename` --
+a client without it just lets the user type a name unconditionally
+and calls `rename` anyway, which still correctly returns `null` when
+the position isn't renameable.
+
+### Formatting
+
+`textDocument/formatting` (`lsp/formatting.c`) normalizes every
+physical line's own leading indentation to `depth * 2` spaces,
+trims trailing whitespace, adds the spacing around commas and
+operators described below, and collapses blank-line runs --
+deliberately not a full AST-based
+pretty-printer: the native compiler retains no AST at all (`docs/
+roadmap.md`'s "Compiler representation"), so a real structural
+formatter would need a whole new tree-building parser kept in sync
+with the real grammar, a materially bigger undertaking than tracking
+nesting from the same token stream every other handler here already
+uses.
+
+`depth` counts open `def`/`class`/`module`/`interface`/
+`struct`/`begin`/`case`/`loop`/`do` blocks, block-form
+`if`/`unless`/`while`/`until` (never a postfix modifier --
+determined by whether the keyword is the first token on its own
+line or immediately preceded by something other than a value-end
+token, e.g. an assignment, an open bracket, or a comma; a value-end
+token directly before it means postfix instead, `return 1 if n <=
+1`), and open brackets. `else`/`elsif`/`when`/`rescue`/`ensure` and
+a line's own leading closers dedent that one line without changing
+the running depth used for subsequent lines. Three shapes get their
+own handling: an endless `def name(...) -> Type = expr` (or
+`closure`, which shares `def`'s exact grammar) needs no `end` at
+all; `loop`/`while`/`until`'s own optional trailing `do` is absorbed
+syntax for the same one level, not a second nested block
+(`src/compiler_flow.c`'s `consume_loop_start`); and a `def` signature
+with no body at all is legal exactly inside an `interface`'s own
+body.
+
+`value.class()` is the one keyword the compiler itself accepts
+as a method name right after a dot (`src/compiler_names.c`'s own
+`parse_invoke`), so it's excluded from opening a level there too.
+
+#### Token spacing
+
+Between two tokens on the same line, a comma takes no space before it
+and one after it (unless a closing bracket follows), and an assignment,
+compound-assignment, comparison (`==`, `!=`, `<=`, `>=`, `<=>`) or
+logical (`&&`, `||`) operator gets a space on each side where it has
+none: `x=1` becomes `x = 1`, `f(a,b)` becomes `f(a, b)`. Existing runs
+of spaces are never collapsed, so aligned columns stay aligned; arithmetic
+operators, block bars, unions and ranges are left alone because the same
+token means a unary or non-spacing form elsewhere. Operators used as
+method names (`def ==(other)`, `a.==(b)`) and the `=` of a setter header
+(`def value=(v)`, `def []=(k, v)`) are recognized and untouched. Only
+the whitespace between two tokens is ever edited, so no string, comment or
+identifier changes. A run of two or more blank lines outside a string
+literal collapses to one. `textDocument/rangeFormatting` returns the same
+edits restricted to those starting on the requested lines; the nesting
+depth still comes from the whole document, so a range that starts inside
+a block indents correctly. A range ending at column 0 of a line does not
+include that line.
+
+#### Formatting limits and tests
+
+`tests/formatting_test.c` checks the rules and, over every `.d6` file in the
+tests, examples, packages and `lib` (2,500+ files), that the token stream
+is unchanged apart from NEWLINE counts and that a second pass proposes
+nothing. Lines that start (or whose newline falls) inside a
+multi-line string literal are string content and are never re-indented
+or trimmed. Returns `json_null()` rather than a guess
+when the source contains a lexer error or the tracked depth doesn't
+balance to exactly zero by EOF -- a real grammar shape this pass
+doesn't model should mean no edits, not a corrupted one. No
+on-type formatting, and no reflowing a long line or reordering
+anything -- see `lsp/formatting.h`'s own doc comment for the full
+contract.
+
+### Shutdown
+
+`shutdown` / `exit` — the ordinary LSP lifecycle; `exit`'s process exit
+code is 0 if `shutdown` was requested first, 1 otherwise, per spec.
+
+Any other request gets a JSON-RPC `MethodNotFound` (-32601) error;
+any other notification is silently ignored.
 
 ## `.div` templates (diagnostics only)
 
@@ -525,14 +628,18 @@ does (a hand-ported C mirror, kept behaviorally in sync by hand — there's
 no shared implementation between the two, see that file's own header
 comment for the exact grammar and scope cuts), then compiles *that*
 through `diagnostics_compute`'s ordinary no-require-bundling path (a
-template never `require`s anything of its own). Any resulting diagnostic
+template never `require`s anything of its own).
+
+Any resulting diagnostic
 gets mapped back through a line-position table `div_translate` builds
 alongside the generated source (one entry per generated line, recording
 which `.div` source line/column it came from — `{0,0}` for a line with no
 single corresponding template position, e.g. the inlined escape-helper
 boilerplate, which falls back to anchoring at the template's own start)
 instead of through the segment-table machinery every other document's
-diagnostics use — there's no `require` bundle here to walk. A tag body
+diagnostics use — there's no `require` bundle here to walk.
+
+A tag body
 that itself spans multiple lines (a multi-line `<% %>`/`<%= %>`/`<%== %>`)
 still maps each of its own physical lines individually, since the
 generated code is a verbatim copy of the tag's own text.
