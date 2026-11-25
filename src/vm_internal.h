@@ -720,6 +720,7 @@ typedef struct DiamondFrame {
  * safely callable more than once (pthread_join itself is not). */
 typedef struct DiamondThread {
     pthread_t handle;
+    struct DiamondThread *deferred_next;
     /* True only once pthread_create actually succeeded for `handle` --
      * distinguishes "there's a real OS thread that must be pthread_join'd"
      * from the synchronous-stub path (Thread.new runs the callable inline,
@@ -822,6 +823,8 @@ typedef struct DiamondSupervisorChild {
      * after recording a crash, before the next attempt). alive?() is
      * exactly !done. */
     bool done;
+    /* The native entry point has also torn down its final attempt VM. */
+    bool finished;
     /* Guards against a double pthread_join on this child's own `handle`
      * (undefined behavior per POSIX) -- stop()/join()/free_supervisor_
      * reference are three independent call sites that each join every
@@ -1166,6 +1169,8 @@ DIAMOND_INTERNAL void *thread_entry_trampoline(void *argument);
 DIAMOND_INTERNAL DiamondThreadHandle *allocate_thread_handle(DiamondVm *vm,DiamondThread *thread);
 
 DIAMOND_INTERNAL void free_thread(DiamondThread *thread);
+DIAMOND_INTERNAL void defer_thread_reap(DiamondVm *vm,DiamondThread *thread);
+DIAMOND_INTERNAL void reap_finished_threads(DiamondVm *vm);
 
 DIAMOND_INTERNAL DiamondChannelHandle *allocate_channel_handle(DiamondVm *vm,DiamondChannel *channel);
 
