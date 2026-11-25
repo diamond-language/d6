@@ -881,6 +881,7 @@ typedef enum DiamondSupervisorStrategy {
  * it on every single iteration (mirrors DiamondThread's own atomic
  * `finished` -- a hot, lock-free poll is the whole point). */
 typedef struct DiamondSupervisor {
+    struct DiamondSupervisor *deferred_next;
     pthread_mutex_t lock;
     atomic_bool stop_requested;
     DiamondSupervisorChild children[DIAMOND_MAX_SUPERVISOR_CHILDREN];
@@ -1170,7 +1171,7 @@ DIAMOND_INTERNAL DiamondThreadHandle *allocate_thread_handle(DiamondVm *vm,Diamo
 
 DIAMOND_INTERNAL void free_thread(DiamondThread *thread);
 DIAMOND_INTERNAL void defer_thread_reap(DiamondVm *vm,DiamondThread *thread);
-DIAMOND_INTERNAL void reap_finished_threads(DiamondVm *vm);
+DIAMOND_INTERNAL void reap_finished_workers(DiamondVm *vm);
 
 DIAMOND_INTERNAL DiamondChannelHandle *allocate_channel_handle(DiamondVm *vm,DiamondChannel *channel);
 
@@ -1179,6 +1180,7 @@ DIAMOND_INTERNAL void free_channel_reference(DiamondChannel *channel);
 DIAMOND_INTERNAL DiamondSupervisorHandle *allocate_supervisor_handle(DiamondVm *vm,
         DiamondSupervisor *supervisor);
 
+DIAMOND_INTERNAL void defer_supervisor_reap(DiamondVm *vm,DiamondSupervisor *supervisor);
 DIAMOND_INTERNAL void free_supervisor_reference(DiamondSupervisor *supervisor);
 
 DIAMOND_INTERNAL DiamondFileHandle *allocate_file_handle(DiamondVm *vm,FILE *stream);

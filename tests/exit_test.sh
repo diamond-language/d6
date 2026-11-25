@@ -189,4 +189,41 @@ nil' 2>"$TMPDIR_EXIT/err")"
     count=$((count + 1))
 done
 
+# A dropped Supervisor stops restarting without joining its current
+# attempt in GC. Check direct collection and a deferred Supervisor in a
+# finished Thread's VM. Normal shutdown must drain the last attempt.
+for stress in DIAMOND_STRESS_GC DIAMOND_STRESS_MINOR_GC; do
+    out="$(env "$stress=1" timeout -k 2 10 "$diamond" -e '
+def worker(release)
+  release.receive()
+  puts("attempt finished")
+  raise "do not restart after collection"
+end
+def start_supervisor(release)
+  sup = Supervisor.new()
+  sup.add_child(worker, release)
+  nil
+end
+def start_nested(release)
+  start_supervisor(release)
+  junk = [0]
+  nil
+end
+def launch_nested(release)
+  Thread.new(start_nested, release).join()
+  nil
+end
+release = Channel.new(1)
+start_supervisor(release)
+junk = [1]
+release.send(true)
+launch_nested(release)
+junk = [2]
+release.send(true)
+nil' 2>"$TMPDIR_EXIT/err")"
+    [[ "$(sort <<<"$out")" == $'attempt finished\nattempt finished\nnil' ]]
+    [[ ! -s "$TMPDIR_EXIT/err" ]]
+    count=$((count + 1))
+done
+
 echo "$count exit tests passed"

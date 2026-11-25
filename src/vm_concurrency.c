@@ -1278,7 +1278,7 @@ static DiamondVmStatus supervisor_add_child_method(DiamondVm *vm,const DiamondCh
     }
     const size_t new_index=target_supervisor->child_count;
     pthread_mutex_unlock(&target_supervisor->lock);
-    reap_finished_threads(vm);
+    reap_finished_workers(vm);
     if(atomic_load(&diamond_active_thread_count)>=diamond_live_thread_limit()) {
         snprintf(vm->error,sizeof vm->error,
             "too many concurrently active threads");
