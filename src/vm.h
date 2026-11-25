@@ -1968,8 +1968,9 @@ struct DiamondVm {
      * lists, exactly as before this field split). */
     DiamondObject *young_objects;
     DiamondObject *old_objects;
-    /* Native threads whose handles were collected are still owned by this VM. */
+    /* Workers whose handles were collected are still owned by this VM. */
     DiamondThread *deferred_threads;
+    struct DiamondSupervisor *deferred_supervisors;
     /* Skip child heap scans when it has never owned a Thread or Supervisor. */
     bool has_worker_handles;
     size_t bytes_allocated;

@@ -474,6 +474,11 @@ void diamond_vm_free(DiamondVm *vm) {
         if(vm_interrupt_requested(vm))thread_interrupt(thread);
         free_thread(thread);
     }
+    while(vm->deferred_supervisors!=nullptr) {
+        DiamondSupervisor *supervisor=vm->deferred_supervisors;
+        vm->deferred_supervisors=supervisor->deferred_next;
+        free_supervisor_reference(supervisor);
+    }
     for(size_t pool=0;pool<=DIAMOND_INSTANCE_POOL_FIELDS;pool++) {
         DiamondObject *object=vm->instance_pool[pool];
         while(object!=nullptr) {DiamondObject *next=object->next;free(object);object=next;}
@@ -1110,6 +1115,9 @@ static bool worker_handles_reap_ready(const DiamondObject *object) {
 static bool thread_reap_ready(const DiamondThread *thread) {
     if(!atomic_load(&thread->finished))return false;
     const DiamondVm *child=thread->child_vm;
+    for(DiamondSupervisor *pending=child->deferred_supervisors;pending!=nullptr;
+        pending=pending->deferred_next)
+        if(!supervisor_reap_ready(pending))return false;
     for(const DiamondThread *pending=child->deferred_threads;pending!=nullptr;
         pending=pending->deferred_next)
         if(!thread_reap_ready(pending))return false;
@@ -1123,7 +1131,24 @@ void defer_thread_reap(DiamondVm *vm,DiamondThread *thread) {
     vm->deferred_threads=thread;
 }
 
-void reap_finished_threads(DiamondVm *vm) {
+void defer_supervisor_reap(DiamondVm *vm,DiamondSupervisor *supervisor) {
+    /* Finish current attempts without letting an unreachable owner restart them. */
+    atomic_store(&supervisor->stop_requested,true);
+    supervisor->deferred_next=vm->deferred_supervisors;
+    vm->deferred_supervisors=supervisor;
+}
+
+void reap_finished_workers(DiamondVm *vm) {
+    DiamondSupervisor **supervisor_link=&vm->deferred_supervisors;
+    while(*supervisor_link!=nullptr) {
+        DiamondSupervisor *supervisor=*supervisor_link;
+        if(supervisor_reap_ready(supervisor)) {
+            *supervisor_link=supervisor->deferred_next;
+            free_supervisor_reference(supervisor);
+        } else {
+            supervisor_link=&supervisor->deferred_next;
+        }
+    }
     DiamondThread **link=&vm->deferred_threads;
     while(*link!=nullptr) {
         DiamondThread *thread=*link;
@@ -1220,9 +1245,8 @@ DiamondSupervisorHandle *allocate_supervisor_handle(DiamondVm *vm,
 }
 
 /* Shared teardown for a DiamondSupervisor -- mirrors free_channel_
- * reference's own role/refcount discipline (only the last referencing
- * handle's sweep actually tears anything down), but additionally has to
- * *stop* every child first: sets stop_requested (same flag Supervisor#
+ * reference's own role/refcount discipline (the last reference owns
+ * teardown), but additionally has to *stop* every child first: sets stop_requested (same flag Supervisor#
  * stop sets) and blocks joining every child's OS thread (supervisor_
  * join_all_children above, exactly what stop() itself does) before
  * reclaiming any child's program_template/args_vm. A child mid-crash-

@@ -352,7 +352,11 @@ restarts -- a child that keeps crashing and restarting forever blocks
 already does. With the cancellation cut, cancel a shared source first and have
 workers catch expected cancellation and return normally before calling `stop()`.
 
-`stop(timeout_ms)` bounds that wait. It stops restarts, gives the current
+When garbage collection finds an unreachable Supervisor, it disables restarts
+and lets the current attempts finish while the collecting VM continues to run.
+Normal VM shutdown waits for those attempts to finish.
+
+`stop(timeout_ms)` bounds the explicit stop wait. It stops restarts, gives the current
 attempts up to `timeout_ms` milliseconds (`0` to `2147483647`) to finish by
 themselves, then interrupts whatever is still running and joins. It returns
 `true` if every child finished within the timeout and `false` if it had to

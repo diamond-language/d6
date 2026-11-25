@@ -7,6 +7,11 @@ come only in minor releases, marked **Breaking** here.
 
 ## Unreleased
 
+### Fixed
+
+- Collecting an unreachable Supervisor disables restarts and lets its current
+  attempts finish without blocking garbage collection.
+
 ## 1.6.2
 
 ### Fixed
