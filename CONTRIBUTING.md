@@ -243,6 +243,8 @@ the PR's actual base before merging and updates that release branch.
    run. The first CI run on `main` after the merges is the check on the
    combination.
 6. Tag a release only after CI is green on the merged `main` commit.
+   Follow the [stable website release procedure](docs/site-release.md) to publish
+   the matching documentation, downloads, and browser runtime.
 
 Tests belong in the same pull request as the behavior they cover.
 

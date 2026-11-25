@@ -468,6 +468,12 @@ void diamond_vm_free(DiamondVm *vm) {
     budget_unregister(vm);
     free_object_list(vm,vm->young_objects);
     free_object_list(vm,vm->old_objects);
+    while(vm->deferred_threads!=nullptr) {
+        DiamondThread *thread=vm->deferred_threads;
+        vm->deferred_threads=thread->deferred_next;
+        if(vm_interrupt_requested(vm))thread_interrupt(thread);
+        free_thread(thread);
+    }
     for(size_t pool=0;pool<=DIAMOND_INSTANCE_POOL_FIELDS;pool++) {
         DiamondObject *object=vm->instance_pool[pool];
         while(object!=nullptr) {DiamondObject *next=object->next;free(object);object=next;}
@@ -1070,23 +1076,66 @@ DiamondThreadHandle *allocate_thread_handle(DiamondVm *vm,DiamondThread *thread)
     if (!maybe_collect(vm)) return nullptr;
     DiamondThreadHandle *handle=malloc(sizeof(DiamondThreadHandle));if(handle==nullptr)return nullptr;
     *handle=(DiamondThreadHandle){.object={.next=vm->young_objects,.kind=DIAMOND_OBJECT_THREAD},.thread=thread};
+    vm->has_worker_handles=true;
     vm->young_objects=&handle->object;vm->bytes_allocated+=sizeof(DiamondThreadHandle);return handle;
 }
 
-/* Shared teardown for a DiamondThread, called from both diamond_vm_collect's
- * cycle-based sweep and diamond_vm_free's whole-VM teardown loop (mirroring
- * diamond_fiber_free's own role for DIAMOND_OBJECT_FIBER) -- guarantees no
- * real OS thread ever outlives its DiamondThreadHandle's GC lifetime: if a
- * spawned-but-never-.join()'d thread's handle becomes unreachable (or the
- * whole VM is shutting down), this blocks on pthread_join right here before
- * reclaiming the thread's own fully independent child_vm/child_program.
- * `thread` itself may be nullptr (mirrors diamond_fiber_free's own
- * nullptr-tolerance) so callers don't need their own guard. The sole
- * decrement matching DIAMOND_OP_THREAD_NEW's own increment of
- * diamond_active_thread_count also lives here -- this is the one place
- * every DiamondThread's lifecycle is guaranteed to pass through exactly
- * once, whether reaped after a normal .join() or cleaned up from a
- * spawn-time failure partway through construction. */
+/* Finishing the thread body publishes the child VM's state. A child VM
+ * with live descendants would still block its owner during teardown. */
+static bool thread_reap_ready(const DiamondThread *thread);
+
+static bool supervisor_reap_ready(DiamondSupervisor *supervisor) {
+    /* As in free_supervisor_reference, prevent restarts once the owner is gone. */
+    atomic_store(&supervisor->stop_requested,true);
+    if(pthread_mutex_trylock(&supervisor->lock)!=0)return false;
+    bool ready=true;
+    for(size_t i=0;i<supervisor->child_count;i++) {
+        const DiamondSupervisorChild *child=&supervisor->children[i];
+        if(!child->finished) {ready=false;break;}
+    }
+    pthread_mutex_unlock(&supervisor->lock);
+    return ready;
+}
+
+static bool worker_handles_reap_ready(const DiamondObject *object) {
+    for(;object!=nullptr;object=object->next) {
+        if(object->kind==DIAMOND_OBJECT_THREAD&&
+           !thread_reap_ready(((const DiamondThreadHandle *)object)->thread))return false;
+        if(object->kind==DIAMOND_OBJECT_SUPERVISOR&&
+           !supervisor_reap_ready(((const DiamondSupervisorHandle *)object)->supervisor))return false;
+    }
+    return true;
+}
+
+static bool thread_reap_ready(const DiamondThread *thread) {
+    if(!atomic_load(&thread->finished))return false;
+    const DiamondVm *child=thread->child_vm;
+    for(const DiamondThread *pending=child->deferred_threads;pending!=nullptr;
+        pending=pending->deferred_next)
+        if(!thread_reap_ready(pending))return false;
+    return !child->has_worker_handles||
+        (worker_handles_reap_ready(child->young_objects)&&
+         worker_handles_reap_ready(child->old_objects));
+}
+
+void defer_thread_reap(DiamondVm *vm,DiamondThread *thread) {
+    thread->deferred_next=vm->deferred_threads;
+    vm->deferred_threads=thread;
+}
+
+void reap_finished_threads(DiamondVm *vm) {
+    DiamondThread **link=&vm->deferred_threads;
+    while(*link!=nullptr) {
+        DiamondThread *thread=*link;
+        if(thread_reap_ready(thread)) {
+            *link=thread->deferred_next;
+            free_thread(thread);
+        } else {
+            link=&thread->deferred_next;
+        }
+    }
+}
+
 /* A thread nobody joined has no one to re-raise its failure, so say it on
  * stderr instead of dropping it. Skipped for a thread that never ran (a
  * spawn failure) and for one told to stop (a cancelled supervised attempt
@@ -1164,6 +1213,7 @@ DiamondSupervisorHandle *allocate_supervisor_handle(DiamondVm *vm,
     *handle=(DiamondSupervisorHandle){
         .object={.next=vm->young_objects,.kind=DIAMOND_OBJECT_SUPERVISOR},
         .supervisor=supervisor};
+    vm->has_worker_handles=true;
     vm->young_objects=&handle->object;
     vm->bytes_allocated+=sizeof(DiamondSupervisorHandle);
     return handle;

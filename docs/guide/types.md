@@ -31,6 +31,18 @@ The names you will use most:
 | `Callable[[Int], String]` | a function from `Int` to `String` |
 | `Account`, `Shape` | instances of your own classes |
 
+## Type aliases
+
+A program-level alias gives a type a name you can reuse in annotations.
+
+```ruby
+type RecordId = Int | String
+def label(id: RecordId) -> String = "record #{id}"
+
+puts(label(12))       # => record 12
+puts(label("draft"))  # => record draft
+```
+
 ## What the compiler catches
 
 When the compiler can see a value's type, a mismatch is an error and the

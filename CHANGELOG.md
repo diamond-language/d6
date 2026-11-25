@@ -7,6 +7,13 @@ come only in minor releases, marked **Breaking** here.
 
 ## Unreleased
 
+## 1.6.2
+
+### Fixed
+
+- Garbage collection defers reaping unreachable Thread handles until their
+  workers finish, so a collecting VM can still signal a worker waiting on it.
+
 ## 1.6.1
 
 ### Fixed

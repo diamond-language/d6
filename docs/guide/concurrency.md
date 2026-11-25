@@ -94,6 +94,23 @@ p(squares)   # => [1, 4, 9]
 A channel is the one value that is shared rather than copied: every thread
 that receives it gets a handle to the same queue.
 
+Use [`IO.poll`](../networking.md#wait-for-sockets-and-channels-together) when
+an event loop handles both channels and sockets. Each result corresponds to
+the item in the same position in the input list.
+
+<!-- docsite: no-run -->
+```ruby
+inbox = Channel.new(1)
+inbox.send("ready")
+ready = IO.poll([inbox], [], 0)
+if ready["readable"][0]
+  puts(inbox.receive())   # => ready
+end
+```
+
+Polling leaves the message in the channel. If several threads can receive
+from it, use `try_receive()` and retry if another thread takes the value first.
+
 ## Supervisors
 
 A `Supervisor` runs workers and restarts one when it crashes with an
