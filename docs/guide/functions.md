@@ -106,6 +106,14 @@ prices = [10, 20]
 puts(total(*prices))     # => 30
 ```
 
+Add an element type to check every collected argument, including values
+passed through a spread.
+
+```ruby
+def typed_total(*amounts: Int) -> Int = amounts.sum()
+puts(typed_total(*[10, 20]))   # => 30
+```
+
 ## Functions are values
 
 A function's name without parentheses is the function itself, which you can
