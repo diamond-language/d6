@@ -5,19 +5,22 @@ def idle(hold) = hold.receive()
 
 def spawner(go, results, hold)
   go.receive()
-  made = 0
+  # Keep the children reachable until the parent releases them. Collecting
+  # a discarded handle can join a child before this spawner reports its count.
+  children = []
   attempts = 0
   while attempts < 6
     begin
-      Thread.new(idle, hold)
-      made += 1
+      children.push(Thread.new(idle, hold))
     rescue error: ThreadError
       nil
     end
     attempts += 1
   end
-  results.send(made)
+  results.send(children.length())
   hold.receive()
+  # The final use keeps the handles live across receive. Teardown can now join.
+  children.length()
 end
 
 go = Channel.new(8)
