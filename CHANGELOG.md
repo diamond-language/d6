@@ -7,6 +7,13 @@ come only in minor releases, marked **Breaking** here.
 
 ## Unreleased
 
+## 1.6.1
+
+### Fixed
+
+- The live-thread-limit regression test keeps child handles alive through the
+  release signal, preventing garbage collection from deadlocking the test.
+
 ## 1.6.0
 
 ### Added
