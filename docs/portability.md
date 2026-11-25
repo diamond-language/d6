@@ -9,66 +9,93 @@ enough POSIX-adjacent surface area to matter here.
 
 ## Validated platforms
 
-- **Fedora 44, Clang 22, x86_64 (glibc, local 2026-09 run)** -- the full
-  1543-case suite and the 277-case LSP suite both passed. This supplements,
-  but does not replace, the continuous Fedora/Ubuntu CI matrix below.
-- **Fedora and Ubuntu 26.04, GCC and Clang, x86_64 (glibc)** -- CI runs the
-  full test suite (`make test-all`) across this 2x2 matrix, split into
-  `test-builds`, `test-integration`, and `test-fuzz` jobs with independent
-  time budgets (`.github/workflows/ci.yml`, `test-all` matrix). The workflow
-  runs on every pull-request update, with manual dispatch available for any
-  branch (see [CI operation](ci.md)).
-- **Ubuntu 26.04, GCC, arm64 (glibc)** -- CI runs the same suites the x86-64 GCC leg of
-  `test-all` does, on native GitHub-hosted arm64 hardware: `make test` and `make test-release`
-  (`test-arm64`), the whole `test-integration` target with a live `redis-server`
-  (`test-arm64-integration`), ASan/UBSan (`test-arm64-sanitize`) and TSan (`test-arm64-tsan`).
-  The MariaDB, MySQL and PostgreSQL dialect tests run against those servers' arm64 images
-  (`test-database-dialects`), and the pinned Thread/Channel/Supervisor stress loop runs too
-  (`test-stress-threads-arm64`). The x86-64-only JIT fixtures are excluded from the corpus;
-  checks elsewhere measure whether the JIT compiled anything rather than assume it. Narrower
-  than `test-all`: no Clang, no Fedora, and no fuzz targets on arm64.
-- **Alpine (musl), GCC, x86_64** -- CI runs `make test` plus a curated set
-  of focused targets (`test-musl` job, same workflow) on every pull-request update. Every
-  `tests/cases/*.d6` corpus case passes except two known failures
-  (`bcrypt.d6`, `active_record_secure_password.d6`) are excluded from the
-  CI run itself rather than left to fail it -- both are the same real,
-  documented libc limitation (BCrypt, below), not a bug. Narrower than
-  `test-all`: GCC only (Clang-on-musl has not been checked), and no
-  sanitizer/tsan builds or package-specific tests (database, HTTP,
-  GraphQL, ...), since those have not actually been validated against
-  musl either -- see the `test-musl` job's own comment for why extending
-  its scope to match `test-all` isn't done casually. See "musl-specific
-  findings" below for exactly what building there required.
-- **FreeBSD 15.1, Clang, x86_64** -- CI runs `make test` plus the same
-  curated focused-target set as musl (`test-freebsd` job, same workflow),
-  via a real QEMU-booted VM (`vmactions/freebsd-vm`), on every pull-request update. Four
-  known failures excluded the same way musl's two are: `bcrypt.d6`/
-  `active_record_secure_password.d6` (BCrypt.hash needs libxcrypt's
-  `crypt_gensalt_rn`, unavailable with no `<crypt.h>` at all on FreeBSD --
-  see "FreeBSD/OpenBSD" below) and `math_exp_log(_tanh).d6` (exp/log
-  differ from glibc's own libm in the last representable bit -- expected
-  cross-library variance, not a bug). Narrower than `test-all` for the
-  same reason musl's own job is: no sanitizer/tsan builds or
-  package-specific tests validated against FreeBSD either. GCC-on-FreeBSD
-  has not been checked (CC=clang here, FreeBSD's own base compiler, to
-  avoid an extra ports build).
-- **macOS/Darwin, Clang, arm64 (Apple Silicon)** -- CI runs `make test` on
-  a real `macos-latest` GitHub-hosted runner (`test-macos` job, same
-  workflow) on every pull-request update, with GNU coreutils/sed and a real bash 5+
-  installed via Homebrew and shadowed onto `PATH` (see "macOS/Darwin"
-  below for why the test harness needs those specifically). Same one
-  known BCrypt failure excluded the same way musl/FreeBSD's own are.
-  Narrower than `test-all` for the same reason musl/FreeBSD's own jobs
-  are: Clang only (no system GCC on macOS at all -- the `gcc` binary
-  there is a symlink to clang), no sanitizer/tsan builds, no package-
-  specific tests validated against macOS either.
+### Fedora 44 local validation
+
+**Fedora 44, Clang 22, x86_64 (glibc, local 2026-09 run)**
+
+The full 1,543-case suite and the 277-case LSP suite both passed. This supplements,
+but does not replace, the continuous Fedora/Ubuntu CI matrix below.
+
+### Fedora and Ubuntu on x86-64
+
+**Fedora and Ubuntu 26.04, GCC and Clang, x86_64 (glibc)**
+
+CI runs the full test suite (`make test-all`) across this 2x2 matrix, split into
+`test-builds`, `test-integration`, and `test-fuzz` jobs with independent
+time budgets (`.github/workflows/ci.yml`, `test-all` matrix). The workflow
+runs on every pull-request update, with manual dispatch available for any
+branch (see [CI operation](ci.md)).
+
+### Ubuntu on ARM64
+
+**Ubuntu 26.04, GCC, arm64 (glibc)**
+
+CI runs the same suites the x86-64 GCC leg of
+`test-all` does, on native GitHub-hosted arm64 hardware: `make test` and `make test-release`
+(`test-arm64`), the whole `test-integration` target with a live `redis-server`
+(`test-arm64-integration`), ASan/UBSan (`test-arm64-sanitize`) and TSan (`test-arm64-tsan`).
+The MariaDB, MySQL and PostgreSQL dialect tests run against those servers' arm64 images
+(`test-database-dialects`), and the pinned Thread/Channel/Supervisor stress loop runs too
+(`test-stress-threads-arm64`). The x86-64-only JIT fixtures are excluded from the corpus.
+Checks elsewhere measure whether the JIT compiled anything.
+
+The ARM64 matrix covers Ubuntu and GCC. Clang, Fedora, and fuzzing remain outside
+that matrix.
+
+### Alpine on x86-64
+
+**Alpine (musl), GCC, x86_64**
+
+On every pull request, `test-musl` runs `make test` plus a curated set of
+focused targets. The corpus excludes `bcrypt.d6` and
+`active_record_secure_password.d6` because both need the BCrypt support
+described under [musl-specific findings](#musl-specific-findings).
+
+The job uses GCC. Clang, sanitizer and ThreadSanitizer builds, and
+package-specific tests such as database, HTTP, and GraphQL still need
+validation on musl.
+
+### FreeBSD on x86-64
+
+**FreeBSD 15.1, Clang, x86_64**
+
+CI runs `make test` plus the same
+curated focused-target set as musl (`test-freebsd` job, same workflow),
+via a real QEMU-booted VM (`vmactions/freebsd-vm`), on every pull-request update.
+
+The job excludes four cases.
+
+- `bcrypt.d6` and `active_record_secure_password.d6` require libxcrypt's
+  `crypt_gensalt_rn`. FreeBSD lacks `<crypt.h>`. See “FreeBSD/OpenBSD” below.
+- The exp/log and tanh math cases differ from glibc's libm in the last
+  representable bit. The difference is expected across math libraries.
+
+The job uses Clang, FreeBSD's base compiler. GCC, sanitizer and ThreadSanitizer
+builds, and package-specific tests still need validation on FreeBSD.
+
+### macOS on Apple Silicon
+
+**macOS/Darwin, Clang, arm64 (Apple Silicon)**
+
+CI runs `make test` on
+a real `macos-latest` GitHub-hosted runner (`test-macos` job, same
+workflow) on every pull-request update, with GNU coreutils/sed and a real bash 5+
+installed via Homebrew and shadowed onto `PATH` (see "macOS/Darwin"
+below for why the test harness needs those specifically).
+
+The job excludes the known BCrypt failure. It uses Clang, including when
+invoked as `gcc` on macOS. Sanitizer and ThreadSanitizer builds and
+package-specific tests still need validation there.
+
+### Thread stacks
 
 Language-level pthreads explicitly request an 8 MiB stack on every platform.
 That matches the stack against which the interpreter recursion guard is
 calibrated instead of inheriting libc-dependent defaults (roughly 128 KiB on
 musl and 512 KiB on Darwin), which are too small for `run_chunk`'s fixed native
-frame and can fault before d6 can report `SystemStackError`. The program's
-own main thread, in `d6` and in `d6 build` binaries alike, runs on a 512 MiB
+frame and can fault before d6 can report `SystemStackError`.
+
+The program's own main thread, in `d6` and in `d6 build` binaries alike, runs on a 512 MiB
 pthread stack (`DIAMOND_MAIN_STACK_MB`), with
 the call-depth limit scaled to match; if that allocation fails it halves the
 request and finally falls back to the process's own stack.
@@ -253,6 +280,7 @@ not just a build-level check.
   `CPPFLAGS_EXTRA`/`LDFLAGS_EXTRA` override points for Homebrew's
   keg-only OpenSSL/libpq/MariaDB Connector paths (`/opt/homebrew` on
   Apple Silicon).
+
 - **`<ucontext.h>` is not actually absent** (unlike OpenBSD) -- Apple's
   own SDK header gates `getcontext`/`makecontext`/`swapcontext`/
   `ucontext_t` behind an explicit `#error` unless `_XOPEN_SOURCE` is
@@ -262,6 +290,7 @@ not just a build-level check.
   added to the same 22 files. Still compiles with deprecation warnings
   (not fatal, no `-Werror` covering them) -- Apple discourages these
   routines but hasn't removed them.
+
 - **Defining `_XOPEN_SOURCE` alone breaks FreeBSD**, confirmed the hard
   way: it landed on `main` once, broke `test-freebsd` immediately
   (`MAP_ANONYMOUS`/`SO_REUSEPORT`/`_SC_NPROCESSORS_ONLN`/`crypt_r`/
@@ -276,6 +305,7 @@ not just a build-level check.
   no-op where its own libc doesn't recognize the name (glibc/musl ignore
   the BSD/Darwin ones the same way FreeBSD/macOS ignore `_DEFAULT_SOURCE`
   itself).
+
 - **`struct crypt_data`/`crypt_r` don't exist on macOS at all** -- neither
   declared in any header, confirmed directly ("incomplete type 'struct
   crypt_data'"). No portable feature test predicts this the way
@@ -292,6 +322,7 @@ not just a build-level check.
   code on macOS -- no `<crypt.h>` there either means
   `CRYPT_GENSALT_IMPLEMENTS_AUTO_ENTROPY` is never defined, same as
   FreeBSD/musl.)
+
 - **Plain `crypt()` on macOS silently mishandles an unrecognized bcrypt
   salt** rather than returning `NULL` the honest way FreeBSD/OpenBSD/musl
   all do -- confirmed directly: `crypt("password", "$2b$04$...")`
@@ -301,6 +332,7 @@ not just a build-level check.
   fail safely), but worth knowing if anything ever calls raw `crypt()` on
   macOS expecting a clean failure signal instead of a wrong-algorithm
   result.
+
 - **The test harness (mostly `tests/run.sh`) leans on GNU-coreutils
   behavior far more than the build does.** The `test-macos` job handles this
   by installing GNU coreutils, sed and bash through Homebrew and shadowing
@@ -454,6 +486,7 @@ tests/run.sh`):
   so (unlike Alpine's `apk` package) installing it doesn't shadow the
   base `sed` on its own; the CI job symlinks it into a directory it
   prepends to `PATH` explicitly instead.
+
 - **Two real runtime bugs, not tooling gaps, found this way** (both fixed
   in `src/vm.c`, both were invisible on Linux/musl):
   1. `tcp_listen_helper`/`udp_socket_helper`'s wildcard bind
@@ -477,6 +510,7 @@ tests/run.sh`):
      always consumes/discards the full datagram regardless of buffer
      size, so this doesn't change `receive(0)`'s documented "consumes
      without copying" contract.
+
 - **Two real, expected (not fixed) platform differences**, excluded from
   the CI run the same way musl's own two BCrypt cases are (`test-freebsd`
   job's own comment):
@@ -514,16 +548,19 @@ attempted, and the prerequisites everything above sits on top of.
   implementation (e.g. hand-rolled `setjmp`/`longjmp` + manual stack
   switch) planned. OpenBSD Fiber/Thread support is out of reach without
   that separate engineering effort -- a CI job alone can't close this gap.
+
 - **`crypt(3)` bcrypt support**: native and correct on both -- confirmed by
   hashing the same password with the same salt on each and getting the
   identical, valid `$2b$` hash back. (The probe's first run produced a
   false NULL on both platforms from a malformed 21-character test salt,
   not a real platform gap -- bcrypt salts are fixed at 22; re-run with a
   known-valid one confirmed this cleanly.)
+
 - **`-ldl`**: links fine on FreeBSD. **Fails on OpenBSD** ("unable to find
   library -ldl") -- same category as macOS's finding above (`dlopen` lives
   in libc directly, no separate `.dylib`/`.so` to link against); the same
   `LDLIBS_DL=` override already added for macOS covers this.
+
 - **`timeout`**: present in *both* base installs (unlike macOS, which has
   none). FreeBSD's accepts GNU-style long options
   (`--foreground`/`--kill-after`/`--preserve-status`/`--signal`, though not
@@ -535,15 +572,19 @@ attempted, and the prerequisites everything above sits on top of.
   native dialect (`-fp`/`-k time`/`-s signal`, no long options at all) --
   meaningfully different, not just missing, and untested against real call
   sites given OpenBSD's own blocker above.
+
 - **`nproc`**: present in FreeBSD's base (`/bin/nproc`) -- no fix needed
   there. Absent on OpenBSD, same as macOS; `sysctl -n hw.ncpu` works on
   both as the portable fallback.
+
 - **`bc`**: present and functional on both.
+
 - **`bash` 5+** (for `$EPOCHREALTIME`): not in either base install, but
   installs cleanly via `pkg`/`pkg_add` and resolves first on `PATH` ahead
   of any system shell once installed -- confirmed directly by `which
   bash` after install on both, unlike macOS's still-unconfirmed PATH
   ordering.
+
 - **Toolchain**: both ship Clang as the base `cc` (FreeBSD 19.1.7, OpenBSD
   19.1.7); GCC is available on both via the package manager (FreeBSD ports
   as plain `gcc`, OpenBSD as `egcc` -- `gcc` there is reserved for an

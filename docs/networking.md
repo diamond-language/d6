@@ -542,185 +542,218 @@ most of the rest of this codebase: TLS is exactly the kind of thing where
 work, so this is a deliberate exception to the project's usual
 zero-external-dependencies stance.
 
-- **`TLSSocket.connect(host, port, options)`** — resolves and connects
-  like `TCPSocket.connect` (reuses the same `getaddrinfo`/try-each-
-  candidate helper, and accepts the identical `connect_timeout_ms`/
-  `read_timeout_ms`/`write_timeout_ms` in `options`), then performs a
-  client-side TLS handshake. **Certificate verification is on
-  unconditionally** — the peer's certificate must chain to a trusted CA
-  *and* be valid for `host` (`SSL_set1_host`, SNI via
-  `SSL_set_tlsext_host_name`). There is no `verify: false`-style escape
-  hatch in this API — a connection to an untrusted or misnamed
-  certificate raises a rescuable `IOError` rather than silently
-  succeeding.
+### Connect as a client
 
-  The trust anchor itself is a real option, though:
+`TLSSocket.connect(host, port, options)` resolves the host and connects using
+the same candidate-address loop as `TCPSocket.connect`. It accepts
+`connect_timeout_ms`, `read_timeout_ms`, and `write_timeout_ms`, then performs
+the TLS handshake.
 
+The peer certificate must chain to a trusted CA and match `host`. d6 passes
+the host to OpenSSL for certificate verification and SNI. An untrusted
+certificate or a host mismatch raises `IOError`. You can supply a trust
+store and a client certificate through `options`.
+
+```ruby
+conn = TLSSocket.connect("internal.example.com", 443,
+    {"ca_file": "internal-ca.pem"})
+
+conn = TLSSocket.connect("example.com", 443,
+    {"cert": "client-cert.pem", "key": "client-key.pem"})
+```
+
+- **`ca_file`**/**`ca_path`** — load a caller-supplied CA bundle file
+  and/or directory (`SSL_CTX_load_verify_locations`) as the trust
+  anchor instead of the system trust store, for an internal CA or a
+  hermetic test server. Neither given keeps the original default
+  (`SSL_CTX_set_default_verify_paths`, honoring `$SSL_CERT_FILE`/
+  `$SSL_CERT_DIR` — how `tests/run.sh`'s own TLS tests point this at a
+  hermetic test CA instead of the real system store). Verification
+  itself is never optional either way — this only changes *which*
+  trust store is consulted, not whether one is.
+
+- **`cert`**/**`key`** — a client certificate chain and private key
+  (both PEM files) for mutual TLS, presented only if the server
+  actually requests one during the handshake (ordinary TLS
+  negotiation — this never forces client-cert auth on a server that
+  doesn't ask). Must be given together; a lone `cert` or `key` is a
+  `TypeError`, checked before any network activity. A missing or
+  unreadable file, or a key that doesn't match the certificate, raises
+  a rescuable `IOError`.
+
+- **`alpn`** — an Array of protocol name Strings (RFC 7301, 1-255 bytes
+  each), offered to the server in preference order for Application-
+  Layer Protocol Negotiation:
+
+  <!-- doc-check: skip -->
   ```ruby
-  conn = TLSSocket.connect("internal.example.com", 443,
-      {"ca_file": "internal-ca.pem"})
-
-  conn = TLSSocket.connect("example.com", 443,
-      {"cert": "client-cert.pem", "key": "client-key.pem"})
+  conn = TLSSocket.connect("example.com", 443, {"alpn": ["h2", "http/1.1"]})
+  conn.alpn_protocol()   # => "h2", or nil if nothing was negotiated
   ```
 
-  - **`ca_file`**/**`ca_path`** — load a caller-supplied CA bundle file
-    and/or directory (`SSL_CTX_load_verify_locations`) as the trust
-    anchor instead of the system trust store, for an internal CA or a
-    hermetic test server. Neither given keeps the original default
-    (`SSL_CTX_set_default_verify_paths`, honoring `$SSL_CERT_FILE`/
-    `$SSL_CERT_DIR` — how `tests/run.sh`'s own TLS tests point this at a
-    hermetic test CA instead of the real system store). Verification
-    itself is never optional either way — this only changes *which*
-    trust store is consulted, not whether one is.
-  - **`cert`**/**`key`** — a client certificate chain and private key
-    (both PEM files) for mutual TLS, presented only if the server
-    actually requests one during the handshake (ordinary TLS
-    negotiation — this never forces client-cert auth on a server that
-    doesn't ask). Must be given together; a lone `cert` or `key` is a
-    `TypeError`, checked before any network activity. A missing or
-    unreadable file, or a key that doesn't match the certificate, raises
-    a rescuable `IOError`.
+  Validated (non-empty, every element a 1-255-byte String) before any
+  network activity, same as the `cert`/`key` pairing check. Which
+  protocol actually gets picked is the *server's* call
+  (`SSL_select_next_proto`, the standard algorithm both this client and
+  `TLSServer.listen` below use): the first entry in the *server's* own
+  list that the client also offered, not the client's own preference
+  order. A client and server with no protocol in common is a fatal
+  handshake failure (`IOError`), not a silent "no protocol negotiated"
+  — there's nothing left to fall back to once neither side will accept
+  what the other proposed.
 
-  - **`alpn`** — an Array of protocol name Strings (RFC 7301, 1-255 bytes
-    each), offered to the server in preference order for Application-
-    Layer Protocol Negotiation:
+- **`session`** — a previously-serialized session blob (see `#session`
+  below) to attempt resumption with. Always best-effort: a blob that
+  fails to parse (corrupt, or from an incompatible OpenSSL build or a
+  since-rotated server ticket key) is silently ignored rather than
+  raising — TLS itself transparently falls back to an ordinary full
+  handshake when resumption doesn't happen, exactly the same outcome as
+  if this option had never been given. `#session_reused?` (below) tells
+  the caller which actually happened.
 
-    <!-- doc-check: skip -->
-    ```ruby
-    conn = TLSSocket.connect("example.com", 443, {"alpn": ["h2", "http/1.1"]})
-    conn.alpn_protocol()   # => "h2", or nil if nothing was negotiated
-    ```
+As with `TCPSocket.connect`, an unrecognized `options` key or a value
+of the wrong type is a `TypeError`, and `options` itself may be `nil`
+(the default) for the original, unchanged behavior.
 
-    Validated (non-empty, every element a 1-255-byte String) before any
-    network activity, same as the `cert`/`key` pairing check. Which
-    protocol actually gets picked is the *server's* call
-    (`SSL_select_next_proto`, the standard algorithm both this client and
-    `TLSServer.listen` below use): the first entry in the *server's* own
-    list that the client also offered, not the client's own preference
-    order. A client and server with no protocol in common is a fatal
-    handshake failure (`IOError`), not a silent "no protocol negotiated"
-    — there's nothing left to fall back to once neither side will accept
-    what the other proposed.
-  - **`session`** — a previously-serialized session blob (see `#session`
-    below) to attempt resumption with. Always best-effort: a blob that
-    fails to parse (corrupt, or from an incompatible OpenSSL build or a
-    since-rotated server ticket key) is silently ignored rather than
-    raising — TLS itself transparently falls back to an ordinary full
-    handshake when resumption doesn't happen, exactly the same outcome as
-    if this option had never been given. `#session_reused?` (below) tells
-    the caller which actually happened.
+### Read the negotiated protocol
 
-  As with `TCPSocket.connect`, an unrecognized `options` key or a value
-  of the wrong type is a `TypeError`, and `options` itself may be `nil`
-  (the default) for the original, unchanged behavior.
-- **`TLSSocket#alpn_protocol()`** — the negotiated ALPN protocol name as
-  a `String`, or `nil` if ALPN wasn't offered or nothing was negotiated.
-  Works the same way on both a client connection and a
-  `TLSServer.listen` listener's accepted connection.
-- **`TLSSocket#session()`** — serializes the connection's current session
-  (DER-encoded via OpenSSL's `i2d_SSL_SESSION`, an opaque `String` blob)
-  for later resumption via a future `TLSSocket.connect`'s own `session`
-  option, or `nil` if no session is available yet. **Call this only
-  after the connection has done at least one read** (`.gets()`/`.read()`)
-  — a TLS 1.3 session ticket normally arrives as a post-handshake message
-  that OpenSSL only actually processes (via a callback registered
-  internally) during a later read, not synchronously inside
-  `SSL_connect`/`SSL_accept` itself, so `#session` called immediately
-  after connecting, with no read in between, can legitimately still
-  return `nil` even though a ticket is about to arrive.
-- **`TLSSocket#peer_subject()`** / **`#peer_fingerprint()`** — who is on
-  the other end, from the certificate the peer presented: `peer_subject`
-  is its subject in RFC 2253 form (most specific name first, e.g.
-  `O=Acme,CN=alice`), `peer_fingerprint` its SHA-256 fingerprint as 64
-  lowercase hex characters (what `openssl x509 -fingerprint -sha256`
-  prints, minus the colons and upcasing), a stable identity to pin or look
-  up. On a connection accepted from a `TLSServer.listen` listener with
-  `client_ca` this is the client's verified certificate; on a
-  `TLSSocket.connect` connection it is the server's. Both return `nil`
-  when the peer presented no certificate (an accepted connection on a
-  listener without `client_ca`). On a closed `TLSSocket` both raise
-  `IOError`, like the other methods.
-- **`TLSSocket#server_name()`** — the host name from the SNI extension: on
-  an accepted connection, the name the client asked for (`nil` when it sent
-  none, as it does not for an IP address); on a client connection, the name
-  it requested.
-- **`TLSSocket#session_reused?()`** — `Bool`, whether this connection
-  actually resumed a previous session (`SSL_session_reused`) rather than
-  performing a full handshake. The one reliable way to confirm resumption
-  worked, since a `session` option that fails to resume (an expired
-  ticket, say) doesn't raise — the connection just silently falls back to
-  a full handshake instead.
-- **`TLSServer.listen(port, cert_path, key_path, options)`** — binds and
-  listens like `TCPServer.listen`, then loads a certificate chain and
-  private key (both PEM files) into one `SSL_CTX` reused across every
-  `.accept()` on this listener, so a broken cert/key pair fails loudly at
-  `.listen()` time rather than on whichever connection happens to arrive
-  first, and the (potentially expensive) cert/key parsing happens once,
-  not per connection. `options` (optional, a `Hash` or `nil`) supports
-  two keys:
-  - **`alpn`** — an Array of protocol name Strings this server is willing
-    to negotiate, in *this server's own* preference order (see
-    `#alpn_protocol` above for how a mismatch is handled).
-  - **`client_ca`** — a String path to a PEM file of the certificate
-    authorities client certificates must chain to. Giving it turns on
-    mutual TLS: the server requests a client certificate in every
-    handshake and **refuses the connection unless one arrives that
-    verifies against this CA** (`SSL_VERIFY_PEER |
-    SSL_VERIFY_FAIL_IF_NO_PEER_CERT`; there is no "optional" mode). A
-    refusal makes the server's `.accept()` raise a rescuable `IOError`
-    ("peer did not return a certificate" / "certificate verify failed"),
-    which a server loop should rescue and carry on from. The client sees
-    it too, but under TLS 1.3 only on its first read after connecting (its
-    own handshake completes before the server has judged the certificate),
-    as an `IOError` such as "certificate required" or "unknown ca". The CA
-    file is loaded at `.listen()` time, so a bad path fails there
-    (`cannot load client CA '...'`), and a non-String value is a
-    `TypeError`. Without `client_ca` a server never asks for a client
-    certificate, as before.
-  Session resumption needs no server-side option at all: reusing one
-  `SSL_CTX`/session-ticket key across every `.accept()` on a listener,
-  which `TLSServer.listen` already does, is the entire server-side
-  requirement — a returning client's `TLSSocket.connect(..., {"session":
-  ...})` just works against it.
-- **`.accept()`** on a `TLSServer.listen` listener does the same blocking
-  `accept()` a plain `TCPServer.listen` listener does (including the
-  signal-interruptible retry loop from the Signals section above — a
-  server genuinely idle with nothing connecting still responds promptly
-  to a trapped signal), then a server-side TLS handshake. No
-  `TLSServer.listen_nonblocking` is not available. Client-side cancellable
-  negotiation is provided separately by `TLSSocket.start_handshake`.
-- Both return the same new object kind, `DIAMOND_OBJECT_TLS_SOCKET` —
-  `.read(n)`/`.read()`/`.gets()`/`.write(value)`/`.close()`, the exact
-  same method surface and semantics as `File` (bounded/unbounded read,
-  line read, EOF-as-nil), not `Socket`'s raw-fd/non-blocking shape — a
-  completed TLS connection uses blocking application I/O, so `packages/http`'s own
-  `conn.gets()`/`conn.read()`/`conn.write()` calls work unchanged against
-  either kind of connection. Internally a raw fd plus an OpenSSL `SSL *`
-  rather than a buffered `FILE *`: `SSL_read`/`SSL_write` need to own the
-  fd's I/O directly, not share it with libc stdio buffering underneath.
-  `.close()` calls `SSL_shutdown` (best-effort, one call, sends this
-  side's own `close_notify` without blocking on the peer's) then
-  `SSL_free` then `close(fd)` — both steps are required; `SSL_free` alone
-  neither sends a `close_notify` nor closes the fd on its own.
-- A write to a connection whose peer has already reset it (not just
-  cleanly closed) raises `SIGPIPE` by default, which would otherwise kill
-  the whole process outright — this is what actually surfaced needing a
-  fix here, not something specific to TLS: OpenSSL servers send a
-  post-handshake `NewSessionTicket` message automatically for TLS 1.3,
-  and a peer that disconnects without ever reading it (any short-lived
-  connection that errors out or drops right after the handshake — the
-  first realistic case in this codebase's own tests, from a TLS error
-  test that deliberately raises immediately post-handshake) leaves that
-  message unread in the kernel receive buffer at close time, which is
-  Linux's own trigger for sending `RST` instead of a plain `FIN`.
-  `diamond_vm_init` now ignores `SIGPIPE` process-wide (once, idempotent)
-  so a write like this returns a plain `EPIPE`/`IOError` instead — every
-  write-capable I/O path already turns a failed write into a catchable
-  error via `errno`/`SSL_get_error`, so this was a straightforward latent
-  bug fix, not a new behavior choice; it applies to the plain TCP/UDP
-  write paths too, which had the same exposure but no test that happened
-  to trigger it before now.
+**`TLSSocket#alpn_protocol()`** — the negotiated ALPN protocol name as
+a `String`, or `nil` if ALPN wasn't offered or nothing was negotiated.
+Works the same way on both a client connection and a
+`TLSServer.listen` listener's accepted connection.
+
+### Save a resumable session
+
+**`TLSSocket#session()`** — serializes the connection's current session
+(DER-encoded via OpenSSL's `i2d_SSL_SESSION`, an opaque `String` blob)
+for later resumption via a future `TLSSocket.connect`'s own `session`
+option, or `nil` if no session is available yet. **Call this only
+after the connection has done at least one read** (`.gets()`/`.read()`)
+— a TLS 1.3 session ticket normally arrives as a post-handshake message
+that OpenSSL only actually processes (via a callback registered
+internally) during a later read, not synchronously inside
+`SSL_connect`/`SSL_accept` itself, so `#session` called immediately
+after connecting, with no read in between, can legitimately still
+return `nil` even though a ticket is about to arrive.
+
+### Inspect the peer certificate
+
+**`TLSSocket#peer_subject()`** / **`#peer_fingerprint()`** — who is on
+the other end, from the certificate the peer presented: `peer_subject`
+is its subject in RFC 2253 form (most specific name first, e.g.
+`O=Acme,CN=alice`), `peer_fingerprint` its SHA-256 fingerprint as 64
+lowercase hex characters (what `openssl x509 -fingerprint -sha256`
+prints, minus the colons and upcasing), a stable identity to pin or look
+up. On a connection accepted from a `TLSServer.listen` listener with
+`client_ca` this is the client's verified certificate; on a
+`TLSSocket.connect` connection it is the server's. Both return `nil`
+when the peer presented no certificate (an accepted connection on a
+listener without `client_ca`). On a closed `TLSSocket` both raise
+`IOError`, like the other methods.
+
+### Read the SNI host name
+
+**`TLSSocket#server_name()`** — the host name from the SNI extension: on
+an accepted connection, the name the client asked for (`nil` when it sent
+none, as it does not for an IP address); on a client connection, the name
+it requested.
+
+### Check session resumption
+
+**`TLSSocket#session_reused?()`** — `Bool`, whether this connection
+actually resumed a previous session (`SSL_session_reused`) rather than
+performing a full handshake. The one reliable way to confirm resumption
+worked, since a `session` option that fails to resume (an expired
+ticket, say) doesn't raise — the connection just silently falls back to
+a full handshake instead.
+
+### Listen as a server
+
+**`TLSServer.listen(port, cert_path, key_path, options)`** — binds and
+listens like `TCPServer.listen`, then loads a certificate chain and
+private key (both PEM files) into one `SSL_CTX` reused across every
+`.accept()` on this listener, so a broken cert/key pair fails loudly at
+`.listen()` time rather than on whichever connection happens to arrive
+first, and the (potentially expensive) cert/key parsing happens once,
+not per connection. `options` (optional, a `Hash` or `nil`) supports
+two keys:
+
+- **`alpn`** — an Array of protocol name Strings this server is willing
+  to negotiate, in *this server's own* preference order (see
+  `#alpn_protocol` above for how a mismatch is handled).
+
+- **`client_ca`** — a String path to a PEM file of the certificate
+  authorities client certificates must chain to. Giving it turns on
+  mutual TLS: the server requests a client certificate in every
+  handshake and **refuses the connection unless one arrives that
+  verifies against this CA** (`SSL_VERIFY_PEER |
+  SSL_VERIFY_FAIL_IF_NO_PEER_CERT`; there is no "optional" mode). A
+  refusal makes the server's `.accept()` raise a rescuable `IOError`
+  ("peer did not return a certificate" / "certificate verify failed"),
+  which a server loop should rescue and carry on from. The client sees
+  it too, but under TLS 1.3 only on its first read after connecting (its
+  own handshake completes before the server has judged the certificate),
+  as an `IOError` such as "certificate required" or "unknown ca". The CA
+  file is loaded at `.listen()` time, so a bad path fails there
+  (`cannot load client CA '...'`), and a non-String value is a
+  `TypeError`. Without `client_ca` a server never asks for a client
+  certificate, as before.
+Session resumption needs no server-side option at all: reusing one
+`SSL_CTX`/session-ticket key across every `.accept()` on a listener,
+which `TLSServer.listen` already does, is the entire server-side
+requirement — a returning client's `TLSSocket.connect(..., {"session":
+...})` just works against it.
+
+### Accept a connection
+
+**`.accept()`** on a `TLSServer.listen` listener does the same blocking
+`accept()` a plain `TCPServer.listen` listener does (including the
+signal-interruptible retry loop from the Signals section above — a
+server genuinely idle with nothing connecting still responds promptly
+to a trapped signal), then a server-side TLS handshake.
+
+`TLSServer.listen_nonblocking` is unavailable. For a cancellable client
+handshake, use `TLSSocket.start_handshake`.
+
+### Read, write, and close a TLS connection
+
+`connect()` and `accept()` both return the same new object kind, `DIAMOND_OBJECT_TLS_SOCKET` —
+`.read(n)`/`.read()`/`.gets()`/`.write(value)`/`.close()`, the exact
+same method surface and semantics as `File` (bounded/unbounded read,
+line read, EOF-as-nil), not `Socket`'s raw-fd/non-blocking shape — a
+completed TLS connection uses blocking application I/O, so `packages/http`'s own
+`conn.gets()`/`conn.read()`/`conn.write()` calls work unchanged against
+either kind of connection. Internally a raw fd plus an OpenSSL `SSL *`
+rather than a buffered `FILE *`: `SSL_read`/`SSL_write` need to own the
+fd's I/O directly, not share it with libc stdio buffering underneath.
+
+`.close()` calls `SSL_shutdown` (best-effort, one call, sends this
+side's own `close_notify` without blocking on the peer's) then
+`SSL_free` then `close(fd)` — both steps are required; `SSL_free` alone
+neither sends a `close_notify` nor closes the fd on its own.
+### Writes after a peer reset
+
+A write to a connection whose peer has already reset it (not just
+cleanly closed) raises `SIGPIPE` by default, which would otherwise kill
+the whole process outright — this is what actually surfaced needing a
+fix here, not something specific to TLS: OpenSSL servers send a
+post-handshake `NewSessionTicket` message automatically for TLS 1.3,
+and a peer that disconnects without ever reading it (any short-lived
+connection that errors out or drops right after the handshake — the
+first realistic case in this codebase's own tests, from a TLS error
+test that deliberately raises immediately post-handshake) leaves that
+message unread in the kernel receive buffer at close time, which is
+Linux's own trigger for sending `RST` instead of a plain `FIN`.
+
+`diamond_vm_init` now ignores `SIGPIPE` process-wide (once, idempotent)
+so a write like this returns a plain `EPIPE`/`IOError` instead — every
+write-capable I/O path already turns a failed write into a catchable
+error via `errno`/`SSL_get_error`, so this was a straightforward latent
+bug fix, not a new behavior choice; it applies to the plain TCP/UDP
+write paths too, which had the same exposure but no test that happened
+to trigger it before now.
+
+### Compiler dispatch
 
 `TLSSocket`/`TLSServer` are recognized in the compiler the same way
 `TCPSocket`/`TCPServer`/`UDPSocket` already are (gated on the identifier
