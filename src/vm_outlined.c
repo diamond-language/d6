@@ -1466,6 +1466,7 @@ DiamondVmStatus outlined_thread_new(DiamondVm *vm,const DiamondChunk *chunk,Diam
     if(argc<target_fn->required_arity||
        (argc>target_fn->arity && !target_fn->has_variadic))
         VM_RETURN(DIAMOND_VM_ARITY_ERROR);
+    reap_finished_threads(vm);
     if(atomic_load(&diamond_active_thread_count)>=diamond_live_thread_limit()) {
         snprintf(vm->error,sizeof vm->error,
             "too many concurrently active threads");

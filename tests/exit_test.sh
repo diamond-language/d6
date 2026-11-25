@@ -145,4 +145,48 @@ Thread.new(ok)' >/dev/null 2>"$TMPDIR_EXIT/err"
 [[ ! -s "$TMPDIR_EXIT/err" ]]
 count=$((count + 1))
 
+# Dropping a thread handle must allow the parent to release the worker
+# after a collection. Also exercise a finished parent with a live descendant.
+for stress in DIAMOND_STRESS_GC DIAMOND_STRESS_MINOR_GC; do
+    out="$(env "$stress=1" timeout -k 2 10 "$diamond" -e '
+def worker(release)
+  release.receive()
+  puts("worker finished")
+end
+def start(release)
+  Thread.new(worker, release)
+  nil
+end
+def start_nested(release)
+  Thread.new(start, release).join()
+  nil
+end
+def supervise(release)
+  sup = Supervisor.new()
+  child = sup.add_child(start, release)
+  while sup.alive?(child)
+    sleep(0.001)
+  end
+  nil
+end
+def start_supervised(release)
+  Thread.new(supervise, release).join()
+  nil
+end
+release = Channel.new(1)
+start(release)
+junk = [0]
+release.send(true)
+start_nested(release)
+junk = [1]
+release.send(true)
+start_supervised(release)
+junk = [2]
+release.send(true)
+nil' 2>"$TMPDIR_EXIT/err")"
+    [[ "$(sort <<<"$out")" == $'nil\nworker finished\nworker finished\nworker finished' ]]
+    [[ ! -s "$TMPDIR_EXIT/err" ]]
+    count=$((count + 1))
+done
+
 echo "$count exit tests passed"
