@@ -5,7 +5,18 @@ The corrected A record is **142.93.192.149**. External health and catalog
 requests succeeded. Since 2026-09-25 nginx terminates TLS with certbot
 certificates (see "Proxy and certificates" below); Caddy was retired.
 
-Runtime revision: `62d13ad786b51d0542e7ad566c54fca63dd7c9a2` (tag
+Runtime revision: `0c749ac3ae373bb533f708eafae1b5072e1c338d` (tag
+`v1.6.1` on the `1.6` maintenance branch, deployed 2026-11-25 02:17 UTC).
+The registry VM recipe ran on [Ubuntu CI](https://github.com/diamond-language/d6/actions/runs/45531243828).
+The deployment verified the public inventory before using the stock upgrade
+script. The running binary matched SHA-256
+`a3340d44103bbe58309f1437f033e71532a35b169252fbf0406fa9d77649393e`
+with `DIAMOND_JIT=1`. After the upgrade, health passed and all 27 public cuts
+resolved, digest-checked, loaded, and reinstalled from an unchanged lockfile.
+The verified pre-upgrade snapshot is
+`~/diamond-registry-backups/1.6.1/cutbackup-2026-11-24-181631-pre-0c749ac3/snapshot`.
+
+Previous runtime revision: `62d13ad786b51d0542e7ad566c54fca63dd7c9a2` (tag
 `v1.6.0-rc2` on `main`, deployed 2026-11-24 04:51 UTC by
 `tools/deploy_registry.sh --revision=v1.6.0-rc2` after a dry run).
 The running binary matched SHA-256
