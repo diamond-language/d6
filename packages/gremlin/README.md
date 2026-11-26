@@ -69,6 +69,23 @@ shutdown. A connection serves at most 100 requests. HTTP/1.0,
 `Connection: close`, and upgraded connections follow their own
 connection lifecycle.
 
+## Worker timing events
+
+Pass `on_event: observe` to receive `observe(event, context)` calls in
+the worker. Timestamps are seconds on the monotonic clock:
+
+- `http_request` includes `accepted_at`, `parse_started_at`,
+  `handler_started_at`, `handler_finished_at`, `response_finished_at`,
+  `request_id`, `method`, `status`, and `reused`. It covers completed
+  HTTP responses. `accepted_at` is the original socket acceptance,
+  so use `parse_started_at` to time individual keep-alive requests.
+- `tick` includes `scheduled_at`, `started_at`, and `finished_at`.
+  Subtracting the scheduled time from the start gives scheduling lag.
+
+Callbacks run synchronously. Keep observers short and use a
+zero-capture callable with multiple workers. Observer errors are
+logged without failing the response or stopping the worker.
+
 ## Binding to one address
 
 By default every worker listens on all interfaces (`0.0.0.0`). A server that sits behind a reverse proxy on the same machine should not

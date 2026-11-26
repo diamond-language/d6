@@ -757,6 +757,7 @@ echo "19 gremlin tests passed"
 
 "$diamond" "$package_root/test/tick_fairness.d6" "$diamond" "$package_root/test/tick_fairness.d6" "$test_project"
 "$diamond" "$package_root/test/keep_alive.d6" "$diamond" "$package_root/test/keep_alive.d6"
+"$diamond" "$package_root/test/timing_events.d6" "$diamond" "$package_root/test/timing_events.d6"
 
 # Token-managed shutdown returns through the owner and bounds stalled clients.
 "$diamond" "$package_root/test/shutdown_driver.d6" "$diamond" "$package_root/test/shutdown.d6"

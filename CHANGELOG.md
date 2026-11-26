@@ -9,6 +9,7 @@ come only in minor releases, marked **Breaking** here.
 
 ### Added
 
+- Gremlin exposes opt-in HTTP request and periodic tick timing events.
 - Gremlin supports opt-in HTTP/1.1 keep-alive with bounded request parsing,
   per-request deadlines, and idle connection expiry.
 - WebSocket clients accept a caller-provided transport, so readiness-aware
