@@ -31,6 +31,16 @@ def gremlin_poll_timeout_ms(next_tick_at)
   end
 end
 
+def gremlin_service_tick(next_tick_at, tick_interval, on_tick, context, log)
+  return next_tick_at if next_tick_at == nil || Time.monotonic() < next_tick_at
+  begin
+    on_tick(context)
+  rescue error: StandardError
+    log.error("tick.handler_failed", {"error": error.message()})
+  end
+  Time.monotonic() + tick_interval
+end
+
 # `tick_interval`/`on_tick`: an optional periodic callback with no
 # connection I/O of its own to hang off of -- the motivating case is
 # fanning a message out to *other* gremlin_serve(threads: N) workers,
@@ -268,6 +278,7 @@ def gremlin_worker(port, handler, tick_interval = nil, on_tick = nil, limits = n
     # race, not a hypothetical one.
     newly_spawned = []
     accepted_this_tick = 0
+    next_tick_at = gremlin_service_tick(next_tick_at, tick_interval, on_tick, context, log)
     # The listener sits at read_list[0] only while it was polled at all:
     # read_list is empty once shutdown has begun and no connections remain.
     listener_polled = read_list.length() > connections.length()
@@ -291,7 +302,11 @@ def gremlin_worker(port, handler, tick_interval = nil, on_tick = nil, limits = n
             newly_spawned.push(entry)
           end
         end
-        if limits != nil && accepted_this_tick >= limits["connections"] then break end
+        next_tick_at = gremlin_service_tick(next_tick_at, tick_interval, on_tick, context, log)
+        # Keep a full listener backlog from starving existing sockets.
+        if accepted_this_tick >= 32 || (limits != nil && accepted_this_tick >= limits["connections"])
+          break
+        end
       end
       rescue error: IOError
         nil
@@ -347,23 +362,16 @@ def gremlin_worker(port, handler, tick_interval = nil, on_tick = nil, limits = n
         still_active.push(entry)
       end
     end
-    connections.each_with_index(resume_if_ready)
+    connections.each_with_index() do |entry, position|
+      resume_if_ready(entry, position)
+      if next_tick_at != nil
+        next_tick_at = gremlin_service_tick(next_tick_at, tick_interval, on_tick, context, log)
+      end
+    end
     connections = still_active.concat(newly_spawned)
 
-    # Checked once per loop iteration rather than on some separate
-    # timer -- gremlin_poll_timeout_ms above already guarantees the
-    # loop wakes up (via IO.poll returning empty) no later than
-    # `next_tick_at`, even with zero connection activity, so this is
-    # never actually late by more than however long one connection's
-    # own resume_if_ready pass just took.
-    if next_tick_at != nil && Time.monotonic() >= next_tick_at
-      begin
-        on_tick(context)
-      rescue error: StandardError
-        log.error("tick.handler_failed", {"error": error.message()})
-      end
-      next_tick_at = Time.monotonic() + tick_interval
-    end
+    # Also service timers when no socket was ready.
+    next_tick_at = gremlin_service_tick(next_tick_at, tick_interval, on_tick, context, log)
 
     if GremlinShutdown.requested?() && connections.length() == 0
       log.info("server.shutdown_complete", {"forced": false})
