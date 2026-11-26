@@ -9,6 +9,8 @@ come only in minor releases, marked **Breaking** here.
 
 ### Added
 
+- PostgreSQL and MySQL/MariaDB connections expose reusable native
+  prepared statements through `prepare`, including Arel's statement cache.
 - HTTP requests and sessions accept caller-provided transports for
   readiness-aware clients.
 - Gremlin exposes opt-in HTTP request and periodic tick timing events.

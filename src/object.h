@@ -46,6 +46,7 @@ typedef struct pg_conn PGconn;
  * functions. Matches mysql.h's own
  * `typedef struct st_mysql MYSQL;` exactly. */
 typedef struct st_mysql MYSQL;
+typedef struct st_mysql_stmt MYSQL_STMT;
 
 typedef enum DiamondObjectKind : uint8_t {
     DIAMOND_OBJECT_STRING,
@@ -66,7 +67,7 @@ typedef enum DiamondObjectKind : uint8_t {
     DIAMOND_OBJECT_PROGRAM_BUILDER,
     DIAMOND_OBJECT_THREAD,
     DIAMOND_OBJECT_SQLITE3,
-    DIAMOND_OBJECT_SQLITE3_STATEMENT,
+    DIAMOND_OBJECT_STATEMENT,
     DIAMOND_OBJECT_POSTGRES,
     DIAMOND_OBJECT_MYSQL,
     DIAMOND_OBJECT_TIME,
@@ -579,21 +580,30 @@ typedef struct DiamondTensor {
     double data[];
 } DiamondTensor;
 
-/* A reusable prepared statement, from `SQLite3#prepare`. Same idempotent-
- * close sentinel discipline as DiamondSqlite3Handle: `stmt` is nulled by
- * an explicit #close() and checked before any other operation; both GC
- * sweep and VM teardown finalize a still-open statement as a safety net.
- * Deliberately holds no back-reference to the owning DiamondSqlite3Handle
- * -- sqlite3_db_handle(stmt) already recovers the owning `sqlite3*` for
- * error messages, and a prepared statement's lifetime isn't tied to its
- * connection's Diamond-level object staying reachable (matching sqlite3's
- * own C-level contract: a statement is only actually invalidated when the
- * connection is closed, at which point every operation on it below
- * already checks the closed-connection sentinel via handle->db first). */
-typedef struct DiamondSqlite3StatementHandle {
+typedef struct DiamondDbPrepared {
+    struct DiamondDbPrepared *next;
+    size_t parameter_count;
+    union {
+        char name[40];
+        MYSQL_STMT *mysql;
+    };
+} DiamondDbPrepared;
+
+/* Network statements keep their connection alive. The connection's list
+ * is weak in the GC and lets it invalidate statements before closing the
+ * native session, regardless of sweep order. SQLite manages its own
+ * lifetime through sqlite3_close_v2 and sqlite3_finalize. */
+typedef struct DiamondStatementHandle {
     DiamondObject object;
-    sqlite3_stmt *stmt;
-} DiamondSqlite3StatementHandle;
+    DiamondObjectKind backend;
+    union {
+        sqlite3_stmt *stmt;
+        DiamondDbPrepared *prepared;
+    };
+    DiamondObject *owner;
+    struct DiamondStatementHandle *next_statement;
+    struct DiamondStatementHandle **previous_link;
+} DiamondStatementHandle;
 
 /* Same shape and same idempotent-close reasoning as DiamondSqlite3Handle
  * immediately above, just wrapping a libpq PGconn* (via PQconnectdb)
@@ -603,6 +613,9 @@ typedef struct DiamondSqlite3StatementHandle {
 typedef struct DiamondPostgresHandle {
     DiamondObject object;
     PGconn *conn;
+    DiamondStatementHandle *statements;
+    DiamondDbPrepared *retired_statements;
+    uint64_t statement_sequence;
 } DiamondPostgresHandle;
 
 /* Same shape and same idempotent-close reasoning as DiamondPostgresHandle
@@ -613,6 +626,8 @@ typedef struct DiamondPostgresHandle {
 typedef struct DiamondMysqlHandle {
     DiamondObject object;
     MYSQL *conn;
+    DiamondStatementHandle *statements;
+    DiamondDbPrepared *retired_statements;
 } DiamondMysqlHandle;
 
 /* Simpler still than DiamondRegexp: owns no OS resource and no second

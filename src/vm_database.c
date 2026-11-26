@@ -2,6 +2,7 @@
 
 #include <ctype.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,6 +23,87 @@ void mysql_library_init_once_fn(void) { mysql_library_init(0,nullptr,nullptr); }
 #else
 void mysql_library_init_once_fn(void) {}
 #endif
+
+#if !defined(DIAMOND_NO_POSTGRES) || !defined(DIAMOND_NO_MYSQL)
+static void database_statement_link(DiamondStatementHandle *statement,
+        DiamondObject *owner,DiamondStatementHandle **head,DiamondDbPrepared *prepared) {
+    statement->prepared=prepared;
+    statement->owner=owner;
+    statement->previous_link=head;
+    statement->next_statement=*head;
+    if(*head!=nullptr)(*head)->previous_link=&statement->next_statement;
+    *head=statement;
+}
+
+static DiamondVmStatus database_statement_params(DiamondVm *vm,const char *method,
+        DiamondValue input,bool allow_nil,const DiamondValue **values,size_t *count) {
+    if(allow_nil&&input.kind==DIAMOND_VALUE_NIL)return DIAMOND_VM_OK;
+    if(input.kind!=DIAMOND_VALUE_OBJECT||input.as.object->kind!=DIAMOND_OBJECT_ARRAY) {
+        snprintf(vm->error,sizeof vm->error,"%s's params argument must be an Array",method);
+        return DIAMOND_VM_TYPE_ERROR;
+    }
+    const DiamondArray *params=(const DiamondArray *)input.as.object;
+    *values=params->values;
+    *count=params->count;
+    return DIAMOND_VM_OK;
+}
+#endif
+
+void database_statement_close(DiamondStatementHandle *statement) {
+    if(statement->backend==DIAMOND_OBJECT_SQLITE3) {
+#ifndef DIAMOND_NO_SQLITE
+        if(statement->stmt!=nullptr)sqlite3_finalize(statement->stmt);
+#endif
+        statement->stmt=nullptr;
+        return;
+    }
+    if(statement->owner==nullptr)return;
+    DiamondDbPrepared **retired=statement->backend==DIAMOND_OBJECT_POSTGRES?
+        &((DiamondPostgresHandle *)statement->owner)->retired_statements:
+        &((DiamondMysqlHandle *)statement->owner)->retired_statements;
+    statement->prepared->next=*retired;
+    *retired=statement->prepared;
+    *statement->previous_link=statement->next_statement;
+    if(statement->next_statement!=nullptr)
+        statement->next_statement->previous_link=statement->previous_link;
+    statement->owner=nullptr;
+    statement->prepared=nullptr;
+    statement->previous_link=nullptr;
+    statement->next_statement=nullptr;
+}
+
+void database_postgres_close(DiamondPostgresHandle *handle) {
+    while(handle->statements!=nullptr)database_statement_close(handle->statements);
+    while(handle->retired_statements!=nullptr) {
+        DiamondDbPrepared *prepared=handle->retired_statements;
+        handle->retired_statements=prepared->next;
+        free(prepared);
+    }
+#ifndef DIAMOND_NO_POSTGRES
+    if(handle->conn!=nullptr)PQfinish(handle->conn);
+#endif
+    handle->conn=nullptr;
+}
+
+static void mysql_close_retired(DiamondMysqlHandle *handle) {
+    while(handle->retired_statements!=nullptr) {
+        DiamondDbPrepared *prepared=handle->retired_statements;
+        handle->retired_statements=prepared->next;
+#ifndef DIAMOND_NO_MYSQL
+        mysql_stmt_close(prepared->mysql);
+#endif
+        free(prepared);
+    }
+}
+
+void database_mysql_close(DiamondMysqlHandle *handle) {
+    while(handle->statements!=nullptr)database_statement_close(handle->statements);
+    mysql_close_retired(handle);
+#ifndef DIAMOND_NO_MYSQL
+    if(handle->conn!=nullptr)mysql_close(handle->conn);
+#endif
+    handle->conn=nullptr;
+}
 
 #ifndef DIAMOND_NO_SQLITE
 /* Binds one Diamond value at a 1-indexed sqlite3 parameter position.
@@ -491,11 +573,12 @@ DiamondVmStatus sqlite3_dispatch_helper(DiamondVm *vm,DiamondSqlite3Handle *targ
         const DiamondVmStatus prepare_status=
             sqlite3_prepare_only_helper(vm,target_db->db,sql,&stmt);
         if(prepare_status!=DIAMOND_VM_OK)return prepare_status;
-        DiamondSqlite3StatementHandle *handle=allocate_sqlite3_statement_handle(vm,stmt);
+        DiamondStatementHandle *handle=allocate_statement_handle(vm,DIAMOND_OBJECT_SQLITE3);
         if(handle==nullptr) {
             sqlite3_finalize(stmt);
             return DIAMOND_VM_OUT_OF_MEMORY;
         }
+        handle->stmt=stmt;
         registers[dest]=DIAMOND_OBJECT(handle);
         return DIAMOND_VM_OK;
     }
@@ -527,8 +610,8 @@ DiamondVmStatus sqlite3_dispatch_helper(DiamondVm *vm,DiamondSqlite3Handle *targ
  * #last_insert_row_id (still only meaningful on the connection). `params`
  * is accepted the same way (Nil/Array/Hash) as the connection's own
  * #execute/#query. */
-DiamondVmStatus sqlite3_statement_dispatch_helper(DiamondVm *vm,
-        DiamondSqlite3StatementHandle *target_stmt,const DiamondStringConstant *method_name,
+static DiamondVmStatus sqlite3_statement_dispatch_helper(DiamondVm *vm,
+        DiamondStatementHandle *target_stmt,const DiamondStringConstant *method_name,
         DiamondValue *registers,uint16_t base,uint8_t argc,uint16_t dest) {
     const bool execute_method=method_name->length==7&&
         memcmp(method_name->chars,"execute",7)==0;
@@ -543,10 +626,7 @@ DiamondVmStatus sqlite3_statement_dispatch_helper(DiamondVm *vm,
     }
     if(close_method) {
         if(argc!=0)return DIAMOND_VM_ARITY_ERROR;
-        if(target_stmt->stmt!=nullptr) {
-            sqlite3_finalize(target_stmt->stmt);
-            target_stmt->stmt=nullptr;
-        }
+        database_statement_close(target_stmt);
         registers[dest]=DIAMOND_NIL;return DIAMOND_VM_OK;
     }
     if(target_stmt->stmt==nullptr) {
@@ -627,8 +707,8 @@ DiamondVmStatus sqlite3_dispatch_helper(DiamondVm *vm,DiamondSqlite3Handle *targ
     return DIAMOND_VM_SQLITE3_ERROR;
 }
 
-DiamondVmStatus sqlite3_statement_dispatch_helper(DiamondVm *vm,
-        DiamondSqlite3StatementHandle *target_stmt,const DiamondStringConstant *method_name,
+static DiamondVmStatus sqlite3_statement_dispatch_helper(DiamondVm *vm,
+        DiamondStatementHandle *target_stmt,const DiamondStringConstant *method_name,
         DiamondValue *registers,uint16_t base,uint8_t argc,uint16_t dest) {
     (void)target_stmt;(void)method_name;(void)registers;(void)base;(void)argc;(void)dest;
     snprintf(vm->error,sizeof vm->error,"SQLite3 support is not compiled into this build");
@@ -815,6 +895,83 @@ static bool postgres_decode_value_helper(DiamondVm *vm,PGresult *res,int row,int
     }
 }
 
+static void postgres_close_retired(DiamondVm *vm,DiamondPostgresHandle *handle) {
+    if(handle->retired_statements==nullptr||PQtransactionStatus(handle->conn)!=PQTRANS_IDLE)
+        return;
+    /* GC queues names without calling libpq. Deallocate outside a transaction
+     * so even a name removed explicitly by SQL cannot abort application work. */
+    PGcancel *cancel=vm->interrupt_flag!=nullptr?PQgetCancel(handle->conn):nullptr;
+    const bool may_run=cancel==nullptr||
+        vm_blocking_call_begin(vm,DIAMOND_BLOCKING_POSTGRES,cancel);
+    while(may_run&&!vm_interrupt_requested(vm)&&handle->retired_statements!=nullptr) {
+        DiamondDbPrepared *retired=handle->retired_statements;
+        char sql[sizeof retired->name+sizeof "DEALLOCATE "];
+        snprintf(sql,sizeof sql,"DEALLOCATE %s",retired->name);
+        PGresult *result=PQexec(handle->conn,sql);
+        if(result!=nullptr)PQclear(result);
+        handle->retired_statements=retired->next;
+        free(retired);
+    }
+    if(cancel!=nullptr) {
+        vm_blocking_call_end(vm);
+        PQfreeCancel(cancel);
+    }
+}
+
+static DiamondVmStatus postgres_check_result(DiamondVm *vm,DiamondPostgresHandle *handle,
+        bool may_run,PGresult *res) {
+    if(!may_run||(vm_interrupt_requested(vm)&&
+       (res==nullptr||PQresultStatus(res)==PGRES_FATAL_ERROR))) {
+        if(res!=nullptr)PQclear(res);
+        return DIAMOND_VM_INTERRUPTED;
+    }
+    if(res==nullptr) {
+        snprintf(vm->error,sizeof vm->error,"%s",PQerrorMessage(handle->conn));
+        return DIAMOND_VM_POSTGRES_ERROR;
+    }
+    const ExecStatusType status=PQresultStatus(res);
+    if(status!=PGRES_TUPLES_OK&&status!=PGRES_COMMAND_OK) {
+        snprintf(vm->error,sizeof vm->error,"%s",PQresultErrorMessage(res));
+        PQclear(res);
+        return DIAMOND_VM_POSTGRES_ERROR;
+    }
+    return DIAMOND_VM_OK;
+}
+
+static DiamondVmStatus postgres_prepare(DiamondVm *vm,DiamondPostgresHandle *handle,
+        const DiamondString *sql,DiamondValue *result) {
+    DiamondStatementHandle *statement=allocate_statement_handle(vm,DIAMOND_OBJECT_POSTGRES);
+    if(statement==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
+    DiamondDbPrepared *prepared=malloc(sizeof *prepared);
+    if(prepared==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
+    char *translated=postgres_translate_placeholders_helper(sql->chars,sql->length,
+        &prepared->parameter_count);
+    if(translated==nullptr) {
+        free(prepared);
+        return DIAMOND_VM_OUT_OF_MEMORY;
+    }
+    snprintf(prepared->name,sizeof prepared->name,"d6_statement_%" PRIu64,
+        ++handle->statement_sequence);
+    PGcancel *cancel=vm->interrupt_flag!=nullptr?PQgetCancel(handle->conn):nullptr;
+    const bool may_run=cancel==nullptr||
+        vm_blocking_call_begin(vm,DIAMOND_BLOCKING_POSTGRES,cancel);
+    PGresult *res=may_run?PQprepare(handle->conn,prepared->name,translated,0,nullptr):nullptr;
+    if(cancel!=nullptr) {
+        vm_blocking_call_end(vm);
+        PQfreeCancel(cancel);
+    }
+    free(translated);
+    const DiamondVmStatus status=postgres_check_result(vm,handle,may_run,res);
+    if(status!=DIAMOND_VM_OK) {
+        free(prepared);
+        return status;
+    }
+    PQclear(res);
+    database_statement_link(statement,&handle->object,&handle->statements,prepared);
+    *result=DIAMOND_OBJECT(statement);
+    return DIAMOND_VM_OK;
+}
+
 /* Shared translate+bind+exec step behind #execute/#query/the internal
  * SELECT lastval() #last_insert_row_id() runs. Unlike
  * sqlite3_prepare_helper, no manual multiple-statements guard is needed:
@@ -822,13 +979,16 @@ static bool postgres_decode_value_helper(DiamondVm *vm,PGresult *res,int row,int
  * parameter count, surfacing that as an ordinary error PGresult this
  * function already turns into DIAMOND_VM_POSTGRES_ERROR. */
 static DiamondVmStatus postgres_exec_helper(DiamondVm *vm,DiamondPostgresHandle *handle,
-        const char *sql_chars,size_t sql_length,const DiamondValue *param_values,
-        size_t param_count,PGresult **out_res) {
-    size_t placeholder_count=0;
-    char *translated=postgres_translate_placeholders_helper(sql_chars,sql_length,
-        &placeholder_count);
-    if(translated==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
-    if(param_count!=placeholder_count) {
+        const char *sql,size_t sql_length,const DiamondDbPrepared *prepared,
+        const DiamondValue *param_values,size_t param_count,PGresult **out_res) {
+    size_t placeholder_count=prepared==nullptr?0:prepared->parameter_count;
+    char *translated=nullptr;
+    if(prepared==nullptr) {
+        translated=postgres_translate_placeholders_helper(sql,sql_length,
+            &placeholder_count);
+        if(translated==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
+    }
+    if(param_count!=placeholder_count||param_count>INT_MAX) {
         free(translated);
         snprintf(vm->error,sizeof vm->error,
             "PostgreSQL statement expects %zu bound parameter(s), got %zu",
@@ -847,39 +1007,33 @@ static DiamondVmStatus postgres_exec_helper(DiamondVm *vm,DiamondPostgresHandle 
     PGcancel *cancel=vm->interrupt_flag!=nullptr?PQgetCancel(handle->conn):nullptr;
     const bool may_run=cancel==nullptr||
         vm_blocking_call_begin(vm,DIAMOND_BLOCKING_POSTGRES,cancel);
-    PGresult *res=may_run?PQexecParams(handle->conn,translated,(int)param_count,
-        nullptr,(const char *const *)bound_values,nullptr,nullptr,0):nullptr;
+    PGresult *res=nullptr;
+    if(may_run) {
+        if(prepared==nullptr)
+            res=PQexecParams(handle->conn,translated,(int)param_count,nullptr,
+                (const char *const *)bound_values,nullptr,nullptr,0);
+        else
+            res=PQexecPrepared(handle->conn,prepared->name,(int)param_count,
+                (const char *const *)bound_values,nullptr,nullptr,0);
+    }
     if(cancel!=nullptr) {
         vm_blocking_call_end(vm);
         PQfreeCancel(cancel);
     }
     free(translated);
     postgres_free_params_helper(bound_values,param_count);
-    if(!may_run||(vm_interrupt_requested(vm)&&
-       (res==nullptr||PQresultStatus(res)==PGRES_FATAL_ERROR))) {
-        if(res!=nullptr)PQclear(res);
-        return DIAMOND_VM_INTERRUPTED;
-    }
-    if(res==nullptr) {
-        snprintf(vm->error,sizeof vm->error,"%s",PQerrorMessage(handle->conn));
-        return DIAMOND_VM_POSTGRES_ERROR;
-    }
-    const ExecStatusType status=PQresultStatus(res);
-    if(status!=PGRES_TUPLES_OK&&status!=PGRES_COMMAND_OK) {
-        snprintf(vm->error,sizeof vm->error,"%s",PQresultErrorMessage(res));
-        PQclear(res);
-        return DIAMOND_VM_POSTGRES_ERROR;
-    }
+    const DiamondVmStatus status=postgres_check_result(vm,handle,may_run,res);
+    if(status!=DIAMOND_VM_OK)return status;
     *out_res=res;
     return DIAMOND_VM_OK;
 }
 
 static DiamondVmStatus postgres_execute_helper(DiamondVm *vm,DiamondPostgresHandle *handle,
-        const char *sql_chars,size_t sql_length,const DiamondValue *param_values,
+        const char *sql,size_t sql_length,const DiamondDbPrepared *prepared,const DiamondValue *param_values,
         size_t param_count,DiamondValue *result) {
     PGresult *res=nullptr;
     const DiamondVmStatus status=
-        postgres_exec_helper(vm,handle,sql_chars,sql_length,param_values,param_count,&res);
+        postgres_exec_helper(vm,handle,sql,sql_length,prepared,param_values,param_count,&res);
     if(status!=DIAMOND_VM_OK)return status;
     const char *affected=PQcmdTuples(res);
     *result=DIAMOND_INT(affected[0]=='\0'?0:strtoll(affected,nullptr,10));
@@ -894,11 +1048,11 @@ static DiamondVmStatus postgres_execute_helper(DiamondVm *vm,DiamondPostgresHand
  * Nil first, rooting the key before decoding may itself allocate a
  * String) before its real column values are filled in one at a time. */
 static DiamondVmStatus postgres_query_helper(DiamondVm *vm,DiamondPostgresHandle *handle,
-        const char *sql_chars,size_t sql_length,const DiamondValue *param_values,
+        const char *sql,size_t sql_length,const DiamondDbPrepared *prepared,const DiamondValue *param_values,
         size_t param_count,DiamondValue *result) {
     PGresult *res=nullptr;
     const DiamondVmStatus status=
-        postgres_exec_helper(vm,handle,sql_chars,sql_length,param_values,param_count,&res);
+        postgres_exec_helper(vm,handle,sql,sql_length,prepared,param_values,param_count,&res);
     if(status!=DIAMOND_VM_OK)return status;
     DiamondArray *rows=allocate_array(vm,nullptr,0);
     if(rows==nullptr) {
@@ -959,34 +1113,34 @@ DiamondVmStatus postgres_dispatch_helper(DiamondVm *vm,DiamondPostgresHandle *ta
         memcmp(method_name->chars,"execute",7)==0;
     const bool query_method=method_name->length==5&&
         memcmp(method_name->chars,"query",5)==0;
+    const bool prepare_method=method_name->length==7&&
+        memcmp(method_name->chars,"prepare",7)==0;
     const bool last_insert_row_id_method=method_name->length==18&&
         memcmp(method_name->chars,"last_insert_row_id",18)==0;
     const bool close_method=method_name->length==5&&
         memcmp(method_name->chars,"close",5)==0;
-    if(!execute_method&&!query_method&&!last_insert_row_id_method&&!close_method) {
+    if(!execute_method&&!query_method&&!prepare_method&&!last_insert_row_id_method&&!close_method) {
         snprintf(vm->error,sizeof vm->error,"undefined method '%.*s' for %s",
             (int)method_name->length,method_name->chars,"PostgreSQL");
         return DIAMOND_VM_TYPE_ERROR;
     }
     if(close_method) {
         if(argc!=0)return DIAMOND_VM_ARITY_ERROR;
-        if(target_db->conn!=nullptr) {
-            PQfinish(target_db->conn);
-            target_db->conn=nullptr;
-        }
+        database_postgres_close(target_db);
         registers[dest]=DIAMOND_NIL;return DIAMOND_VM_OK;
     }
     if(target_db->conn==nullptr) {
         snprintf(vm->error,sizeof vm->error,"PostgreSQL connection is closed");
         return DIAMOND_VM_POSTGRES_ERROR;
     }
+    postgres_close_retired(vm,target_db);
     if(last_insert_row_id_method) {
         if(argc!=0)return DIAMOND_VM_ARITY_ERROR;
         static const char lastval_sql[]="SELECT lastval()";
         /* The query helper allocates repeatedly while it builds its result, so (as with every other caller) the result goes straight into
          * the rooted register; a C local holding the new Array is invisible to the collector. */
         const DiamondVmStatus query_status=postgres_query_helper(vm,target_db,
-            lastval_sql,sizeof lastval_sql-1,nullptr,0,&registers[dest]);
+            lastval_sql,sizeof lastval_sql-1,nullptr,nullptr,0,&registers[dest]);
         if(query_status!=DIAMOND_VM_OK)return query_status;
         const DiamondArray *row_array=(const DiamondArray *)registers[dest].as.object;
         const DiamondHash *row=(const DiamondHash *)row_array->values[0].as.object;
@@ -994,7 +1148,7 @@ DiamondVmStatus postgres_dispatch_helper(DiamondVm *vm,DiamondPostgresHandle *ta
         return DIAMOND_VM_OK;
     }
     /* execute/query share the same argument shape: (sql) or (sql, params). */
-    if(argc!=1&&argc!=2)return DIAMOND_VM_ARITY_ERROR;
+    if(argc!=1&&(argc!=2||prepare_method))return DIAMOND_VM_ARITY_ERROR;
     if(registers[base].kind!=DIAMOND_VALUE_OBJECT||
        registers[base].as.object->kind!=DIAMOND_OBJECT_STRING) {
         snprintf(vm->error,sizeof vm->error,"PostgreSQL#%.*s's sql argument must be a String",
@@ -1002,6 +1156,7 @@ DiamondVmStatus postgres_dispatch_helper(DiamondVm *vm,DiamondPostgresHandle *ta
         return DIAMOND_VM_TYPE_ERROR;
     }
     const DiamondString *sql=(const DiamondString *)registers[base].as.object;
+    if(prepare_method)return postgres_prepare(vm,target_db,sql,&registers[dest]);
     const DiamondValue *param_values=nullptr;
     size_t param_count=0;
     if(argc==2) {
@@ -1019,14 +1174,14 @@ DiamondVmStatus postgres_dispatch_helper(DiamondVm *vm,DiamondPostgresHandle *ta
     if(execute_method) {
         DiamondValue execute_result=DIAMOND_NIL;
         const DiamondVmStatus execute_status=postgres_execute_helper(vm,
-            target_db,sql->chars,sql->length,param_values,param_count,&execute_result);
+            target_db,sql->chars,sql->length,nullptr,param_values,param_count,&execute_result);
         if(execute_status!=DIAMOND_VM_OK)return execute_status;
         registers[dest]=execute_result;return DIAMOND_VM_OK;
     }
     /* query_method: postgres_query_helper writes directly into
      * registers[dest] (a real GC root), not a local -- see its own
      * comment. */
-    return postgres_query_helper(vm,target_db,sql->chars,sql->length,param_values,
+    return postgres_query_helper(vm,target_db,sql->chars,sql->length,nullptr,param_values,
         param_count,&registers[dest]);
 }
 
@@ -1165,55 +1320,49 @@ static bool mysql_decode_value_helper(DiamondVm *vm,const MYSQL_FIELD *field,
  * connection is never opened with CLIENT_MULTI_STATEMENTS (see
  * DIAMOND_OP_MYSQL_OPEN), so a semicolon-separated second statement is
  * simply a syntax error from mysql_stmt_prepare itself. */
-static DiamondVmStatus mysql_exec_impl(DiamondVm *vm,DiamondMysqlHandle *handle,
-        const char *sql_chars,size_t sql_length,const DiamondValue *param_values,
-        size_t param_count,MYSQL_STMT **out_stmt) {
+static MYSQL_STMT *mysql_prepare_native(DiamondVm *vm,DiamondMysqlHandle *handle,
+        const char *sql_chars,size_t sql_length) {
     MYSQL_STMT *stmt=mysql_stmt_init(handle->conn);
     if(stmt==nullptr) {
         snprintf(vm->error,sizeof vm->error,"%s",mysql_error(handle->conn));
-        return DIAMOND_VM_MYSQL_ERROR;
+        return nullptr;
     }
     if(mysql_stmt_prepare(stmt,sql_chars,(unsigned long)sql_length)!=0) {
         snprintf(vm->error,sizeof vm->error,"%s",mysql_stmt_error(stmt));
         mysql_stmt_close(stmt);
-        return DIAMOND_VM_MYSQL_ERROR;
+        return nullptr;
     }
+    return stmt;
+}
+
+static DiamondVmStatus mysql_exec_impl(DiamondVm *vm,MYSQL_STMT *stmt,
+        const DiamondValue *param_values,size_t param_count) {
     const unsigned long placeholder_count=mysql_stmt_param_count(stmt);
-    if((unsigned long)param_count!=placeholder_count) {
+    if(param_count!=placeholder_count) {
         snprintf(vm->error,sizeof vm->error,
             "MySQL statement expects %lu bound parameter(s), got %zu",
             placeholder_count,param_count);
-        mysql_stmt_close(stmt);
         return DIAMOND_VM_ARITY_ERROR;
     }
+    MYSQL_BIND *binds=nullptr;
+    DiamondMysqlParamStorage *storage=nullptr;
     if(param_count>0) {
-        MYSQL_BIND *binds=nullptr;
-        DiamondMysqlParamStorage *storage=nullptr;
         const DiamondVmStatus bind_status=
             mysql_bind_params_helper(vm,param_values,param_count,&binds,&storage);
-        if(bind_status!=DIAMOND_VM_OK) {
-            mysql_stmt_close(stmt);
-            return bind_status;
-        }
+        if(bind_status!=DIAMOND_VM_OK)return bind_status;
         if(mysql_stmt_bind_param(stmt,binds)!=0) {
             snprintf(vm->error,sizeof vm->error,"%s",mysql_stmt_error(stmt));
             free(binds);free(storage);
-            mysql_stmt_close(stmt);
             return DIAMOND_VM_MYSQL_ERROR;
         }
-        const int execute_result=mysql_stmt_execute(stmt);
-        free(binds);free(storage);
-        if(execute_result!=0) {
-            snprintf(vm->error,sizeof vm->error,"%s",mysql_stmt_error(stmt));
-            mysql_stmt_close(stmt);
-            return DIAMOND_VM_MYSQL_ERROR;
-        }
-    } else if(mysql_stmt_execute(stmt)!=0) {
+    }
+    const int execute_result=mysql_stmt_execute(stmt);
+    free(binds);
+    free(storage);
+    if(execute_result!=0) {
         snprintf(vm->error,sizeof vm->error,"%s",mysql_stmt_error(stmt));
-        mysql_stmt_close(stmt);
         return DIAMOND_VM_MYSQL_ERROR;
     }
-    *out_stmt=stmt;
     return DIAMOND_VM_OK;
 }
 
@@ -1232,14 +1381,73 @@ static void mysql_blocking_end(DiamondVm *vm) {
 }
 
 static DiamondVmStatus mysql_exec_helper(DiamondVm *vm,DiamondMysqlHandle *handle,
-        const char *sql_chars,size_t sql_length,const DiamondValue *param_values,
+        const char *sql_chars,size_t sql_length,MYSQL_STMT *prepared,const DiamondValue *param_values,
         size_t param_count,MYSQL_STMT **out_stmt) {
     if(!mysql_blocking_begin(vm,handle))return DIAMOND_VM_INTERRUPTED;
-    const DiamondVmStatus status=mysql_exec_impl(vm,handle,sql_chars,sql_length,
-        param_values,param_count,out_stmt);
+    mysql_close_retired(handle);
+    MYSQL_STMT *stmt=prepared==nullptr?
+        mysql_prepare_native(vm,handle,sql_chars,sql_length):prepared;
+    const DiamondVmStatus status=stmt==nullptr?DIAMOND_VM_MYSQL_ERROR:
+        mysql_exec_impl(vm,stmt,param_values,param_count);
+    if(status==DIAMOND_VM_OK)*out_stmt=stmt;
+    else if(prepared==nullptr&&stmt!=nullptr)mysql_stmt_close(stmt);
     mysql_blocking_end(vm);
     if(status==DIAMOND_VM_MYSQL_ERROR&&vm_interrupt_requested(vm))
         return DIAMOND_VM_INTERRUPTED;
+    return status;
+}
+
+static DiamondVmStatus mysql_prepare(DiamondVm *vm,DiamondMysqlHandle *handle,
+        const DiamondString *sql,DiamondValue *result) {
+    DiamondStatementHandle *statement=allocate_statement_handle(vm,DIAMOND_OBJECT_MYSQL);
+    if(statement==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
+    DiamondDbPrepared *prepared=malloc(sizeof *prepared);
+    if(prepared==nullptr)return DIAMOND_VM_OUT_OF_MEMORY;
+    if(!mysql_blocking_begin(vm,handle)) {
+        free(prepared);
+        return DIAMOND_VM_INTERRUPTED;
+    }
+    mysql_close_retired(handle);
+    MYSQL_STMT *stmt=mysql_prepare_native(vm,handle,sql->chars,sql->length);
+    mysql_blocking_end(vm);
+    if(stmt==nullptr) {
+        free(prepared);
+        return vm_interrupt_requested(vm)?DIAMOND_VM_INTERRUPTED:DIAMOND_VM_MYSQL_ERROR;
+    }
+    prepared->mysql=stmt;
+    database_statement_link(statement,&handle->object,&handle->statements,prepared);
+    *result=DIAMOND_OBJECT(statement);
+    return DIAMOND_VM_OK;
+}
+
+/* Releasing all results leaves a reusable statement and its connection
+ * ready for the next command, including after a multi-result CALL. */
+static DiamondVmStatus mysql_finish_execution(DiamondVm *vm,DiamondMysqlHandle *handle,
+        MYSQL_STMT *stmt,bool reusable,DiamondVmStatus status) {
+    if(!reusable) {
+        mysql_stmt_close(stmt);
+        return status;
+    }
+    if(status==DIAMOND_VM_INTERRUPTED)return status;
+    if(mysql_stmt_field_count(stmt)==0&&!mysql_stmt_more_results(stmt))return status;
+    if(!mysql_blocking_begin(vm,handle))
+        return DIAMOND_VM_INTERRUPTED;
+    int next=0;
+    for(;;) {
+        if(mysql_stmt_field_count(stmt)!=0&&mysql_stmt_free_result(stmt)!=0) {
+            next=1;
+            break;
+        }
+        if(!mysql_stmt_more_results(stmt))break;
+        next=mysql_stmt_next_result(stmt);
+        if(next!=0)break;
+    }
+    mysql_blocking_end(vm);
+    if(next>0&&status==DIAMOND_VM_OK) {
+        if(vm_interrupt_requested(vm))return DIAMOND_VM_INTERRUPTED;
+        snprintf(vm->error,sizeof vm->error,"%s",mysql_stmt_error(stmt));
+        return DIAMOND_VM_MYSQL_ERROR;
+    }
     return status;
 }
 
@@ -1255,15 +1463,14 @@ static int mysql_store_interruptible(DiamondVm *vm,DiamondMysqlHandle *handle,
 }
 
 static DiamondVmStatus mysql_execute_helper(DiamondVm *vm,DiamondMysqlHandle *handle,
-        const char *sql_chars,size_t sql_length,const DiamondValue *param_values,
+        const char *sql_chars,size_t sql_length,MYSQL_STMT *prepared,const DiamondValue *param_values,
         size_t param_count,DiamondValue *result) {
     MYSQL_STMT *stmt=nullptr;
-    const DiamondVmStatus status=mysql_exec_helper(vm,handle,sql_chars,sql_length,
+    const DiamondVmStatus status=mysql_exec_helper(vm,handle,sql_chars,sql_length,prepared,
         param_values,param_count,&stmt);
     if(status!=DIAMOND_VM_OK)return status;
     *result=DIAMOND_INT((int64_t)mysql_stmt_affected_rows(stmt));
-    mysql_stmt_close(stmt);
-    return DIAMOND_VM_OK;
+    return mysql_finish_execution(vm,handle,stmt,prepared!=nullptr,DIAMOND_VM_OK);
 }
 
 /* Fixed-width result types this driver gives a small inline buffer
@@ -1316,22 +1523,16 @@ static bool mysql_fixed_width_field_helper(enum enum_field_types type) {
  * column are then pulled per cell via mysql_stmt_fetch_column into a
  * freshly sized buffer. This is the standard two-phase dynamic-length
  * fetch pattern for the MySQL C API's binary protocol. */
-static DiamondVmStatus mysql_query_helper(DiamondVm *vm,DiamondMysqlHandle *handle,
-        const char *sql_chars,size_t sql_length,const DiamondValue *param_values,
-        size_t param_count,DiamondValue *result) {
-    MYSQL_STMT *stmt=nullptr;
-    const DiamondVmStatus status=mysql_exec_helper(vm,handle,sql_chars,sql_length,
-        param_values,param_count,&stmt);
-    if(status!=DIAMOND_VM_OK)return status;
+static DiamondVmStatus mysql_query_result(DiamondVm *vm,DiamondMysqlHandle *handle,
+        MYSQL_STMT *stmt,DiamondValue *result) {
     MYSQL_RES *meta=mysql_stmt_result_metadata(stmt);
     if(meta==nullptr) {
         /* Not a resultset-producing statement (e.g. an UPDATE run through
          * #query) -- an empty Array, the same "no rows" shape a SELECT
          * matching nothing produces. */
         DiamondArray *rows=allocate_array(vm,nullptr,0);
-        if(rows==nullptr) {mysql_stmt_close(stmt);return DIAMOND_VM_OUT_OF_MEMORY;}
+        if(rows==nullptr) return DIAMOND_VM_OUT_OF_MEMORY;
         *result=DIAMOND_OBJECT(rows);
-        mysql_stmt_close(stmt);
         return DIAMOND_VM_OK;
     }
     const unsigned int column_count=mysql_num_fields(meta);
@@ -1342,7 +1543,7 @@ static DiamondVmStatus mysql_query_helper(DiamondVm *vm,DiamondMysqlHandle *hand
     char *fixed_buffers=calloc(column_count,DIAMOND_MYSQL_FIXED_FIELD_WIDTH);
     if(out_binds==nullptr||lengths==nullptr||nulls==nullptr||fixed_buffers==nullptr) {
         free(out_binds);free(lengths);free(nulls);free(fixed_buffers);
-        mysql_free_result(meta);mysql_stmt_close(stmt);
+        mysql_free_result(meta);
         return DIAMOND_VM_OUT_OF_MEMORY;
     }
     for(unsigned int col=0;col<column_count;col++) {
@@ -1357,7 +1558,7 @@ static DiamondVmStatus mysql_query_helper(DiamondVm *vm,DiamondMysqlHandle *hand
     if(mysql_stmt_bind_result(stmt,out_binds)!=0) {
         snprintf(vm->error,sizeof vm->error,"%s",mysql_stmt_error(stmt));
         free(out_binds);free(lengths);free(nulls);free(fixed_buffers);
-        mysql_free_result(meta);mysql_stmt_close(stmt);
+        mysql_free_result(meta);
         return DIAMOND_VM_MYSQL_ERROR;
     }
     bool store_interrupted=false;
@@ -1365,13 +1566,13 @@ static DiamondVmStatus mysql_query_helper(DiamondVm *vm,DiamondMysqlHandle *hand
         if(!store_interrupted)
             snprintf(vm->error,sizeof vm->error,"%s",mysql_stmt_error(stmt));
         free(out_binds);free(lengths);free(nulls);free(fixed_buffers);
-        mysql_free_result(meta);mysql_stmt_close(stmt);
+        mysql_free_result(meta);
         return store_interrupted?DIAMOND_VM_INTERRUPTED:DIAMOND_VM_MYSQL_ERROR;
     }
     DiamondArray *rows=allocate_array(vm,nullptr,0);
     if(rows==nullptr) {
         free(out_binds);free(lengths);free(nulls);free(fixed_buffers);
-        mysql_free_result(meta);mysql_stmt_close(stmt);
+        mysql_free_result(meta);
         return DIAMOND_VM_OUT_OF_MEMORY;
     }
     *result=DIAMOND_OBJECT(rows);
@@ -1381,18 +1582,18 @@ static DiamondVmStatus mysql_query_helper(DiamondVm *vm,DiamondMysqlHandle *hand
         if(fetch_status!=0&&fetch_status!=MYSQL_DATA_TRUNCATED) {
             snprintf(vm->error,sizeof vm->error,"%s",mysql_stmt_error(stmt));
             free(out_binds);free(lengths);free(nulls);free(fixed_buffers);
-            mysql_free_result(meta);mysql_stmt_close(stmt);
+            mysql_free_result(meta);
             return DIAMOND_VM_MYSQL_ERROR;
         }
         DiamondHash *row_hash=allocate_hash(vm);
         if(row_hash==nullptr) {
             free(out_binds);free(lengths);free(nulls);free(fixed_buffers);
-            mysql_free_result(meta);mysql_stmt_close(stmt);
+            mysql_free_result(meta);
             return DIAMOND_VM_OUT_OF_MEMORY;
         }
         if(!array_push(vm,rows,DIAMOND_OBJECT(row_hash))) {
             free(out_binds);free(lengths);free(nulls);free(fixed_buffers);
-            mysql_free_result(meta);mysql_stmt_close(stmt);
+            mysql_free_result(meta);
             return DIAMOND_VM_OUT_OF_MEMORY;
         }
         for(unsigned int col=0;col<column_count;col++) {
@@ -1400,12 +1601,12 @@ static DiamondVmStatus mysql_query_helper(DiamondVm *vm,DiamondMysqlHandle *hand
                 allocate_string(vm,fields[col].name,strlen(fields[col].name));
             if(key==nullptr) {
                 free(out_binds);free(lengths);free(nulls);free(fixed_buffers);
-                mysql_free_result(meta);mysql_stmt_close(stmt);
+                mysql_free_result(meta);
                 return DIAMOND_VM_OUT_OF_MEMORY;
             }
             if(!hash_set(vm,row_hash,DIAMOND_OBJECT(key),DIAMOND_NIL)) {
                 free(out_binds);free(lengths);free(nulls);free(fixed_buffers);
-                mysql_free_result(meta);mysql_stmt_close(stmt);
+                mysql_free_result(meta);
                 return DIAMOND_VM_OUT_OF_MEMORY;
             }
             DiamondValue column_value=DIAMOND_NIL;
@@ -1421,7 +1622,7 @@ static DiamondVmStatus mysql_query_helper(DiamondVm *vm,DiamondMysqlHandle *hand
                     char *buffer=malloc(value_length>0?value_length:1);
                     if(buffer==nullptr) {
                         free(out_binds);free(lengths);free(nulls);free(fixed_buffers);
-                        mysql_free_result(meta);mysql_stmt_close(stmt);
+                        mysql_free_result(meta);
                         return DIAMOND_VM_OUT_OF_MEMORY;
                     }
                     MYSQL_BIND fetch_bind=(MYSQL_BIND){0};
@@ -1432,7 +1633,7 @@ static DiamondVmStatus mysql_query_helper(DiamondVm *vm,DiamondMysqlHandle *hand
                         snprintf(vm->error,sizeof vm->error,"%s",mysql_stmt_error(stmt));
                         free(buffer);
                         free(out_binds);free(lengths);free(nulls);free(fixed_buffers);
-                        mysql_free_result(meta);mysql_stmt_close(stmt);
+                        mysql_free_result(meta);
                         return DIAMOND_VM_MYSQL_ERROR;
                     }
                     decoded=mysql_decode_value_helper(vm,&fields[col],buffer,
@@ -1441,21 +1642,39 @@ static DiamondVmStatus mysql_query_helper(DiamondVm *vm,DiamondMysqlHandle *hand
                 }
                 if(!decoded) {
                     free(out_binds);free(lengths);free(nulls);free(fixed_buffers);
-                    mysql_free_result(meta);mysql_stmt_close(stmt);
+                    mysql_free_result(meta);
                     return DIAMOND_VM_OUT_OF_MEMORY;
                 }
             }
             if(!hash_set(vm,row_hash,DIAMOND_OBJECT(key),column_value)) {
                 free(out_binds);free(lengths);free(nulls);free(fixed_buffers);
-                mysql_free_result(meta);mysql_stmt_close(stmt);
+                mysql_free_result(meta);
                 return DIAMOND_VM_OUT_OF_MEMORY;
             }
         }
     }
     free(out_binds);free(lengths);free(nulls);free(fixed_buffers);
     mysql_free_result(meta);
-    mysql_stmt_close(stmt);
     return DIAMOND_VM_OK;
+}
+
+static DiamondVmStatus mysql_query_helper(DiamondVm *vm,DiamondMysqlHandle *handle,
+        const char *sql_chars,size_t sql_length,DiamondStatementHandle *prepared,
+        const DiamondValue *param_values,size_t param_count,DiamondValue *result) {
+    /* The result register can replace the receiver while rows are allocated. */
+    const size_t mark=vm->gc_protected_count;
+    DiamondObject *root=prepared==nullptr?&handle->object:&prepared->object;
+    if(!gc_protect(vm,DIAMOND_OBJECT(root)))return DIAMOND_VM_OUT_OF_MEMORY;
+    MYSQL_STMT *stmt=nullptr;
+    MYSQL_STMT *native=prepared==nullptr?nullptr:prepared->prepared->mysql;
+    DiamondVmStatus status=mysql_exec_helper(vm,handle,sql_chars,sql_length,native,
+        param_values,param_count,&stmt);
+    if(status==DIAMOND_VM_OK) {
+        status=mysql_query_result(vm,handle,stmt,result);
+        status=mysql_finish_execution(vm,handle,stmt,prepared!=nullptr,status);
+    }
+    gc_unprotect(vm,mark);
+    return status;
 }
 
 /* #execute/#query/#last_insert_row_id/#close -- factored out of the
@@ -1473,21 +1692,20 @@ DiamondVmStatus mysql_dispatch_helper(DiamondVm *vm,DiamondMysqlHandle *target_d
         memcmp(method_name->chars,"execute",7)==0;
     const bool query_method=method_name->length==5&&
         memcmp(method_name->chars,"query",5)==0;
+    const bool prepare_method=method_name->length==7&&
+        memcmp(method_name->chars,"prepare",7)==0;
     const bool last_insert_row_id_method=method_name->length==18&&
         memcmp(method_name->chars,"last_insert_row_id",18)==0;
     const bool close_method=method_name->length==5&&
         memcmp(method_name->chars,"close",5)==0;
-    if(!execute_method&&!query_method&&!last_insert_row_id_method&&!close_method) {
+    if(!execute_method&&!query_method&&!prepare_method&&!last_insert_row_id_method&&!close_method) {
         snprintf(vm->error,sizeof vm->error,"undefined method '%.*s' for %s",
             (int)method_name->length,method_name->chars,"MySQL");
         return DIAMOND_VM_TYPE_ERROR;
     }
     if(close_method) {
         if(argc!=0)return DIAMOND_VM_ARITY_ERROR;
-        if(target_db->conn!=nullptr) {
-            mysql_close(target_db->conn);
-            target_db->conn=nullptr;
-        }
+        database_mysql_close(target_db);
         registers[dest]=DIAMOND_NIL;return DIAMOND_VM_OK;
     }
     if(target_db->conn==nullptr) {
@@ -1500,7 +1718,7 @@ DiamondVmStatus mysql_dispatch_helper(DiamondVm *vm,DiamondMysqlHandle *target_d
         return DIAMOND_VM_OK;
     }
     /* execute/query share the same argument shape: (sql) or (sql, params). */
-    if(argc!=1&&argc!=2)return DIAMOND_VM_ARITY_ERROR;
+    if(argc!=1&&(argc!=2||prepare_method))return DIAMOND_VM_ARITY_ERROR;
     if(registers[base].kind!=DIAMOND_VALUE_OBJECT||
        registers[base].as.object->kind!=DIAMOND_OBJECT_STRING) {
         snprintf(vm->error,sizeof vm->error,"MySQL#%.*s's sql argument must be a String",
@@ -1508,6 +1726,7 @@ DiamondVmStatus mysql_dispatch_helper(DiamondVm *vm,DiamondMysqlHandle *target_d
         return DIAMOND_VM_TYPE_ERROR;
     }
     const DiamondString *sql=(const DiamondString *)registers[base].as.object;
+    if(prepare_method)return mysql_prepare(vm,target_db,sql,&registers[dest]);
     const DiamondValue *param_values=nullptr;
     size_t param_count=0;
     if(argc==2) {
@@ -1525,13 +1744,13 @@ DiamondVmStatus mysql_dispatch_helper(DiamondVm *vm,DiamondMysqlHandle *target_d
     if(execute_method) {
         DiamondValue execute_result=DIAMOND_NIL;
         const DiamondVmStatus execute_status=mysql_execute_helper(vm,
-            target_db,sql->chars,sql->length,param_values,param_count,&execute_result);
+            target_db,sql->chars,sql->length,nullptr,param_values,param_count,&execute_result);
         if(execute_status!=DIAMOND_VM_OK)return execute_status;
         registers[dest]=execute_result;return DIAMOND_VM_OK;
     }
     /* query_method: mysql_query_helper writes directly into registers[dest]
      * (a real GC root), not a local -- see its own comment. */
-    return mysql_query_helper(vm,target_db,sql->chars,sql->length,param_values,
+    return mysql_query_helper(vm,target_db,sql->chars,sql->length,nullptr,param_values,
         param_count,&registers[dest]);
 }
 #else
@@ -1547,3 +1766,73 @@ DiamondVmStatus mysql_dispatch_helper(DiamondVm *vm,DiamondMysqlHandle *target_d
     return DIAMOND_VM_MYSQL_ERROR;
 }
 #endif
+
+DiamondVmStatus statement_dispatch_helper(DiamondVm *vm,DiamondStatementHandle *statement,
+        const DiamondStringConstant *method,DiamondValue *registers,uint16_t base,
+        uint8_t argc,uint16_t dest) {
+    if(statement->backend==DIAMOND_OBJECT_SQLITE3)
+        return sqlite3_statement_dispatch_helper(vm,statement,method,registers,base,argc,dest);
+#if !defined(DIAMOND_NO_POSTGRES) || !defined(DIAMOND_NO_MYSQL)
+    const bool execute=method->length==7&&memcmp(method->chars,"execute",7)==0;
+    const bool query=method->length==5&&memcmp(method->chars,"query",5)==0;
+    const bool close=method->length==5&&memcmp(method->chars,"close",5)==0;
+    const bool postgres=statement->backend==DIAMOND_OBJECT_POSTGRES;
+    const char *type=postgres?"PostgreSQL::Statement":"MySQL::Statement";
+    if(!execute&&!query&&!close) {
+        snprintf(vm->error,sizeof vm->error,"undefined method '%.*s' for %s",
+            (int)method->length,method->chars,type);
+        return DIAMOND_VM_TYPE_ERROR;
+    }
+    DiamondObject *owner=statement->owner;
+    if(close) {
+        if(argc!=0)return DIAMOND_VM_ARITY_ERROR;
+        database_statement_close(statement);
+#ifndef DIAMOND_NO_POSTGRES
+        if(postgres&&owner!=nullptr)postgres_close_retired(vm,(DiamondPostgresHandle *)owner);
+#endif
+#ifndef DIAMOND_NO_MYSQL
+        if(!postgres&&owner!=nullptr) {
+            DiamondMysqlHandle *handle=(DiamondMysqlHandle *)owner;
+            if(mysql_blocking_begin(vm,handle)) {
+                mysql_close_retired(handle);
+                mysql_blocking_end(vm);
+            }
+        }
+#endif
+        registers[dest]=DIAMOND_NIL;
+        return DIAMOND_VM_OK;
+    }
+    if(owner==nullptr) {
+        snprintf(vm->error,sizeof vm->error,"%s is closed",type);
+        return postgres?DIAMOND_VM_POSTGRES_ERROR:DIAMOND_VM_MYSQL_ERROR;
+    }
+    if(argc>1)return DIAMOND_VM_ARITY_ERROR;
+    const DiamondValue *values=nullptr;
+    size_t count=0;
+    if(argc==1) {
+        const DiamondVmStatus status=database_statement_params(vm,
+            execute?"Statement#execute":"Statement#query",registers[base],true,&values,&count);
+        if(status!=DIAMOND_VM_OK)return status;
+    }
+#ifndef DIAMOND_NO_POSTGRES
+    if(postgres) {
+        DiamondPostgresHandle *handle=(DiamondPostgresHandle *)owner;
+        postgres_close_retired(vm,handle);
+        if(execute)return postgres_execute_helper(vm,handle,nullptr,0,statement->prepared,
+            values,count,&registers[dest]);
+        return postgres_query_helper(vm,handle,nullptr,0,statement->prepared,
+            values,count,&registers[dest]);
+    }
+#endif
+#ifndef DIAMOND_NO_MYSQL
+    if(!postgres) {
+        DiamondMysqlHandle *handle=(DiamondMysqlHandle *)owner;
+        if(execute)return mysql_execute_helper(vm,handle,nullptr,0,statement->prepared->mysql,
+            values,count,&registers[dest]);
+        return mysql_query_helper(vm,handle,nullptr,0,statement,values,count,&registers[dest]);
+    }
+#endif
+#endif
+    snprintf(vm->error,sizeof vm->error,"network database support is not compiled into this build");
+    return DIAMOND_VM_TYPE_ERROR;
+}

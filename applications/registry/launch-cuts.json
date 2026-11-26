@@ -1,6 +1,6 @@
 {
   "active_record": "0.21.4",
-  "arel": "0.35.6",
+  "arel": "0.35.7",
   "cancellation": "0.7.2",
   "cookies": "0.2.7",
   "csv": "0.1.1",

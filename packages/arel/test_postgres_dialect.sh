@@ -54,3 +54,5 @@ export DIAMOND_STRESS_GC=1
 export DIAMOND_STRESS_MINOR_GC=1
 
 "$diamond" test_postgres_dialect.d6
+
+"$diamond" ../../tests/database_prepared.d6 postgres
