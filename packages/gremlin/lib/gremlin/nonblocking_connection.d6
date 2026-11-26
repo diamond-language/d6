@@ -10,6 +10,7 @@ class NonblockingConnection
     @closed = false
     @deadline = nil
     @request_id = nil
+    @waiting_for_request = false
     # The client's address, read once while the socket is open. nil on a runtime without
     # peer_address (older than the release that added it) or when there is none.
     @peer_address = nil
@@ -19,12 +20,27 @@ class NonblockingConnection
       @peer_address = nil
     end
     if limits != nil
-      @deadline = Time.monotonic() + limits["timeout_seconds"]
+      @timeout_seconds = limits["timeout_seconds"]
+      @deadline = Time.monotonic() + @timeout_seconds
       @request_id = SecureRandom.hex(16)
     end
   end
 
   def deadline() = @deadline
+
+  def wait_for_next_request()
+    @waiting_for_request = true
+    @deadline = Time.monotonic() + @timeout_seconds
+  end
+
+  def waiting_for_request?() = @waiting_for_request
+  def buffered_request?() = @waiting_for_request && !@buffer.empty?()
+
+  def begin_next_request()
+    @waiting_for_request = false
+    @deadline = Time.monotonic() + @timeout_seconds
+    @request_id = SecureRandom.hex(16)
+  end
 
   # Removes the request deadline. A handler that keeps the connection for as long as it lives (a WebSocket) is not subject to the per-request
   # timeout, which would otherwise close it a fixed time after it was accepted.

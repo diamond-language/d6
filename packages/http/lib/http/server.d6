@@ -4,11 +4,14 @@ class HttpRequestError < StandardError
 end
 
 # Bounded parsing is opt-in; Gremlin supplies per-service limits.
-def http_bounded_line(conn, maximum)
+def http_bounded_line(conn, maximum, allow_eof = false)
   line = ""
   loop do
     byte = conn.read(1)
-    if byte == "" then raise HttpRequestError.new("400") end
+    if byte == nil || byte == ""
+      return nil if allow_eof && line.empty?()
+      raise HttpRequestError.new("400")
+    end
     line = line + byte
     if line.bytesize() > maximum then raise HttpRequestError.new("431") end
     if byte == "\n"
@@ -19,7 +22,8 @@ def http_bounded_line(conn, maximum)
 end
 
 def http_parse_bounded_request(conn, limits)
-  line = http_bounded_line(conn, limits["line_bytes"])
+  line = http_bounded_line(conn, limits["line_bytes"], true)
+  return nil if line == nil
   pieces = line.split(" ")
   if pieces.length() != 3 || !["HTTP/1.1", "HTTP/1.0"].include?(pieces[2]) || !pieces[1].start_with?("/")
     raise HttpRequestError.new("400")
@@ -69,14 +73,14 @@ def http_parse_bounded_request(conn, limits)
   if headers["expect"] != nil then conn.write("HTTP/1.1 100 Continue\r\n\r\n") end
   body = conn.read(length)
   if body.bytesize() != length then raise HttpRequestError.new("400") end
-  {"method": pieces[0], "path": pieces[1], "headers": headers, "body": body}
+  {"method": pieces[0], "path": pieces[1], "headers": headers, "body": body, "http_version": pieces[2]}
 end
 
 ## Reads one request from `conn` and returns `{"method", "path", "headers", "body"}`
 ## (header names lower-cased), or `nil` when the peer closed before sending a request
 ## line. With a `limits` Hash (`line_bytes`, `header_bytes`, `header_count`,
 ## `body_bytes`) parsing is bounded and strict, and a bad request raises
-## `HttpRequestError`.
+## `HttpRequestError`. Bounded requests include `http_version`.
 def http_parse_request(conn, limits = nil)
   if limits != nil then return http_parse_bounded_request(conn, limits) end
   request_line = conn.gets()

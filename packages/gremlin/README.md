@@ -58,6 +58,17 @@ A WebSocket is not cut off by `timeout_seconds`: `websocket_accept` clears the
 connection's deadline once the upgrade is answered. It still counts toward
 `connections` for as long as it is open.
 
+## HTTP keep-alive
+
+Pass `keep_alive: true` to `gremlin_serve` to reuse HTTP/1.1 sockets.
+It enables bounded parsing with the default limits or your supplied
+`limits`. Gremlin processes pipelined requests in order and gives
+other sockets a turn between responses. Each request gets its own
+ID and deadline. Idle connections use the same timeout and close at
+shutdown. A connection serves at most 100 requests. HTTP/1.0,
+`Connection: close`, and upgraded connections follow their own
+connection lifecycle.
+
 ## Binding to one address
 
 By default every worker listens on all interfaces (`0.0.0.0`). A server that sits behind a reverse proxy on the same machine should not

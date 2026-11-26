@@ -9,6 +9,8 @@ come only in minor releases, marked **Breaking** here.
 
 ### Added
 
+- Gremlin supports opt-in HTTP/1.1 keep-alive with bounded request parsing,
+  per-request deadlines, and idle connection expiry.
 - WebSocket clients accept a caller-provided transport, so readiness-aware
   clients can reuse the cut's handshake and framing.
 
