@@ -1,0 +1,68 @@
+require "../../../tests/harness"
+require "../lib/gremlin"
+
+def burst_handler(request, context)
+  if request["path"] == "/prime"
+    puts("primed")
+    deadline = Time.monotonic() + 5.0
+    until File.exist?(ARGV[2])
+      raise "burst was never released" if Time.monotonic() >= deadline
+      Channel.new(1).wait_readable([], Time.monotonic() + 0.001)
+    end
+  else
+    context["burst_started"] = true
+    Channel.new(1).wait_readable([], Time.monotonic() + 0.015)
+  end
+  [200, {}, if context["tick_during_burst"] then "tick ran" else "no tick" end]
+end
+
+def burst_tick(context)
+  context["tick_during_burst"] = true if context["burst_started"]
+end
+
+def queue_request(port, path)
+  socket = TCPSocket.connect("127.0.0.1", port, {"connect_timeout_ms": 3000, "read_timeout_ms": 3000})
+  socket.write("GET #{path} HTTP/1.1\r\nHost: localhost\r\n\r\n")
+  socket.flush()
+  socket
+end
+
+if ARGV[0] == "--server"
+  gremlin_serve(ARGV[1].to_i(), burst_handler, tick_interval: 0.005, on_tick: burst_tick, host: "127.0.0.1")
+else
+  Harness.with_port(5) do |port|
+    release = File.join(ARGV[2], "release-burst-#{port}")
+    child = Harness::Child.new([ARGV[0], ARGV[1], "--server", port.to_s(), release], {})
+    sockets = []
+    begin
+      Harness.wait_for(3000, "burst server startup") do
+        begin
+          sockets.push(queue_request(port, "/prime"))
+          true
+        rescue error: IOError
+          false
+        end
+      end
+      child.wait_for_text("primed", 3000)
+      24.times() do |index| sockets.push(queue_request(port, "/burst")) end
+      File.write(release, "")
+      saw_tick = false
+      sockets.each() do |socket|
+        response = socket.read()
+        raise "burst request failed" unless response.start_with?("HTTP/1.1 200")
+        saw_tick = true if response.end_with?("\r\n\r\ntick ran")
+      end
+      raise "periodic callback starved until the burst finished" unless saw_tick
+    rescue error
+      if (child.stdout_text() + child.stderr_text()).include?("Address already in use")
+        raise Harness::PortTaken.new("Gremlin burst listener unavailable")
+      end
+      raise error
+    ensure
+      sockets.each() do |socket| socket.close() end
+      child.finish()
+      File.delete(release) if File.exist?(release)
+    end
+  end
+  puts("gremlin tick runs during an HTTP burst")
+end

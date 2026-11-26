@@ -755,6 +755,8 @@ SRCEOF
 done
 echo "19 gremlin tests passed"
 
+"$diamond" "$package_root/test/tick_fairness.d6" "$diamond" "$package_root/test/tick_fairness.d6" "$test_project"
+
 # Token-managed shutdown returns through the owner and bounds stalled clients.
 "$diamond" "$package_root/test/shutdown_driver.d6" "$diamond" "$package_root/test/shutdown.d6"
 "$diamond" build "$package_root/test/shutdown.d6" -o "$test_project/shutdown-test" > "$test_project/build.log"

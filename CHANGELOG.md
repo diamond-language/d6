@@ -9,6 +9,8 @@ come only in minor releases, marked **Breaking** here.
 
 ### Fixed
 
+- Gremlin services periodic callbacks during HTTP bursts and bounds accepts
+  before returning to existing connections.
 - Collecting an unreachable Supervisor disables restarts and lets its current
   attempts finish without blocking garbage collection.
 
