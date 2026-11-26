@@ -751,4 +751,5 @@ CLIENTEOF
 [[ "$inprocess_response" == $'true\nhello /a\nstopped\nnil' ]] || { echo "in-process server test: $inprocess_response" >&2; exit 1; }
 
 "$diamond" test/client_retry.d6 "$diamond" "$PWD/test/client_retry.d6"
+"$diamond" test/client_transport.d6
 echo "19 http package tests passed"

@@ -207,10 +207,15 @@ def http_tls_options(options)
 end
 
 def http_connect(scheme, host, port, options)
-  if scheme == "https"
-    TLSSocket.connect(host, port, http_tls_options(options))
+  tls = scheme == "https"
+  transport_options = if tls then http_tls_options(options) else http_socket_options(options) end
+  connector = options["connector"]
+  if connector != nil
+    connector(host, port, tls, transport_options)
+  elsif tls
+    TLSSocket.connect(host, port, transport_options)
   else
-    TCPSocket.connect(host, port, http_socket_options(options))
+    TCPSocket.connect(host, port, transport_options)
   end
 end
 
@@ -457,6 +462,10 @@ end
 ## - `follow_redirects` (default `false`) and `max_redirects` (default 5)
 ## - `max_body_bytes` (default 25 MiB): a longer response body raises IOError, whether
 ##   it has a Content-Length, is chunked, or runs until the connection closes
+## - `connector`: optional `(host, port, tls, options)` callable returning a connected
+##   transport with `gets()`, `read(n)`, `write(bytes)`, and `close()`. The
+##   connector receives only socket and TLS options, and owns TLS verification.
+##   A readiness-aware transport can yield to the caller's scheduler.
 def http_request(method, url, headers = {}, body = "", options = {})
   parsed = http_parse_url(url)
   prepared = http_prepare_headers_and_body(headers, body, options)

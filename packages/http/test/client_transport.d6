@@ -1,0 +1,86 @@
+require "../lib/http"
+
+class TestHttpTransport
+  def initialize(lines, body = "", pause = false)
+    @lines = lines
+    @body = body
+    @pause = pause
+    @writes = ""
+    @closed = false
+  end
+
+  def gets()
+    if @pause
+      @pause = false
+      yield
+    end
+    @lines.shift()
+  end
+
+  def read(size) = @body.byteslice(0, size)
+  def writes() = @writes
+  def closed?() = @closed
+
+  def write(bytes)
+    @writes += bytes
+    bytes.bytesize()
+  end
+
+  def close()
+    @closed = true
+  end
+end
+
+def connect_and_redirect()
+  calls = []
+  first = TestHttpTransport.new(["HTTP/1.1 302 Found", "Location: https://new.test:8443/result", "Content-Length: 0", ""])
+  final = TestHttpTransport.new(["HTTP/1.1 200 OK", "Content-Length: 2", ""], "ok")
+  def connector(host, port, tls, options)
+    calls.push([host, port, tls, options])
+    if calls.length() == 1 then first else final end
+  end
+  options = {"connector": connector, "follow_redirects": true, "ca_file": "test-ca",
+    "read_timeout_ms": 50, "bearer_token": "example-token"}
+  response = http_get("https://old.test/start", {}, options)
+  socket_options = {"ca_file": "test-ca", "read_timeout_ms": 50}
+  raise "wrong connector arguments" unless calls == [["old.test", 443, true, socket_options], ["new.test", 8443, true, socket_options]]
+  raise "redirect lost response or leaked a stream" unless response["body"] == "ok" && first.closed?() && final.closed?()
+  raise "credentials reached a different origin" if final.writes().include?("example-token")
+  raise "original credentials missing" unless first.writes().include?("Authorization: Bearer example-token")
+end
+
+def reuse_stream()
+  stream = TestHttpTransport.new([
+    "HTTP/1.1 200 OK", "Content-Length: 0", "",
+    "HTTP/1.1 200 OK", "Content-Length: 0", "Connection: close", ""])
+  opened = 0
+  def connector(host, port, tls, options)
+    opened += 1
+    raise "unexpected TLS options on a plain connection" if tls || options.key?("ca_file")
+    stream
+  end
+  session = HttpSession.new({"connector": connector, "retry_stale": "never", "ca_file": "unused"})
+  url = "http://local.test"
+  raise "first request failed" unless session.get(url + "/hello")["status"] == 200 && !stream.closed?()
+  raise "second request failed" unless session.post(url + "/write", "change")["status"] == 200
+  raise "session failed to reuse and then close" unless opened == 1 && stream.closed?() && stream.writes().include?("POST /write ")
+  session.close()
+end
+
+def cooperative_request()
+  stream = TestHttpTransport.new(["HTTP/1.1 200 OK", "Content-Length: 2", ""], "ok", true)
+  def connector(host, port, tls, options) = stream
+  def run() = http_get("http://event-loop.test/", {}, {"connector": connector})["body"]
+  [Fiber.new(run), stream]
+end
+
+connect_and_redirect()
+reuse_stream()
+left, left_stream = cooperative_request()
+right, right_stream = cooperative_request()
+left.resume()
+right.resume()
+raise "requests could not wait concurrently" unless left.alive?() && right.alive?()
+raise "fiber responses were lost" unless right.resume() == "ok" && left.resume() == "ok"
+raise "fibers leaked streams" unless left_stream.closed?() && right_stream.closed?()
+puts("HTTP connector redirects, session reuse, and cooperative waits passed")

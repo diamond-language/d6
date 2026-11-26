@@ -83,6 +83,16 @@ error on a reused socket. A POST may already have committed when
 the response fails, so only choose `"always"` when replay is safe.
 This policy is separate from HTTP redirects.
 
+For an application-owned event loop, pass `{"connector": connect_transport}`
+to `http_request` or `HttpSession.new`. The callable receives
+`(host, port, tls, options)` for each new connection, including redirects
+and retries. Only socket and TLS options are passed to it. The returned
+stream supplies `gets()` for lines without line endings, `read(n)` for
+up to `n` bytes (short only at EOF), `write(bytes)` for complete writes,
+and `close()` for cleanup. An injected stream can yield while waiting
+for readiness. Its connector owns TLS setup and certificate verification
+for HTTPS. The client still handles HTTP framing, redirects, and cleanup.
+
 ## Notes
 
 `http_serve` accepts a request handler returning `[status, headers, body]`. The response to a `HEAD` request leaves the body out; `http_write_response(conn, response, false)` writes a response that way. `http_get` and `http_post` return hashes with `status`, `headers`, and `body`.
