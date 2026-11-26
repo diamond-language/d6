@@ -218,6 +218,14 @@ the `publish:http` scope. It was revoked after publication and its local file
 was removed. Public verification resolved, digest-checked, loaded, and
 reinstalled all 27 cuts from an unchanged lockfile.
 
+Arel 0.35.7, HTTP 0.2.12, Gremlin 0.5.11 and WebSocket 0.2.6 were published
+on 2026-11-26 UTC from main `bc4883b2` in dependency order. All four returned
+SHA-256 digests matched the reviewed inventory. The pre-publication snapshot
+`~/diamond-registry-backups/pre-d6-1.7-cuts-bc4883b2/snapshot` passed restore
+verification. Credential 54 was scoped to the four cuts, issued for 30 minutes
+and revoked after publication. Public verification resolved, digest-checked,
+loaded and reinstalled all 27 cuts from an unchanged lockfile.
+
 Previously `0e482f26c56854c4c41c6c82d093ad04f6569a21` (v1.0.0-rc4, deployed 2026-11-12 UTC (2026-11-11 Pacific)
 with `tools/deploy_registry.sh --revision=v1.0.0-rc4 --force` after its dry run).
 The fresh snapshot at
