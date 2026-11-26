@@ -31,7 +31,8 @@ cannot see the variables of the code that started it.
 
 `join()` re-raises an exception the thread did not rescue. A thread that
 fails and is never joined prints its exception and backtrace on stderr, so
-the error is not lost.
+the error is not lost. A worker can keep running after its handle goes out
+of scope. Keep the handle if you need to join it.
 
 ## Values are copied
 
@@ -135,7 +136,9 @@ puts(results.receive())                  # => finished on attempt 2
 puts(supervisor.restart_count(child))    # => 1
 ```
 
-A worker that returns normally is finished and is not restarted. The
+A worker that returns normally is finished and is not restarted. Keep the
+supervisor reachable while it manages workers. If it becomes unreachable,
+its running workers can finish and further restarts are disabled. The
 [threads reference](../threads.md#supervisors) covers restart limits,
 back-off, and the strategies that restart a group of workers together.
 

@@ -65,7 +65,10 @@ statements stay usable after closing their connection.
 
 ### `query(params = nil) -> Array`
 
-Run the statement with fresh `params`, like the connection's methods.
+Run the statement with fresh `params`. PostgreSQL and MySQL bind positional
+Arrays and use an omitted argument or `nil` for zero parameters. `execute`
+returns the affected-row count. `query` returns rows with the connection's
+usual decoding. [Reuse examples](../databases.md#reusable-postgresql-and-mysql-statements).
 
 ### `close()`
 
@@ -119,7 +122,7 @@ Raises `PostgreSQLError` before any sequence has been used. Prefer
 
 ### `close()`
 
-Closes the connection.
+Closes the connection and invalidates its prepared statements.
 
 ## MySQL
 
@@ -153,4 +156,4 @@ The `AUTO_INCREMENT` value from the latest insert, or `0`.
 
 ### `close()`
 
-Closes the connection.
+Closes the connection and invalidates its prepared statements.

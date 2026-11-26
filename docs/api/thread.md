@@ -18,7 +18,9 @@ left.join() + right.join()   # => 85
 
 There are no detached threads: a program waits for every thread before it
 exits normally, and an unjoined thread's uncaught exception is printed on
-standard error.
+standard error. If a handle becomes unreachable while its worker is
+running, garbage collection continues. The VM reaps the worker after
+it and its descendants finish.
 
 ## Functions
 

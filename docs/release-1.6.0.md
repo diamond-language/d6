@@ -1,4 +1,4 @@
-# d6 1.6 release notes
+# d6 1.6.0
 
 d6 1.6 adds reusable type aliases, typed variadic parameters, and a way to
 poll channels alongside sockets.

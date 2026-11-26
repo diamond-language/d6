@@ -8,6 +8,10 @@ restarted. Workers follow `Thread.new`'s rules: arguments are copied, fresh
 for each attempt, and capturing closures are refused. [Threads](../threads.md#supervisors)
 describes how stopping interrupts blocking calls.
 
+Keep the supervisor reachable while it manages workers. If it becomes
+unreachable, garbage collection disables restarts and lets the current
+attempts finish in the background. Normal VM shutdown waits for them.
+
 <!-- doc-check: skip -->
 ```ruby
 def fetch_loop(url)

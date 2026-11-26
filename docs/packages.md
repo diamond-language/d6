@@ -474,7 +474,7 @@ with `facet` like any other cut. The public ones each have a page under
 | `active_record` | SQL repositories, models, validation, and migrations |
 | `active_social` | Follower relationships backed by ActiveRecord |
 | `active_tagging` | Normalized tags and tagging relationships |
-| `arel` | Immutable SQL query builder with dialect visitors |
+| `arel` | Immutable SQL builder with dialect visitors and a [prepared statement cache](databases.md#reusable-postgresql-and-mysql-statements) |
 | `cancellation` | Cooperative cancellation tokens, deadlines, and task scopes |
 | `cookies` | Cookie parsing, signing, encryption, and session helpers |
 | `csv` | Read and write CSV, including files too large to load at once |
@@ -483,8 +483,8 @@ with `facet` like any other cut. The public ones each have a page under
 | `div` | Compile view templates into d6 source |
 | `graphql` | GraphQL schema and query execution |
 | `graphsql` | GraphQL-aware SQL selection and association preloading |
-| `gremlin` | Concurrent fiber-based HTTP server |
-| `http` | HTTP server and client for d6 |
+| `gremlin` | Concurrent fiber-based HTTP server with [keep-alive and timing events](networking.md#gremlin-http-and-timing) |
+| `http` | HTTP server and client with reusable sessions and [custom transports](networking.md#http-and-websocket-client-transports) |
 | `html` | Parse HTML into a tree and query it with CSS selectors |
 | `jobs` | Durable database-backed background jobs |
 | `log_viewer` | Format structured JSON log streams |
@@ -500,7 +500,7 @@ with `facet` like any other cut. The public ones each have a page under
 | `registry` | Cut registry storage primitives |
 | `terminal` | Keys, text widths and redraws for full-screen terminal programs |
 | `toml` | Read and write TOML 1.0 configuration files |
-| `websocket` | WebSocket handshake and frame handling |
+| `websocket` | WebSocket handshake and framing with [custom client transports](networking.md#http-and-websocket-client-transports) |
 
 ## What's deliberately out of scope so far
 

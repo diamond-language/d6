@@ -4,8 +4,10 @@ Choose the guide for the service you are using:
 
 - [Local I/O](local-io.md) — stdout, stdin, files, and file paths.
 - [Networking and signals](networking.md) — blocking and non-blocking TCP,
-  polling, UDP, signals, and TLS.
-- [Databases](databases.md) — SQLite3, PostgreSQL, and MySQL.
+  polling, UDP, signals, TLS, [Gremlin keep-alive and timing](networking.md#gremlin-http-and-timing),
+  and [HTTP and WebSocket client transports](networking.md#http-and-websocket-client-transports).
+- [Databases](databases.md) — SQLite3, PostgreSQL, MySQL, and
+  [reusable statements](databases.md#reusable-postgresql-and-mysql-statements).
 - [Time](time.md) — construction, parsing, formatting, timezones, arithmetic,
   comparisons, durations, and monotonic time.
 - [Processes](processes.md) — completed commands and live subprocess handles.
