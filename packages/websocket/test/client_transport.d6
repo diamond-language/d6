@@ -1,0 +1,86 @@
+require "../lib/websocket"
+
+class TestClientStream
+  def initialize(response_status = "101 Switching Protocols", upgrade = "websocket")
+    @status = response_status
+    @upgrade = upgrade
+    @response = nil
+    @closed = false
+  end
+
+  def write(bytes)
+    if @response == nil
+      raise "wrong upgrade target" unless bytes.start_with?("GET /events HTTP/1.1\r\nHost: example.test:8443\r\n")
+      key = bytes.split("\r\n").find() do |line| line.start_with?("Sec-WebSocket-Key: ") end
+      accept = websocket_accept_key(key.split(": ")[1])
+      @response = "HTTP/1.1 #{@status}\r\nUpgrade: #{@upgrade}\r\nConnection: keep-alive, UpGrAdE\r\nSec-WebSocket-Accept: #{accept}\r\n\r\n" +
+        websocket_encode_frame(websocket_opcode_text(), "first frame")
+    end
+    bytes.bytesize()
+  end
+
+  def read(count)
+    raise IOError.new("read timeout") if @timeout
+    return nil if @response.empty?()
+    result = @response.byteslice(0, count)
+    @response = @response.byteslice(result.bytesize(), @response.bytesize() - result.bytesize())
+    result
+  end
+
+  def fail_reads()
+    @timeout = true
+  end
+
+  def close()
+    @closed = true
+  end
+
+  def closed?() = @closed
+end
+
+def connect_test_stream(stream)
+  def connector(host, port, tls, options)
+    raise "wrong connector arguments" unless host == "example.test" && port == 8443 && tls && options == {"test": true}
+    stream
+  end
+  websocket_connect("wss://example.test:8443/events", {}, {"test": true}, connector: connector)
+end
+
+stream = TestClientStream.new()
+socket = connect_test_stream(stream)
+raise "upgrade consumed the first frame" unless socket.receive()["data"] == "first frame"
+stream.fail_reads()
+begin
+  socket.receive()
+  raise "frame-header timeout was treated as EOF"
+rescue error: IOError
+  raise "wrong frame-header error" unless error.message() == "read timeout"
+ensure
+  socket.force_close()
+end
+
+clean = TestClientStream.new()
+socket = connect_test_stream(clean)
+socket.receive()
+raise "clean EOF did not close the stream" unless socket.receive() == nil && clean.closed?()
+
+[TestClientStream.new("1010 invalid"), TestClientStream.new("101 Switching Protocols", "other")].each() do |invalid|
+  begin
+    connect_test_stream(invalid)
+    raise "invalid upgrade was accepted"
+  rescue error: IOError
+    raise "rejected upgrade leaked the stream" unless invalid.closed?()
+  end
+end
+
+class NoPayloadStream
+  def read(count) = nil
+end
+
+begin
+  websocket_read_exact(NoPayloadStream.new(), 1)
+  raise "mid-frame EOF was accepted"
+rescue error: IOError
+  raise "wrong mid-frame error" unless error.message() == "WebSocket connection closed mid-frame"
+end
+puts("websocket client transport and EOF checks passed")

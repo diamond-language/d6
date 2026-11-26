@@ -56,6 +56,15 @@ The second argument adds request headers (an `Origin`, a `Cookie`); a third is p
 `TCPSocket.connect` or `TLSSocket.connect` for timeouts and CA files. It raises `IOError` if
 the server does not answer the upgrade.
 
+To share the handshake with a readiness-aware adapter, pass
+`connector: connect_transport`, where the callable takes
+`(host, port, tls, options)` and returns a connected stream. Retain that
+stream if you need to poll it before `receive()`. The stream must fill
+`read(n)` unless it reaches EOF, send the complete string on `write(bytes)`,
+and release its resources on `close()`. An adapter for nonblocking sockets
+handles readiness and partial I/O internally. It also owns TLS setup and
+verification for `wss://` URLs.
+
 ## Notes
 
 - Use a server that exposes the live connection in `request["gremlin_connection"]` (gremlin
@@ -67,8 +76,8 @@ the server does not answer the upgrade.
   `websocket_origin_allowed?(request)` first: the `Origin` must match the `Host` header, or
   be one of the origins you pass as a second argument. A request with no `Origin` (not a
   browser) passes.
-- `receive` returns `nil` when the peer closes the connection, with a Close frame or by going
-  away between messages (a closed tab). A connection that breaks partway through a frame, or a
-  frame that breaks the protocol, raises `IOError`.
+- `receive` returns `nil` on a Close frame or EOF between frames. Read failures
+  such as timeouts and resets propagate as errors. A partial frame or a protocol
+  violation raises `IOError`.
 - gremlin's `limits` do not time a WebSocket out: `websocket_accept` clears the request
   deadline.

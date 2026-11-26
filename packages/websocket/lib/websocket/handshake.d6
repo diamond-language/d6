@@ -175,11 +175,21 @@ end
 ## Connects to a `ws://` or `wss://` URL and returns a client `WebSocketConnection`
 ## (`send_text`, `receive`, `close` as on the server side). `headers` adds request
 ## headers, such as `{"Origin": "https://example.com"}` or a `Cookie`; `options` goes to
-## `TCPSocket.connect` or `TLSSocket.connect` (timeouts, CA files). Raises `IOError` if the
-## server does not accept the upgrade.
-def websocket_connect(url, headers = {}, options = nil)
+## `TCPSocket.connect` or `TLSSocket.connect` (timeouts, CA files). An optional
+## `connector(host, port, tls, options)` can return an already connected transport.
+## Its `read(n)` fills the request unless it reaches EOF, `write(bytes)`
+## sends the whole string, and `close()` releases it. The caller can retain
+## the transport to poll it before calling `receive()`. Raises `IOError` if
+## the server does not accept the upgrade.
+def websocket_connect(url, headers = {}, options = nil, connector = nil)
   [tls, host, port, authority, path] = websocket_split_url(url)
-  socket = if tls then TLSSocket.connect(host, port, options) else TCPSocket.connect(host, port, options) end
+  socket = if connector != nil
+    connector(host, port, tls, options)
+  elsif tls
+    TLSSocket.connect(host, port, options)
+  else
+    TCPSocket.connect(host, port, options)
+  end
   key = Base64.encode(SecureRandom.bytes(16))
   request = StringBuilder.new()
   request.append("GET #{path} HTTP/1.1\r\nHost: #{authority}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n")
@@ -206,20 +216,34 @@ def websocket_connect(url, headers = {}, options = nil)
     end
     lines = head.to_s().split("\r\n")
     status = lines[0]
-    unless status.start_with?("HTTP/1.1 101")
+    unless status == "HTTP/1.1 101" || status.start_with?("HTTP/1.1 101 ")
       raise IOError.new("WebSocket server refused the upgrade: #{status}")
     end
     accept = nil
+    websocket_upgrade = false
+    connection_upgrade = false
     lines.each() do |line|
       colon = line.index_of(":")
-      if colon != nil && line.slice(0, colon).strip().downcase() == "sec-websocket-accept"
-        accept = line.slice(colon + 1, line.length() - colon - 1).strip()
+      if colon != nil
+        name = line.slice(0, colon).strip().downcase()
+        value = line.slice(colon + 1, line.length() - colon - 1).strip()
+        case name
+        when "sec-websocket-accept"
+          accept = value
+        when "upgrade"
+          websocket_upgrade = value.downcase() == "websocket"
+        when "connection"
+          connection_upgrade ||= value.downcase().split(",").any?() do |token| token.strip() == "upgrade" end
+        end
       end
+    end
+    unless websocket_upgrade && connection_upgrade
+      raise IOError.new("WebSocket server did not confirm the upgrade")
     end
     unless accept == websocket_accept_key(key)
       raise IOError.new("WebSocket server answered with a wrong Sec-WebSocket-Accept")
     end
-  rescue error: IOError
+  rescue error: StandardError
     socket.close()
     raise error
   end
