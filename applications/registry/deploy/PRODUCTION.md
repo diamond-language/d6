@@ -5,7 +5,17 @@ The corrected A record is **142.93.192.149**. External health and catalog
 requests succeeded. Since 2026-09-25 nginx terminates TLS with certbot
 certificates (see "Proxy and certificates" below); Caddy was retired.
 
-Runtime revision: `0c749ac3ae373bb533f708eafae1b5072e1c338d` (tag
+Runtime revision: `ac3afb8e26b7a4f81ee9c1f88161fc1fa283020c` (tag
+`v1.7.0`, deployed 2026-11-26 UTC). The Ubuntu 26.04 build VM passed the
+registry publish/install, monitoring, administration, restore, and seed checks.
+The running binary matched SHA-256
+`f89b817ac8537bf73e33e9bb412a54b039d179acece50403a26d0ec4c6078ae1`
+with `DIAMOND_JIT=1`. Public health passed, and all 27 cuts resolved,
+digest-checked, loaded, and reinstalled from an unchanged lockfile.
+The verified pre-upgrade snapshot is
+`~/diamond-registry-backups/1.7.0/cutbackup-2026-11-26-073944-pre-ac3afb8e/snapshot`.
+
+Previous runtime revision: `0c749ac3ae373bb533f708eafae1b5072e1c338d` (tag
 `v1.6.1` on the `1.6` maintenance branch, deployed 2026-11-25 02:17 UTC).
 The registry VM recipe ran on [Ubuntu CI](https://github.com/diamond-language/d6/actions/runs/45531243828).
 The deployment verified the public inventory before using the stock upgrade
