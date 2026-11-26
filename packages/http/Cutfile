@@ -1,1 +1,1 @@
-{"name": "http", "version": "0.2.9", "summary": "HTTP server and client for d6", "license": "MIT", "d6": ">=1.4.0", "maintainers": [{"name": "Chad 'Matrix9180' Ingram", "contact": "https://github.com/diamond-language/d6"}]}
+{"name": "http", "version": "0.2.10", "summary": "HTTP server and client for d6", "license": "MIT", "d6": ">=1.4.0", "maintainers": [{"name": "Chad 'Matrix9180' Ingram", "contact": "https://github.com/diamond-language/d6"}]}

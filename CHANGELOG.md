@@ -14,6 +14,8 @@ come only in minor releases, marked **Breaking** here.
 
 ### Fixed
 
+- HTTP clients close failed connections promptly. Sessions only retry safe
+  methods on a reused socket by default, with an explicit retry policy.
 - WebSocket frame-header reads preserve transport errors and distinguish
   them from clean EOF.
 - Gremlin services periodic callbacks during HTTP bursts and bounds accepts

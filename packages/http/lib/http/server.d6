@@ -180,9 +180,14 @@ def http_serve(port, handler: Callable[1], host = nil, ready = nil, stop = nil)
     conn = server.accept()
     request = http_parse_request(conn)
     unless request == nil
-      response = handler(request)
+      status, headers, body = handler(request)
+      response_headers = {}
+      headers.each() do |name, value|
+        response_headers[name] = value unless name.downcase() == "connection"
+      end
+      response_headers["Connection"] = "close"
       # A HEAD response never carries a body, whatever the handler returned.
-      http_write_response(conn, response, request["method"] != "HEAD")
+      http_write_response(conn, [status, response_headers, body], request["method"] != "HEAD")
     end
     conn.close()
   end

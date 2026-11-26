@@ -1,0 +1,100 @@
+require "../../../tests/harness"
+require "../lib/http"
+
+def reply(conn, body, close = false)
+  header = if close then "Connection: close\r\n" else "" end
+  conn.write("HTTP/1.1 200 OK\r\n#{header}Content-Length: #{body.bytesize()}\r\n\r\n#{body}")
+  conn.flush()
+end
+
+def run_server(port, mode)
+  listener = TCPServer.listen(port, host: "127.0.0.1")
+  puts("ready")
+  conn = listener.accept()
+  request = http_parse_request(conn)
+  if mode == "cleanup"
+    conn.write("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n")
+    conn.flush()
+    trailing = conn.read(1)
+    puts("peer closed") if trailing == nil || trailing == ""
+    conn.close()
+    listener.close()
+    return nil
+  end
+  raise "missing priming request" unless request["path"] == "/prime"
+  reply(conn, "primed", mode == "advertised_close")
+  if mode != "advertised_close"
+    request = http_parse_request(conn)
+    raise "request never reached reused connection" unless request["path"] == "/operation"
+    puts("operation reached server")
+  end
+  conn.close()
+  second = listener.accept()
+  request = http_parse_request(second)
+  reply(second, "#{request["method"]} #{request["path"]}", true)
+  second.close()
+  listener.close()
+end
+
+def expect_io(callback)
+  begin
+    callback()
+  rescue error: IOError
+    return nil
+  end
+  raise "expected IOError"
+end
+
+def run_client(command, mode)
+  Harness.with_port(5) do |port|
+    child = Harness::Child.new(command + ["--server", port.to_s(), mode], {})
+    session = nil
+    begin
+      child.wait_for_text("ready", 3000)
+      url = "http://127.0.0.1:#{port}"
+      options = {"connect_timeout_ms": 1000, "read_timeout_ms": 1500}
+      if mode == "cleanup"
+        expect_io() do
+          http_get(url, {}, options.merge({"max_body_bytes": 1}))
+        end
+        child.wait_for_text("peer closed", 2000)
+      else
+        options["retry_stale"] = "always" if mode == "replay"
+        options["retry_stale"] = "never" if mode == "never"
+        session = HttpSession.new(options)
+        raise "priming failed" unless session.get(url + "/prime")["body"] == "primed"
+        case mode
+        when "safe_get"
+          raise "safe request was not retried" unless session.get(url + "/operation")["body"] == "GET /operation"
+        when "replay", "advertised_close"
+          raise "POST did not reach a fresh socket" unless session.post(url + "/operation", "change")["body"] == "POST /operation"
+        else
+          expect_io() do
+            if mode == "never" then session.get(url + "/operation")
+            else session.post(url + "/operation", "change") end
+          end
+          child.wait_for_text("operation reached server", 2000)
+          raise "failed socket was reused" unless session.get(url + "/recovery")["body"] == "GET /recovery"
+        end
+      end
+      raise "server failed" unless child.wait_exit(3000) == 0
+    rescue error
+      if (child.stdout_text() + child.stderr_text()).include?("Address already in use")
+        raise Harness::PortTaken.new("HTTP retry test listener unavailable")
+      end
+      raise error
+    ensure
+      session.close() if session != nil
+      child.finish()
+    end
+  end
+end
+
+if ARGV[0] == "--server"
+  run_server(ARGV[1].to_i(), ARGV[2])
+else
+  ["cleanup", "safe_get", "safe_post", "replay", "never", "advertised_close"].each() do |mode|
+    run_client(ARGV, mode)
+  end
+  puts("HTTP transport cleanup and retry policy checks passed")
+end

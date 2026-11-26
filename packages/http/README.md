@@ -76,6 +76,13 @@ response body it will read (25 MiB by default; a longer one raises `IOError`).
 `https://` URLs are supported. To fetch a URL a user supplied, check it first with the
 [`network_safety`](https://github.com/diamond-language/d6/tree/main/packages/network_safety) cut.
 
+`HttpSession` caches connections that can be reused. Set
+`"retry_stale"` to `"safe"` (the default), `"never"`, or `"always"`.
+The default retries GET, HEAD, OPTIONS, and TRACE once after an I/O
+error on a reused socket. A POST may already have committed when
+the response fails, so only choose `"always"` when replay is safe.
+This policy is separate from HTTP redirects.
+
 ## Notes
 
 `http_serve` accepts a request handler returning `[status, headers, body]`. The response to a `HEAD` request leaves the body out; `http_write_response(conn, response, false)` writes a response that way. `http_get` and `http_post` return hashes with `status`, `headers`, and `body`.
