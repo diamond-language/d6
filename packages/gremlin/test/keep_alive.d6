@@ -1,0 +1,116 @@
+require "../../../tests/harness"
+require "../lib/gremlin"
+
+def respond(request, context)
+  if request["path"] == "/upgrade"
+    socket = request["gremlin_connection"]
+    socket.clear_deadline()
+    socket.write("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: sample\r\n\r\n")
+    socket.write(socket.read(4))
+    return nil
+  end
+  [200, {"X-Request-ID": request["request_id"]}, request["path"] + request["body"]]
+end
+
+def read_response(socket, head = false)
+  status = socket.gets()
+  headers = {}
+  loop do
+    line = socket.gets()
+    break if line == ""
+    raise "incomplete response headers" if line == nil
+    names = line.split(": ")
+    headers[names[0].downcase()] = names[1]
+  end
+  length = (headers["content-length"] || "0").to_i()
+  body = if head || length == 0 then "" else socket.read(length) end
+  [status, headers, body]
+end
+
+def connect_peer(port)
+  TCPSocket.connect("127.0.0.1", port, {"connect_timeout_ms": 500, "read_timeout_ms": 3000})
+end
+
+def send_wire(socket, bytes)
+  socket.write(bytes)
+  socket.flush()
+end
+
+def assert_eof(socket)
+  data = socket.read(1)
+  raise "connection failed to close" unless data == nil || data == ""
+end
+
+def exercise(command)
+  Harness.with_port(5) do |port|
+    child = Harness::Child.new(command + ["--server", port.to_s()], {})
+    sockets = []
+    begin
+      Harness.wait_for(3000, "keep-alive server startup") do
+        begin
+          sockets.push(connect_peer(port))
+          true
+        rescue error: IOError
+          false
+        end
+      end
+      socket = sockets[0]
+      send_wire(socket, "POST /first HTTP/1.1\r\nHost: localhost\r\nContent-Length: 3\r\n\r\nabc" +
+        "HEAD /second HTTP/1.1\r\nHost: localhost\r\n\r\n" +
+        "GET /third HTTP/1.1\r\nHost: localhost\r\nConnection: foo, CLOSE\r\n\r\n")
+      first = read_response(socket)
+      second = read_response(socket, true)
+      third = read_response(socket)
+      raise "pipeline lost or reordered bytes" unless [first[2], second[2], third[2]] == ["/firstabc", "", "/third"]
+      ids = [first[1]["x-request-id"], second[1]["x-request-id"], third[1]["x-request-id"]]
+      raise "request identifiers were reused" unless ids.all?() do |id| id != nil end && ids.uniq().length() == 3
+      raise "Connection: close was ignored" unless third[1]["connection"] == "close"
+      assert_eof(socket)
+
+      upgrade = connect_peer(port)
+      sockets.push(upgrade)
+      send_wire(upgrade, "GET /before HTTP/1.1\r\nHost: localhost\r\n\r\n" +
+        "GET /upgrade HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: sample\r\n\r\nwire")
+      raise "pre-upgrade request failed" unless read_response(upgrade)[2] == "/before"
+      raise "raw connection did not upgrade" unless read_response(upgrade)[0].start_with?("HTTP/1.1 101")
+      raise "raw upgrade lost buffered bytes" unless upgrade.read(4) == "wire"
+      assert_eof(upgrade)
+
+      idle = connect_peer(port)
+      sockets.push(idle)
+      send_wire(idle, "GET /idle HTTP/1.1\r\nHost: localhost\r\n\r\n")
+      raise "idle request failed" unless read_response(idle)[2] == "/idle"
+      assert_eof(idle)
+
+      malformed = connect_peer(port)
+      sockets.push(malformed)
+      send_wire(malformed, "POST /invalid HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n")
+      raise "ambiguous request framing was accepted" unless read_response(malformed)[0].start_with?("HTTP/1.1 400")
+      assert_eof(malformed)
+
+      draining = connect_peer(port)
+      sockets.push(draining)
+      send_wire(draining, "GET /shutdown HTTP/1.1\r\nHost: localhost\r\n\r\n")
+      raise "shutdown request failed" unless read_response(draining)[2] == "/shutdown"
+      child.terminate()
+      assert_eof(draining)
+      raise "idle connection prevented graceful shutdown" unless child.wait_exit(3000) == 0 &&
+        child.stdout_text().include?("\"forced\":false")
+    rescue error
+      if (child.stdout_text() + child.stderr_text()).include?("Address already in use")
+        raise Harness::PortTaken.new("Gremlin keep-alive listener unavailable")
+      end
+      raise error
+    ensure
+      sockets.each() do |socket| socket.close() end
+      child.finish()
+    end
+  end
+end
+
+if ARGV[0] == "--server"
+  gremlin_serve(ARGV[1].to_i(), respond, limits: {"timeout_seconds": 1}, host: "127.0.0.1", keep_alive: true)
+else
+  exercise(ARGV)
+  puts("gremlin keep-alive, pipelining, idle timeout, and shutdown passed")
+end

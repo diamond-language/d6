@@ -41,6 +41,28 @@ def gremlin_service_tick(next_tick_at, tick_interval, on_tick, context, log)
   Time.monotonic() + tick_interval
 end
 
+def gremlin_keep_alive?(request, response)
+  status, headers, _ = response
+  request_connection = request["headers"]["connection"]
+  response_connection = http_header_lookup(headers, "Connection")
+  response_connection = response_connection.join(",") if response_connection is Array
+  request["http_version"] == "HTTP/1.1" && request["headers"]["upgrade"] == nil &&
+    status >= 200 && status != 204 && status != 304 &&
+    !http_connection_closes?(request_connection) && !http_connection_closes?(response_connection)
+end
+
+def gremlin_write_http_response(conn, response, send_body, keep_alive)
+  status, original, body = response
+  headers = {}
+  original.each() do |name, value|
+    unless ["connection", "content-length", "transfer-encoding"].include?(name.downcase())
+      headers[name] = value
+    end
+  end
+  headers["Connection"] = "close" unless keep_alive
+  http_write_response(conn, [status, headers, body], send_body)
+end
+
 # `tick_interval`/`on_tick`: an optional periodic callback with no
 # connection I/O of its own to hang off of -- the motivating case is
 # fanning a message out to *other* gremlin_serve(threads: N) workers,
@@ -87,17 +109,20 @@ def gremlin_worker(port, handler, tick_interval = nil, on_tick = nil, limits = n
   def spawn_connection(client_socket)
     conn = NonblockingConnection.new(client_socket, limits)
     def handle_connection()
-      begin
-        request = http_parse_request(conn, limits)
-      rescue error: HttpRequestError
-        status = error.message().to_i()
-        code = if status == 413 then "payload_too_large" else "invalid_request" end
-        log.warn("request.rejected", {"request_id": conn.request_id(), "status": status, "error": code})
-        http_write_response(conn, [status, {"Content-Type": "application/json", "Connection": "close", "X-Request-ID": conn.request_id()}, JSON.stringify({"protocol": 1, "error": code, "message": code, "request_id": conn.request_id()})])
-        conn.close()
-        return nil
-      end
-      unless request == nil
+      keep_alive_enabled = limits != nil && limits["keep_alive"] == true
+      requests = 0
+      loop do
+        begin
+          request = http_parse_request(conn, limits)
+        rescue error: HttpRequestError
+          status = error.message().to_i()
+          code = if status == 413 then "payload_too_large" else "invalid_request" end
+          log.warn("request.rejected", {"request_id": conn.request_id(), "status": status, "error": code})
+          http_write_response(conn, [status, {"Content-Type": "application/json", "Connection": "close", "X-Request-ID": conn.request_id()}, JSON.stringify({"protocol": 1, "error": code, "message": code, "request_id": conn.request_id()})])
+          conn.close()
+          return nil
+        end
+        break if request == nil
         request["peer_address"] = conn.peer_address()
         # context["gremlin_connection"]: this request's own live
         # NonblockingConnection -- an escape hatch for a handler that
@@ -138,8 +163,23 @@ def gremlin_worker(port, handler, tick_interval = nil, on_tick = nil, limits = n
         unless response == nil
           # A HEAD response never carries a body, whatever the handler returned
           # (rack's HeadAsGet runs HEAD through GET routes).
-          http_write_response(conn, response, request["method"] != "HEAD")
+          if keep_alive_enabled
+            requests += 1
+            keep = requests < 100 && !GremlinShutdown.requested?() && gremlin_keep_alive?(request, response)
+            gremlin_write_http_response(conn, response, request["method"] != "HEAD", keep)
+            if keep
+              conn.wait_for_next_request()
+              # Give other sockets and ticks a turn even with pipelined input.
+              yield
+              break if conn.closed?() || GremlinShutdown.requested?()
+              conn.begin_next_request()
+              next
+            end
+          else
+            http_write_response(conn, response, request["method"] != "HEAD")
+          end
         end
+        break
       end
       conn.close()
     end
@@ -185,6 +225,9 @@ def gremlin_worker(port, handler, tick_interval = nil, on_tick = nil, limits = n
     index = 0
     while index < connections.length()
       entry = connections[index]
+      if GremlinShutdown.requested?() && entry["conn"].waiting_for_request?()
+        entry["conn"].close()
+      end
       if entry["conn"].closed?()
         if entry["fiber"].alive?()
           begin
@@ -235,6 +278,7 @@ def gremlin_worker(port, handler, tick_interval = nil, on_tick = nil, limits = n
     poll_ms = gremlin_poll_timeout_ms(next_tick_at)
     position = 0
     while position < connections.length()
+      poll_ms = 0 if connections[position]["conn"].buffered_request?()
       deadline = connections[position]["conn"].deadline()
       if deadline != nil
         remaining = to_i((deadline - Time.monotonic()) * 1000)
@@ -322,7 +366,9 @@ def gremlin_worker(port, handler, tick_interval = nil, on_tick = nil, limits = n
       end
       deadline = entry["conn"].deadline()
       if deadline != nil && Time.monotonic() >= deadline
-        log.warn("request.timeout", {"request_id": entry["conn"].request_id(), "reason": "deadline_exceeded"})
+        unless entry["conn"].waiting_for_request?()
+          log.warn("request.timeout", {"request_id": entry["conn"].request_id(), "reason": "deadline_exceeded"})
+        end
         entry["conn"].close()
         # Resume the parked fiber once, as for a connection closed elsewhere: its pending read raises IOError, so the handler's ensure and
         # cleanup code run instead of the fiber being dropped mid-wait.
@@ -350,7 +396,7 @@ def gremlin_worker(port, handler, tick_interval = nil, on_tick = nil, limits = n
       readable = ready["readable"][position + readable_offset]
       write_position = write_positions[position]
       writable = if write_position == nil then false else ready["writable"][write_position] end
-      if (readable || writable) && entry["fiber"].alive?()
+      if (readable || writable || entry["conn"].buffered_request?()) && entry["fiber"].alive?()
         begin
           entry["fiber"].resume()
         rescue error: StandardError
@@ -495,10 +541,11 @@ end
 ## - `return_after_shutdown`: return after draining instead of exiting (one worker)
 ## - `shutdown_token`, `shutdown_timeout`: drain when a `cancellation` token is cancelled, then return
 ## - `host`: listen on one address only, such as `"127.0.0.1"`
+## - `keep_alive`: opt in to HTTP/1.1 reuse with bounded request parsing
 ##
 ## A handler that raises gets a 500 and a logged `request.handler_failed`; the server
 ## keeps running. `TERM` or `INT` drains and stops it, unless a token manages shutdown.
-def gremlin_serve(port, handler: Callable[2], threads = 1, tick_interval = nil, on_tick = nil, limits = nil, return_after_shutdown: Bool = false, shutdown_token = nil, shutdown_timeout = 10.0, host = nil)
+def gremlin_serve(port, handler: Callable[2], threads = 1, tick_interval = nil, on_tick = nil, limits = nil, return_after_shutdown: Bool = false, shutdown_token = nil, shutdown_timeout = 10.0, host = nil, keep_alive: Bool = false)
   if shutdown_token == nil && shutdown_timeout != 10.0 && threads != 1
     raise ArgumentError.new("custom shutdown_timeout without a token requires threads = 1")
   end
@@ -507,7 +554,8 @@ def gremlin_serve(port, handler: Callable[2], threads = 1, tick_interval = nil, 
   end
   GremlinShutdown.configure(shutdown_token, shutdown_timeout)
   GremlinShutdown.return_after_shutdown(return_after_shutdown || shutdown_token != nil)
-  limits = gremlin_complete_limits(limits) if limits != nil
+  limits = gremlin_complete_limits(limits || {}) if limits != nil || keep_alive
+  limits["keep_alive"] = true if keep_alive
   if threads < 1
     raise ArgumentError.new("gremlin_serve threads must be at least 1")
   end
