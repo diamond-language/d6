@@ -7,6 +7,8 @@ come only in minor releases, marked **Breaking** here.
 
 ## Unreleased
 
+## 1.7.0-rc1
+
 ### Added
 
 - PostgreSQL and MySQL/MariaDB connections expose reusable native
