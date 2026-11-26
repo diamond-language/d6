@@ -461,8 +461,11 @@ def http_request(method, url, headers = {}, body = "", options = {})
   parsed = http_parse_url(url)
   prepared = http_prepare_headers_and_body(headers, body, options)
   conn = http_connect(parsed["scheme"], parsed["host"], parsed["port"], options)
-  response = http_send(conn, method, parsed, prepared["headers"], prepared["body"], http_body_limit(options))
-  conn.close()
+  begin
+    response = http_send(conn, method, parsed, prepared["headers"], prepared["body"], http_body_limit(options))
+  ensure
+    http_close_connection(conn)
+  end
   response["body"] = http_maybe_decompress(response["body"], response["headers"], options)
 
   follow = options["follow_redirects"]
@@ -541,20 +544,32 @@ end
 # "log in, then reuse the session cookie" case; a real cookie-attribute
 # implementation is a real, deliberate scope cut, not an oversight.
 #
-# Connection reuse is "try the cached connection, and if a write/read
-# against it fails for any reason, open a fresh one and retry the
-# request exactly once" -- rather than trying to track whether the
-# *server* actually intends to keep it alive (parsing Connection:
-# close, an idle timeout, ...). A server that already closed an idle
-# connection makes the first attempt fail with an ordinary IOError; the
-# retry is indistinguishable from a first attempt on a cold connection.
+def http_close_connection(conn)
+  conn.close()
+rescue error: IOError
+  # Cleanup must not replace the failure that made the socket unusable.
+  nil
+end
+
+def http_connection_closes?(value)
+  value != nil && value.downcase().split(",").any?() do |token| token.strip() == "close" end
+end
+
 ## Several requests against the same servers: keeps one open connection per
-## scheme, host and port (reopened and retried once if it went stale) and a cookie
+## scheme, host and port and a cookie
 ## jar keyed by exact host. Cookies have no Domain or Path scoping or expiry.
 ## `options` are the `http_request` options, applied to every request.
+## `retry_stale` accepts "safe" (default), "never", or "always". By default
+## only GET, HEAD, OPTIONS, and TRACE may retry once after an IOError on
+## a reused socket. Use "always" only when replay is safe for the caller.
 class HttpSession
   def initialize(options = {})
     @options = options
+    @retry_stale = options["retry_stale"]
+    @retry_stale = "safe" if @retry_stale == nil
+    unless ["safe", "never", "always"].include?(@retry_stale)
+      raise ArgumentError.new("retry_stale must be safe, never, or always")
+    end
     @cookies = {}
     @connections = {}
   end
@@ -610,6 +625,21 @@ class HttpSession
     "#{parsed["scheme"]}://#{parsed["host"]}:#{parsed["port"]}"
   end
 
+  def send_on_connection(conn, key, method, parsed, headers, body, limit)
+    keep = false
+    begin
+      response = http_send(conn, method, parsed, headers, body, limit)
+      response_headers = response["headers"]
+      framed = method == "HEAD" || response_headers["content-length"] != nil || response_headers["transfer-encoding"] == "chunked"
+      keep = framed && !http_connection_closes?(http_header_lookup(headers, "Connection")) &&
+        !http_connection_closes?(response_headers["connection"])
+      @connections[key] = conn if keep
+      response
+    ensure
+      http_close_connection(conn) unless keep
+    end
+  end
+
   # redirects_left and drop_credentials carry state across the hops of one redirect chain.
   ## Sends a request through the session, storing any `Set-Cookie` it returns and
   ## sending stored cookies for the host. Returns the response Hash.
@@ -630,20 +660,20 @@ class HttpSession
       request_headers = request_headers.merge({"Connection": "keep-alive"})
     end
     key = self.connection_key(parsed)
-    cached = @connections[key]
+    cached = @connections.delete(key)
     response = nil
-    if cached == nil
-      conn = http_connect(parsed["scheme"], parsed["host"], parsed["port"], options)
-      response = http_send(conn, method, parsed, request_headers, prepared["body"], http_body_limit(options))
-      @connections[key] = conn
-    else
+    limit = http_body_limit(options)
+    if cached != nil
       begin
-        response = http_send(cached, method, parsed, request_headers, prepared["body"], http_body_limit(options))
+        response = self.send_on_connection(cached, key, method, parsed, request_headers, prepared["body"], limit)
       rescue error: IOError
-        conn = http_connect(parsed["scheme"], parsed["host"], parsed["port"], options)
-        response = http_send(conn, method, parsed, request_headers, prepared["body"], http_body_limit(options))
-        @connections[key] = conn
+        safe = ["GET", "HEAD", "OPTIONS", "TRACE"].include?(method)
+        raise error unless @retry_stale == "always" || (@retry_stale == "safe" && safe)
       end
+    end
+    if response == nil
+      conn = http_connect(parsed["scheme"], parsed["host"], parsed["port"], options)
+      response = self.send_on_connection(conn, key, method, parsed, request_headers, prepared["body"], limit)
     end
     response["body"] = http_maybe_decompress(response["body"], response["headers"], options)
     self.http_store_cookie(parsed["host"], response["headers"]["set-cookie"])

@@ -41,7 +41,7 @@ http_response="$(cat <&3)"
 { exec 3<&- 3>&-; } 2>/dev/null || true
 kill "$http_pid" 2>/dev/null || true
 wait "$http_pid" 2>/dev/null || true
-[[ "$http_response" == $'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\nhello, /world' ]]
+[[ "$http_response" == $'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\nContent-Length: 13\r\n\r\nhello, /world' ]]
 rm -f "$http_out"
 
 http_port=18744
@@ -70,7 +70,7 @@ http_response="$(cat <&3)"
 { exec 3<&- 3>&-; } 2>/dev/null || true
 kill "$http_pid" 2>/dev/null || true
 wait "$http_pid" 2>/dev/null || true
-[[ "$http_response" == $'HTTP/1.1 201 Created\r\nContent-Type: text/plain\r\nContent-Length: 24\r\n\r\nPOST: {"name":"diamond"}' ]]
+[[ "$http_response" == $'HTTP/1.1 201 Created\r\nContent-Type: text/plain\r\nConnection: close\r\nContent-Length: 24\r\n\r\nPOST: {"name":"diamond"}' ]]
 rm -f "$http_out"
 
 # Lowercase request header name still parses (case-insensitive lookup).
@@ -97,7 +97,7 @@ http_response="$(cat <&3)"
 { exec 3<&- 3>&-; } 2>/dev/null || true
 kill "$http_pid" 2>/dev/null || true
 wait "$http_pid" 2>/dev/null || true
-[[ "$http_response" == $'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 10\r\n\r\ngot: hello' ]]
+[[ "$http_response" == $'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\nContent-Length: 10\r\n\r\ngot: hello' ]]
 rm -f "$http_out"
 
 # Client: http_get/http_post against a real diamond-http server (not
@@ -236,7 +236,7 @@ recovery_response="$(timeout 5 cat <&4)"
 { exec 4<&- 4>&-; } 2>/dev/null || true
 kill "$http_pid" 2>/dev/null || true
 wait "$http_pid" 2>/dev/null || true
-[[ "$recovery_response" == $'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 11\r\n\r\nstill alive' ]]
+[[ "$recovery_response" == $'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\nContent-Length: 11\r\n\r\nstill alive' ]]
 rm -f "$http_out"
 
 # Client: a response declaring a Content-Length far past
@@ -750,4 +750,5 @@ CLIENTEOF
 )" 2>&1)"
 [[ "$inprocess_response" == $'true\nhello /a\nstopped\nnil' ]] || { echo "in-process server test: $inprocess_response" >&2; exit 1; }
 
+"$diamond" test/client_retry.d6 "$diamond" "$PWD/test/client_retry.d6"
 echo "19 http package tests passed"
