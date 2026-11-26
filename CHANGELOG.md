@@ -7,8 +7,15 @@ come only in minor releases, marked **Breaking** here.
 
 ## Unreleased
 
+### Added
+
+- WebSocket clients accept a caller-provided transport, so readiness-aware
+  clients can reuse the cut's handshake and framing.
+
 ### Fixed
 
+- WebSocket frame-header reads preserve transport errors and distinguish
+  them from clean EOF.
 - Gremlin services periodic callbacks during HTTP bursts and bounds accepts
   before returning to existing connections.
 - Collecting an unreachable Supervisor disables restarts and lets its current

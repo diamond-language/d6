@@ -431,6 +431,7 @@ DIEOF
     exit 1
 fi
 grep -q "all unit checks passed" "$unit_out"
+"$diamond" "$package_root/test/client_transport.d6"
 rm -f "$unit_out"
 echo "websocket unit checks passed"
 

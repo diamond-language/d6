@@ -97,7 +97,8 @@ class WebSocketConnection
   # frame after a fragment is always its continuation.
   ## Waits for the next message and returns `{"opcode", "data"}` (`opcode` is
   ## `websocket_opcode_text()` or `websocket_opcode_binary()`), or `nil` once the peer has
-  ## closed the connection, with a Close frame or by going away between messages.
+  ## closed the connection, with a Close frame or EOF between frames.
+  ## Read failures propagate to the caller.
   def receive()
     message_opcode = nil
     buffer = StringBuilder.new()

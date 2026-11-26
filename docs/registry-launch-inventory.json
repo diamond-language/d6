@@ -226,9 +226,9 @@
       "archive": "websocket.tar",
       "dependencies": {},
       "name": "websocket",
-      "sha256": "b86ec3924b640318e383a55b7e15128b90340ff8d4356d5d3c2349f535e44c74",
-      "size": 44544,
-      "version": "0.2.5"
+      "sha256": "ab87d52582f5d29793c5bf90e3e46796e77e85f14a09459c2624754f7d927685",
+      "size": 45568,
+      "version": "0.2.6"
     }
   ],
   "format": 1

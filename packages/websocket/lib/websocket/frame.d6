@@ -106,7 +106,7 @@ def websocket_read_exact(conn, n)
     return ""
   end
   data = conn.read(n)
-  if data.bytesize() != n
+  if data == nil || data.bytesize() != n
     raise IOError.new("WebSocket connection closed mid-frame")
   end
   data
@@ -122,17 +122,10 @@ end
 # mid-frame (IOError, from websocket_read_exact above).
 def websocket_read_frame_bytes(conn) = websocket_read_frame_rest(conn, websocket_read_exact(conn, 2))
 
-# The two header bytes that start the next frame, or nil when the connection
-# ended (EOF, or a reset that makes the read raise IOError) before a frame
-# began: a peer that vanished without a Close frame, such as a closed browser
-# tab. A connection that ends partway through a header still raises.
+# The next frame's two-byte header, or nil on EOF between frames.
+# Read failures and partial headers propagate as errors.
 def websocket_read_frame_start(conn)
-  header = nil
-  begin
-    header = conn.read(2)
-  rescue error: IOError
-    return nil
-  end
+  header = conn.read(2)
   return nil if header == nil || header.bytesize() == 0
   if header.bytesize() != 2
     raise IOError.new("WebSocket connection closed mid-frame")
