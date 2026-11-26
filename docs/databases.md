@@ -129,13 +129,10 @@ trailing whitespace with a clear `SQLite3Error` rather than ignoring it.
 
 ### `Statement`: `SQLite3#prepare`'s `.execute`/`.query`/`.close`
 
-`db.prepare(sql)` compiles `sql` once (`sqlite3_prepare_v2`, the same
-single-statement guard as `.execute`/`.query`) and returns a `Statement`
-— another new GC-managed heap object kind
-(`DIAMOND_OBJECT_SQLITE3_STATEMENT`), a thin wrapper around a
-`sqlite3_stmt *`, with the same closed/open sentinel and GC-sweep-closes-
-as-safety-net shape as `SQLite3` itself (`#close()`/GC sweep/VM teardown
-all `sqlite3_finalize`, idempotently).
+`db.prepare(sql)` compiles `sql` once with `sqlite3_prepare_v2` and returns
+a `Statement`. It uses the same single-statement guard as
+`.execute` and `.query`. Closing it, collecting it, or shutting down the
+VM releases the native statement.
 
 - `.execute(params = nil)` / `.query(params = nil)` — same argument
   shape, return values, and bind semantics as the connection's own
@@ -157,7 +154,37 @@ it) while the `Statement` is still reachable and in use, is well-defined
 and worked out via `sqlite3_close_v2`'s deferred-close semantics, not
 merely untested.
 
-## PostgreSQL: `PostgreSQL.open`/`.execute`/`.query`/`.last_insert_row_id`/`.close`
+## Reusable PostgreSQL and MySQL statements
+
+`PostgreSQL#prepare(sql)` and `MySQL#prepare(sql)` return a `Statement`
+compiled on the connection's server session. MySQL and MariaDB use the
+same interface. Use the SQL and positional `?` binds you would pass to
+the connection's `execute` or `query` methods.
+
+<!-- doc-check: skip -->
+```ruby
+db = PostgreSQL.open(ENV["DATABASE_URL"])
+insert = db.prepare("INSERT INTO people (name, age) VALUES (?, ?)")
+insert.execute(["Ada", 30])
+insert.execute(["Grace", 36])
+insert.close()
+db.close()
+```
+
+Each call takes fresh arguments. An omitted argument or `nil` means zero
+parameters. `execute` returns the affected row count and `query` returns
+rows using the connection's usual decoding rules. MySQL procedures
+return rows from the first result set. The driver drains subsequent result
+sets before reusing the statement or connection.
+
+Closing a network statement is idempotent. A reachable statement keeps
+its connection alive. Closing the connection invalidates its statements.
+Garbage collection queues abandoned statements for release before a later
+operation. PostgreSQL releases those names when the session is idle, so
+closing a statement during a transaction does not issue SQL on that transaction.
+PostgreSQL reserves server statement names starting with `d6_statement_`.
+
+## PostgreSQL: `PostgreSQL.open`/`.execute`/`.query`/`.prepare`/`.last_insert_row_id`/`.close`
 
 ```ruby
 db = PostgreSQL.open("host=localhost dbname=myapp user=myuser password=secret")
@@ -245,14 +272,11 @@ than one SQL command per call regardless of parameter count, so unlike
 `sqlite3_prepare_v2`), no separate multi-statement guard is needed here —
 Postgres's own rejection surfaces as an ordinary `PostgreSQLError`.
 
-Out of scope for this driver, deliberately: prepared/named statements,
-asynchronous/non-blocking connections, connection pooling, and
-binary-format result decoding. (An Arel dialect visitor for Postgres is
-*not* out of scope anymore — `Arel::PostgreSQLVisitor` exists and is
-verified against a live PostgreSQL server; see
-[`packages/arel/ROADMAP.md`](../packages/arel/ROADMAP.md).)
+The driver uses positional parameters, synchronous connections, and
+text-format result decoding. Arel's PostgreSQL dialect visitor uses
+this driver and its statement cache.
 
-## MySQL: `MySQL.open`/`.execute`/`.query`/`.last_insert_row_id`/`.close`
+## MySQL: `MySQL.open`/`.execute`/`.query`/`.prepare`/`.last_insert_row_id`/`.close`
 
 ```ruby
 db = MySQL.open("localhost", "myuser", "secret", "myapp", 3306)

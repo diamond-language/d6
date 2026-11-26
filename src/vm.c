@@ -438,25 +438,12 @@ static void free_object_list(const DiamondVm *vm,DiamondObject *object) {
 #else
             (void)db;
 #endif
-        } else if(object->kind==DIAMOND_OBJECT_SQLITE3_STATEMENT) {
-            sqlite3_stmt *stmt=((DiamondSqlite3StatementHandle *)object)->stmt;
-#ifndef DIAMOND_NO_SQLITE
-            if(stmt!=nullptr)sqlite3_finalize(stmt);
-#else
-            (void)stmt;
-#endif
+        } else if(object->kind==DIAMOND_OBJECT_STATEMENT) {
+            database_statement_close((DiamondStatementHandle *)object);
         } else if(object->kind==DIAMOND_OBJECT_POSTGRES) {
-            PGconn *conn=((DiamondPostgresHandle *)object)->conn;
-#ifndef DIAMOND_NO_POSTGRES
-            if(conn!=nullptr)PQfinish(conn);
-#else
-            (void)conn;
-#endif
+            database_postgres_close((DiamondPostgresHandle *)object);
         } else if(object->kind==DIAMOND_OBJECT_MYSQL) {
-#ifndef DIAMOND_NO_MYSQL
-            MYSQL *conn=((DiamondMysqlHandle *)object)->conn;
-            if(conn!=nullptr)mysql_close(conn);
-#endif
+            database_mysql_close((DiamondMysqlHandle *)object);
         }
         free(object);
         object = next;
@@ -1342,15 +1329,15 @@ DiamondSqlite3Handle *allocate_sqlite3_handle(DiamondVm *vm,sqlite3 *db) {
     vm->young_objects=&handle->object;vm->bytes_allocated+=sizeof(DiamondSqlite3Handle);return handle;
 }
 
-DiamondSqlite3StatementHandle *allocate_sqlite3_statement_handle(
-        DiamondVm *vm,sqlite3_stmt *stmt) {
+DiamondStatementHandle *allocate_statement_handle(
+        DiamondVm *vm,DiamondObjectKind backend) {
     if (!maybe_collect(vm)) return nullptr;
-    DiamondSqlite3StatementHandle *handle=malloc(sizeof(DiamondSqlite3StatementHandle));
+    DiamondStatementHandle *handle=malloc(sizeof(DiamondStatementHandle));
     if(handle==nullptr)return nullptr;
-    *handle=(DiamondSqlite3StatementHandle){
-        .object={.next=vm->young_objects,.kind=DIAMOND_OBJECT_SQLITE3_STATEMENT},.stmt=stmt};
+    *handle=(DiamondStatementHandle){
+        .object={.next=vm->young_objects,.kind=DIAMOND_OBJECT_STATEMENT},.backend=backend};
     vm->young_objects=&handle->object;
-    vm->bytes_allocated+=sizeof(DiamondSqlite3StatementHandle);
+    vm->bytes_allocated+=sizeof(DiamondStatementHandle);
     return handle;
 }
 

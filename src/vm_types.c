@@ -174,9 +174,9 @@ static const char *const NATIVE_OBJECT_MEMBERS_SQLITE3[]={
     "close","execute","last_insert_row_id","prepare","query"};
 static const char *const NATIVE_OBJECT_MEMBERS_STATEMENT[]={"close","execute","query"};
 static const char *const NATIVE_OBJECT_MEMBERS_POSTGRES[]={
-    "close","execute","last_insert_row_id","query"};
+    "close","execute","last_insert_row_id","prepare","query"};
 static const char *const NATIVE_OBJECT_MEMBERS_MYSQL[]={
-    "close","execute","last_insert_row_id","query"};
+    "close","execute","last_insert_row_id","prepare","query"};
 static const char *const NATIVE_OBJECT_MEMBERS_TENSOR[]={
     "add!","add_bias!","add_columns!","clone","cols","column_sums","columns","gelu!",
     "gelu_backward","get","layernorm_backward","layernorm_forward","matmul","row_softmax!",
@@ -210,7 +210,7 @@ size_t diamond_native_object_member_names(uint8_t object_kind,const char *const 
         NATIVE_OBJECT_MEMBERS_CASE(DIAMOND_OBJECT_TLS_SOCKET,NATIVE_OBJECT_MEMBERS_TLS_SOCKET)
         NATIVE_OBJECT_MEMBERS_CASE(DIAMOND_OBJECT_REGEXP,NATIVE_OBJECT_MEMBERS_REGEXP)
         NATIVE_OBJECT_MEMBERS_CASE(DIAMOND_OBJECT_SQLITE3,NATIVE_OBJECT_MEMBERS_SQLITE3)
-        NATIVE_OBJECT_MEMBERS_CASE(DIAMOND_OBJECT_SQLITE3_STATEMENT,NATIVE_OBJECT_MEMBERS_STATEMENT)
+        NATIVE_OBJECT_MEMBERS_CASE(DIAMOND_OBJECT_STATEMENT,NATIVE_OBJECT_MEMBERS_STATEMENT)
         NATIVE_OBJECT_MEMBERS_CASE(DIAMOND_OBJECT_POSTGRES,NATIVE_OBJECT_MEMBERS_POSTGRES)
         NATIVE_OBJECT_MEMBERS_CASE(DIAMOND_OBJECT_MYSQL,NATIVE_OBJECT_MEMBERS_MYSQL)
         NATIVE_OBJECT_MEMBERS_CASE(DIAMOND_OBJECT_TENSOR,NATIVE_OBJECT_MEMBERS_TENSOR)

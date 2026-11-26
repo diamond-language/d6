@@ -497,10 +497,13 @@ DIAMOND_INTERNAL void mysql_library_init_once_fn(void);
 DIAMOND_INTERNAL DiamondVmStatus postgres_dispatch_helper(DiamondVm *vm,DiamondPostgresHandle *target_db, const DiamondStringConstant *method_name,DiamondValue *registers,uint16_t base, uint8_t argc,uint16_t dest);
 DIAMOND_INTERNAL DiamondVmStatus sqlite3_dispatch_helper(DiamondVm *vm,DiamondSqlite3Handle *target_db, const DiamondStringConstant *method_name,DiamondValue *registers,uint16_t base, uint8_t argc,uint16_t dest);
 DIAMOND_INTERNAL DiamondVmStatus sqlite3_open_helper(DiamondVm *vm,const DiamondString *path, DiamondValue mode,sqlite3 **out_db);
-DIAMOND_INTERNAL DiamondVmStatus sqlite3_statement_dispatch_helper(DiamondVm *vm, DiamondSqlite3StatementHandle *target_stmt,const DiamondStringConstant *method_name, DiamondValue *registers,uint16_t base,uint8_t argc,uint16_t dest);
+DIAMOND_INTERNAL DiamondVmStatus statement_dispatch_helper(DiamondVm *vm, DiamondStatementHandle *target_stmt,const DiamondStringConstant *method_name, DiamondValue *registers,uint16_t base,uint8_t argc,uint16_t dest);
 
 /* Shared primitives that stay in vm.c (needed by vm_database.c) */
-DIAMOND_INTERNAL DiamondSqlite3StatementHandle *allocate_sqlite3_statement_handle( DiamondVm *vm,sqlite3_stmt *stmt);
+DIAMOND_INTERNAL DiamondStatementHandle *allocate_statement_handle(DiamondVm *vm,DiamondObjectKind backend);
+DIAMOND_INTERNAL void database_statement_close(DiamondStatementHandle *statement);
+DIAMOND_INTERNAL void database_postgres_close(DiamondPostgresHandle *handle);
+DIAMOND_INTERNAL void database_mysql_close(DiamondMysqlHandle *handle);
 
 /* vm_process_io.c: entry points called from run_chunk and the rest of vm.c */
 DIAMOND_INTERNAL DiamondVmStatus file_path_basename_helper(DiamondVm *vm,const DiamondString *path, const DiamondString *suffix,DiamondValue *out);

@@ -1,0 +1,99 @@
+# Run against the disposable databases from packages/arel/test_*_dialect.sh.
+def connect(postgres)
+  if postgres then return PostgreSQL.open(ENV["DIAMOND_PG_TEST_CONNINFO"]) end
+  MySQL.open(ENV["DIAMOND_MYSQL_TEST_HOST"], ENV["DIAMOND_MYSQL_TEST_USER"],
+    ENV["DIAMOND_MYSQL_TEST_PASSWORD"], ENV["DIAMOND_MYSQL_TEST_DATABASE"],
+    ENV["DIAMOND_MYSQL_TEST_PORT"].to_i())
+end
+
+def live_statements(db)
+  db.query("SELECT count(*) AS n FROM pg_prepared_statements WHERE name LIKE 'd6_statement_%'")[0]["n"]
+end
+
+def mysql_prepares(db)
+  db.query("SHOW SESSION STATUS LIKE 'Com_stmt_prepare'")[0]["Value"].to_i()
+end
+
+def prepare_without_connection(postgres)
+  connect(postgres).prepare("SELECT 7 AS n")
+end
+
+def abandon_statement(db)
+  db.prepare("SELECT 8 AS n")
+  nil
+end
+
+postgres = ARGV[0] == "postgres"
+db = connect(postgres)
+db.execute("CREATE TEMPORARY TABLE prepared_test (id INTEGER PRIMARY KEY, label TEXT)")
+insertion = db.prepare("INSERT INTO prepared_test (id, label) VALUES (?, ?)")
+lookup = db.prepare("SELECT id, label FROM prepared_test WHERE id = ?")
+raise "unexpected PostgreSQL statement count" if postgres && live_statements(db) != 2
+prepares = if postgres then 0 else mysql_prepares(db) end
+
+raise "wrong affected count" unless insertion.execute([1, nil]) == 1
+raise "wrong affected count" unless insertion.execute([2, "long text " * 80]) == 1
+raise "wrong first result" unless lookup.query([1]) == [{"id": 1, "label": nil}]
+raise "wrong second result" unless lookup.query([2]) == [{"id": 2, "label": "long text " * 80}]
+raise "wrong empty result" unless lookup.query([9]) == []
+raise "wrong reused result" unless lookup.query([1]) == [{"id": 1, "label": nil}]
+raise "reprepared PostgreSQL statement" if postgres && live_statements(db) != 2
+raise "reprepared MySQL statement" if !postgres && mysql_prepares(db) != prepares + 1
+
+begin
+  lookup.query(nil)
+  raise "accepted missing parameter"
+rescue error: ArgumentError
+end
+begin
+  lookup.query({})
+  raise "accepted named parameters"
+rescue error: TypeError
+end
+begin
+  insertion.execute([1, "duplicate"])
+  raise "accepted duplicate key"
+rescue error: PostgreSQLError | MySQLError
+end
+raise "write failed after a database error" unless insertion.execute([3, "recovered"]) == 1
+begin
+  db.prepare("SELECT 1; SELECT 2")
+  raise "accepted multiple statements"
+rescue error: PostgreSQLError | MySQLError
+end
+
+if postgres
+  db.execute("BEGIN")
+  insertion.close()
+  raise "close affected current transaction" unless lookup.query([3])[0]["label"] == "recovered"
+  db.execute("ROLLBACK")
+  raise "statement was not released" unless live_statements(db) == 1
+  abandon_statement(db)
+  # With stress GC, allocating the query's arguments makes the abandoned
+  # statement eligible for retirement before the next command.
+  raise "unreachable statement was not released" unless live_statements(db) == 1
+else
+  insertion.close()
+  procedure = db.prepare("CALL d6_prepared_results()")
+  raise "wrong CALL result" unless procedure.query() == [{"n": 10}]
+  raise "failed to drain CALL" unless lookup.query([1]) == [{"id": 1, "label": nil}]
+  raise "failed to reuse CALL" unless procedure.query() == [{"n": 10}]
+  procedure.close()
+end
+insertion.close()
+begin
+  insertion.execute([4, "closed"])
+  raise "used closed statement"
+rescue error: PostgreSQLError | MySQLError
+end
+db.close()
+lookup.close()
+begin
+  lookup.query([1])
+  raise "used statement after closing its connection"
+rescue error: PostgreSQLError | MySQLError
+end
+owned = prepare_without_connection(postgres)
+raise "statement lost its connection" unless owned.query() == [{"n": 7}]
+owned.close()
+puts("native prepared statements passed")

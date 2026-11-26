@@ -3437,10 +3437,10 @@ DiamondVmStatus outlined_native_object_invoke(DiamondVm *vm,const DiamondChunk *
         VM_PROPAGATE(dispatch_status);
         return DIAMOND_VM_OK;
     }
-    if(receiver_kind==DIAMOND_OBJECT_SQLITE3_STATEMENT) {
+    if(receiver_kind==DIAMOND_OBJECT_STATEMENT) {
         if(type_argument_count!=0)VM_REJECT_TYPE_ARGUMENTS(method_name);
-        const DiamondVmStatus dispatch_status=sqlite3_statement_dispatch_helper(vm,
-            (DiamondSqlite3StatementHandle *)registers[recv].as.object,
+        const DiamondVmStatus dispatch_status=statement_dispatch_helper(vm,
+            (DiamondStatementHandle *)registers[recv].as.object,
             method_name,registers,base,argc,dest);
         VM_PROPAGATE(dispatch_status);
         return DIAMOND_VM_OK;

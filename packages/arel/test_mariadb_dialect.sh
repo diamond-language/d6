@@ -59,3 +59,7 @@ export DIAMOND_STRESS_GC=1
 export DIAMOND_STRESS_MINOR_GC=1
 
 "$diamond" test_mariadb_dialect.d6
+
+podman exec "$container_name" mariadb -uroot -pdiamondtest diamond_arel_test --delimiter="//" -e \
+    'CREATE PROCEDURE d6_prepared_results() BEGIN SELECT 10 AS n; SELECT 20 AS n; END//'
+"$diamond" ../../tests/database_prepared.d6 mysql

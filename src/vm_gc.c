@@ -48,7 +48,9 @@ static_assert((int)DIAMOND_GC_CARD_SIZE == (int)DIAMOND_JIT_GC_CARD_SIZE, "jit.c
  * many sessions already has to be listed once here; a second copy
  * would just be one more place for a future kind to be missed from). */
 static void mark_object_children(DiamondObject *object, bool minor) {
-    if (object->kind == DIAMOND_OBJECT_INSTANCE) {
+    if (object->kind == DIAMOND_OBJECT_STATEMENT) {
+        mark_object(((DiamondStatementHandle *)object)->owner,minor);
+    } else if (object->kind == DIAMOND_OBJECT_INSTANCE) {
         DiamondInstance *instance=(DiamondInstance *)object;
         for(size_t i=0;i<instance->field_count;i++) mark_value(instance->fields[i],minor);
     } else if(object->kind==DIAMOND_OBJECT_ARRAY) {
@@ -548,28 +550,15 @@ static void sweep_list(DiamondVm *vm, DiamondObject **list_head,
 #else
             (void)db;
 #endif
-        } else if(unreached->kind==DIAMOND_OBJECT_SQLITE3_STATEMENT) {
-            size=sizeof(DiamondSqlite3StatementHandle);
-            sqlite3_stmt *stmt=((DiamondSqlite3StatementHandle *)unreached)->stmt;
-#ifndef DIAMOND_NO_SQLITE
-            if(stmt!=nullptr)sqlite3_finalize(stmt);
-#else
-            (void)stmt;
-#endif
+        } else if(unreached->kind==DIAMOND_OBJECT_STATEMENT) {
+            size=sizeof(DiamondStatementHandle);
+            database_statement_close((DiamondStatementHandle *)unreached);
         } else if(unreached->kind==DIAMOND_OBJECT_POSTGRES) {
             size=sizeof(DiamondPostgresHandle);
-            PGconn *conn=((DiamondPostgresHandle *)unreached)->conn;
-#ifndef DIAMOND_NO_POSTGRES
-            if(conn!=nullptr)PQfinish(conn);
-#else
-            (void)conn;
-#endif
+            database_postgres_close((DiamondPostgresHandle *)unreached);
         } else if(unreached->kind==DIAMOND_OBJECT_MYSQL) {
             size=sizeof(DiamondMysqlHandle);
-#ifndef DIAMOND_NO_MYSQL
-            MYSQL *conn=((DiamondMysqlHandle *)unreached)->conn;
-            if(conn!=nullptr)mysql_close(conn);
-#endif
+            database_mysql_close((DiamondMysqlHandle *)unreached);
         } else if(unreached->kind==DIAMOND_OBJECT_TIME) {
             /* No owned resource, no separate allocation -- free(unreached)
              * below is all that's needed; this branch exists only for

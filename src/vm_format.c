@@ -121,7 +121,7 @@ static const struct {const char *name;DiamondObjectKind kind;} native_type_names
     {"UDPSocket",DIAMOND_OBJECT_UDP_SOCKET},{"TLSSocket",DIAMOND_OBJECT_TLS_SOCKET},
     {"Regexp",DIAMOND_OBJECT_REGEXP},{"ProgramBuilder",DIAMOND_OBJECT_PROGRAM_BUILDER},
     {"Thread",DIAMOND_OBJECT_THREAD},{"SQLite3",DIAMOND_OBJECT_SQLITE3},
-    {"Statement",DIAMOND_OBJECT_SQLITE3_STATEMENT},{"PostgreSQL",DIAMOND_OBJECT_POSTGRES},
+    {"Statement",DIAMOND_OBJECT_STATEMENT},{"PostgreSQL",DIAMOND_OBJECT_POSTGRES},
     {"MySQL",DIAMOND_OBJECT_MYSQL},{"Time",DIAMOND_OBJECT_TIME},
     {"ProcessResult",DIAMOND_OBJECT_PROCESS_RESULT},
     {"ProcessHandle",DIAMOND_OBJECT_PROCESS_HANDLE},
@@ -203,7 +203,7 @@ void diamond_format_value_type(char *buffer, size_t capacity,
         case DIAMOND_OBJECT_PROGRAM_BUILDER: name="ProgramBuilder"; break;
         case DIAMOND_OBJECT_THREAD: name="Thread"; break;
         case DIAMOND_OBJECT_SQLITE3: name="SQLite3"; break;
-        case DIAMOND_OBJECT_SQLITE3_STATEMENT: name="Statement"; break;
+        case DIAMOND_OBJECT_STATEMENT: name="Statement"; break;
         case DIAMOND_OBJECT_POSTGRES: name="PostgreSQL"; break;
         case DIAMOND_OBJECT_MYSQL: name="MySQL"; break;
         case DIAMOND_OBJECT_TIME: name="Time"; break;

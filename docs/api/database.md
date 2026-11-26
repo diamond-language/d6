@@ -56,8 +56,10 @@ Closes the connection. Closing again does nothing.
 
 ## Statement
 
-A statement prepared by `SQLite3#prepare`. It stays usable after its
-connection is closed, until it is closed itself.
+A statement prepared by `SQLite3#prepare`, `PostgreSQL#prepare`, or
+`MySQL#prepare`. PostgreSQL and MySQL statements keep their connection
+reachable and become invalid when it is explicitly closed. SQLite
+statements stay usable after closing their connection.
 
 ### `execute(params = nil) -> Int`
 
@@ -67,7 +69,7 @@ Run the statement with fresh `params`, like the connection's methods.
 
 ### `close()`
 
-Releases the statement.
+Releases the statement. Closing again does nothing.
 
 ```ruby
 db = SQLite3.open(":memory:")
@@ -103,6 +105,12 @@ a `postgresql://` URI.
 As for SQLite3. Integer, float, numeric, text and boolean columns become d6
 values; other types come back as their text form.
 
+### `prepare(sql) -> Statement`
+
+Prepares one SQL statement on this session. Pass positional `?` values as an
+Array on each execution. The driver releases closed statements when the
+connection is idle.
+
 ### `last_insert_row_id() -> Int`
 
 The value of `lastval()`, the most recent sequence value on this connection.
@@ -133,6 +141,11 @@ Connects; every argument is required.
 
 As for SQLite3. Integer and decimal columns become d6 values; dates, JSON and
 other types come back as text.
+
+### `prepare(sql) -> Statement`
+
+Prepares one SQL statement on this session. Pass positional `?` values as an
+Array on each execution. MySQL and MariaDB use the same API.
 
 ### `last_insert_row_id() -> Int`
 

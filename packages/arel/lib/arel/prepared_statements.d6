@@ -1,8 +1,8 @@
 module Arel
 
   # A drop-in stand-in for a real `Statement` on a connection kind that
-  # doesn't support `#prepare` (Postgres, MySQL; or a plain Instance
-  # decorator around a real connection that doesn't forward `#prepare`,
+  # doesn't support `#prepare` (such as a connection decorator
+  # that doesn't forward `#prepare`,
   # like `ActiveRecord::InstrumentedConnection` -- see PreparedStatements
   # below) -- just forwards straight to the connection's own
   # `#query`/`#execute` every time, same as before this whole class
@@ -19,10 +19,8 @@ module Arel
   end
 
   # Reuses one compiled `Statement` per (connection, SQL text) pair
-  # across every call, avoiding `sqlite3_prepare_v2`'s parse/plan cost on
-  # every single query -- the exact cost `db.prepare`/`Statement`
-  # (docs/io.md) was added to avoid, but that nothing in this framework
-  # actually used until now. `Query#to_a`/`#count` and
+  # across calls, avoiding a fresh native prepare for every execution on
+  # SQLite, PostgreSQL, and MySQL/MariaDB. `Query#to_a`/`#count` and
   # `Insert`/`Update`/`Delete#execute`/`#to_a` all route through this
   # instead of calling `db.query`/`db.execute` directly.
   #
@@ -32,8 +30,6 @@ module Arel
   # `values_equal`/`hash_value` fix this depended on); before that fix,
   # using a connection as a Hash key segfaulted.
   #
-  # Only `SQLite3` supports `#prepare` today (docs/io.md; Postgres/MySQL
-  # don't -- a deliberately deferred gap for those drivers), and
   # `ActiveRecord::InstrumentedConnection` -- a plain Diamond `Instance`
   # wrapping a real connection to log/time every call -- only forwards
   # `#query`/`#execute`/`#last_insert_row_id`/`#close`, not `#prepare`
@@ -91,8 +87,8 @@ module Arel
         begin
           statement = db.prepare(sql)
         rescue error: TypeError | NoMethodError
-          # TypeError: a native connection with no #prepare at all
-          # (Postgres, MySQL). NoMethodError: a plain Instance decorator
+          # TypeError: a native connection with no #prepare.
+          # NoMethodError: a plain Instance decorator
           # around a real connection that doesn't forward #prepare --
           # ActiveRecord::InstrumentedConnection only exposes #query/
           # #execute/#last_insert_row_id/#close, by design (it wraps
