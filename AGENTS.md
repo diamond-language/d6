@@ -3,6 +3,28 @@
 - Always commit completed changes in this repository. After verification, stage the task's files, create a descriptive commit, and confirm the working tree status before reporting completion. Do not leave finished work uncommitted.
 - Add new functionality on a branch and land it through a pull request, never by committing to `main`. Before merging, rebase the branch onto the current `main` (no merge commits from `main` into the branch) and have a green CI run on the rebased head. Do not merge on a red or still-running run. Several open pull requests that each have a green run and do not conflict may be merged together without a re-run apiece. See "Branches and pull requests" in CONTRIBUTING.md for the steps.
 
+## Task Continuity and Completion
+
+A new prompt does not cancel, replace, or supersede an existing task unless the user explicitly says so.
+
+Maintain a queue of outstanding tasks and complete them in the order received.
+
+If a new instruction modifies an existing task, incorporate that instruction without abandoning the remaining work.
+
+Do not abandon unfinished work when responding to a new prompt.
+
+Complete all required implementation, testing, documentation, deployment, and verification steps applicable to each task.
+
+Updating documentation means updating its actual content. Building, testing, or deploying unchanged documentation does not constitute a documentation update.
+
+Never report partially completed work as complete.
+
+If a task is blocked, explicitly identify the blocker and outstanding work. Do not silently skip requirements.
+
+Before reporting completion, review the original request, subsequent instructions, and all outstanding requirements.
+
+A task is complete only when every applicable requirement has been satisfied and verified.
+
 ## How the owner works with agents
 
 - **Act on what is authorised; do not hand work back.** The owner runs agents in bypass-permissions mode and has said "stop depending on me for stuff YOU can handle". Merge your own pull requests once the rules above are met, delete merged branches, clean up worktrees, publish and deploy when they have asked for it. Ask only for a real design decision (a policy format, a public API shape) or something destructive and unrequested.
