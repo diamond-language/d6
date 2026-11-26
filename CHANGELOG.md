@@ -7,6 +7,31 @@ come only in minor releases, marked **Breaking** here.
 
 ## Unreleased
 
+## 1.7.0
+
+### Added
+
+- PostgreSQL and MySQL/MariaDB connections expose reusable native
+  prepared statements through `prepare`, including Arel's statement cache.
+- HTTP requests and sessions accept caller-provided transports for
+  readiness-aware clients.
+- Gremlin exposes opt-in HTTP request and periodic tick timing events.
+- Gremlin supports opt-in HTTP/1.1 keep-alive with bounded request parsing,
+  per-request deadlines, and idle connection expiry.
+- WebSocket clients accept a caller-provided transport, so readiness-aware
+  clients can reuse the cut's handshake and framing.
+
+### Fixed
+
+- HTTP clients close failed connections promptly. Sessions only retry safe
+  methods on a reused socket by default, with an explicit retry policy.
+- WebSocket frame-header reads preserve transport errors and distinguish
+  them from clean EOF.
+- Gremlin services periodic callbacks during HTTP bursts and bounds accepts
+  before returning to existing connections.
+- Collecting an unreachable Supervisor disables restarts and lets its current
+  attempts finish without blocking garbage collection.
+
 ## 1.7.0-rc1
 
 ### Added
