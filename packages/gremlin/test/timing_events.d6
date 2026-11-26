@@ -1,0 +1,58 @@
+require "../../../tests/harness"
+require "../lib/gremlin"
+
+def handler(request, context)
+  [200, {}, request["path"]]
+end
+
+def tick(context)
+  nil
+end
+
+def observe(event, context)
+  if event["type"] == "tick"
+    if !context["observed_tick"] && event["scheduled_at"] <= event["started_at"] &&
+        event["started_at"] <= event["finished_at"]
+      context["observed_tick"] = true
+      puts("tick observed")
+    end
+  elsif event["type"] == "http_request"
+    times = [event["accepted_at"], event["parse_started_at"], event["handler_started_at"],
+      event["handler_finished_at"], event["response_finished_at"]]
+    if times == times.sort() && event["status"] == 200 && event["method"] == "GET" && event["request_id"] != nil
+      puts(if event["reused"] then "reused request observed" else "first request observed" end)
+      raise "intentional observer failure" unless event["reused"]
+    end
+  end
+end
+
+if ARGV[0] == "--server"
+  gremlin_serve(ARGV[1].to_i(), handler, tick_interval: 0.02, on_tick: tick,
+    host: "127.0.0.1", keep_alive: true, on_event: observe)
+else
+  Harness.with_port(5) do |port|
+    child = Harness::Child.new(ARGV + ["--server", port.to_s()], {})
+    socket = nil
+    begin
+      child.wait_for_text("tick observed", 3000)
+      socket = TCPSocket.connect("127.0.0.1", port, {"connect_timeout_ms": 1000, "read_timeout_ms": 3000})
+      socket.write("GET /first HTTP/1.1\r\nHost: localhost\r\n\r\n" +
+        "GET /second HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+      socket.flush()
+      reply = socket.read()
+      raise "observer error interrupted an HTTP response: #{reply.inspect()} #{child.stdout_text()} #{child.stderr_text()}" unless reply.include?("\r\n\r\n/first") && reply.end_with?("/second")
+      child.wait_for_text("first request observed", 3000)
+      child.wait_for_text("observer.failed", 3000)
+      child.wait_for_text("reused request observed", 3000)
+    rescue error
+      if (child.stdout_text() + child.stderr_text()).include?("Address already in use")
+        raise Harness::PortTaken.new("Gremlin timing test listener unavailable")
+      end
+      raise error
+    ensure
+      socket.close() if socket != nil
+      child.finish()
+    end
+  end
+  puts("gremlin timing events and observer isolation passed")
+end

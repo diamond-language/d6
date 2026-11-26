@@ -100,9 +100,9 @@
         "logger": "^0.5.0"
       },
       "name": "gremlin",
-      "sha256": "8eaa40dad64d2515f409bb006dd55bf88f4eb200980715eb5beb923c789ba967",
-      "size": 65536,
-      "version": "0.5.10"
+      "sha256": "b6668f88c1db6b561fa1aa821b3cb80598f2a7453c18ecbb65444877d7fe9f29",
+      "size": 67584,
+      "version": "0.5.11"
     },
     {
       "archive": "html.tar",

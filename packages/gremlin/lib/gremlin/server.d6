@@ -31,14 +31,27 @@ def gremlin_poll_timeout_ms(next_tick_at)
   end
 end
 
-def gremlin_service_tick(next_tick_at, tick_interval, on_tick, context, log)
-  return next_tick_at if next_tick_at == nil || Time.monotonic() < next_tick_at
+def gremlin_emit_event(on_event, event, context, log)
+  on_event(event, context)
+rescue error
+  log.error("observer.failed", {"error": "#{error}"})
+end
+
+def gremlin_service_tick(next_tick_at, tick_interval, on_tick, context, log, on_event)
+  return nil if next_tick_at == nil
+  started = Time.monotonic()
+  return next_tick_at if started < next_tick_at
   begin
     on_tick(context)
   rescue error: StandardError
     log.error("tick.handler_failed", {"error": error.message()})
   end
-  Time.monotonic() + tick_interval
+  finished = Time.monotonic()
+  if on_event != nil
+    gremlin_emit_event(on_event, {"type": "tick", "scheduled_at": next_tick_at,
+      "started_at": started, "finished_at": finished}, context, log)
+  end
+  finished + tick_interval
 end
 
 def gremlin_keep_alive?(request, response)
@@ -78,7 +91,7 @@ end
 # `nil`, meaning no tick at all -- IO.poll blocks with its original
 # `-1` (or whatever shutdown alone already bounded it to), exactly
 # today's behavior, unchanged for every existing caller.
-def gremlin_worker(port, handler, tick_interval = nil, on_tick = nil, limits = nil, host = nil)
+def gremlin_worker(port, handler, tick_interval = nil, on_tick = nil, limits = nil, host = nil, on_event = nil)
   listener = if host == nil then TCPServer.listen_nonblocking(port, reuse_port: true) else TCPServer.listen_nonblocking(port, host: host, reuse_port: true) end
   connections = []
   context = {}
@@ -107,11 +120,13 @@ def gremlin_worker(port, handler, tick_interval = nil, on_tick = nil, limits = n
   end
 
   def spawn_connection(client_socket)
+    accepted_at = Time.monotonic() if on_event != nil
     conn = NonblockingConnection.new(client_socket, limits)
     def handle_connection()
       keep_alive_enabled = limits != nil && limits["keep_alive"] == true
       requests = 0
       loop do
+        parse_started_at = Time.monotonic() if on_event != nil
         begin
           request = http_parse_request(conn, limits)
         rescue error: HttpRequestError
@@ -144,6 +159,7 @@ def gremlin_worker(port, handler, tick_interval = nil, on_tick = nil, limits = n
         # onto its own stream, which the peer sees as a protocol error.
         # SystemStackError is not a StandardError (a handler that recurses too deeply on a hostile input would
         # otherwise take the whole worker down), so it is answered the same way.
+        handler_started_at = Time.monotonic() if on_event != nil
         begin
           response = handler(request, context)
         rescue error: StandardError
@@ -153,6 +169,7 @@ def gremlin_worker(port, handler, tick_interval = nil, on_tick = nil, limits = n
           log.error("request.handler_failed", {"request_id": conn.request_id(), "error": error.message()})
           response = [500, {"Content-Type": "text/plain; charset=utf-8", "Connection": "close", "X-Request-ID": conn.request_id()}, "Internal Server Error"]
         end
+        handler_finished_at = Time.monotonic() if on_event != nil
         # nil is the signal a handler already fully took over `conn`
         # itself (via context["gremlin_connection"] above) and wrote
         # its own response directly -- no ordinary handler could
@@ -167,16 +184,24 @@ def gremlin_worker(port, handler, tick_interval = nil, on_tick = nil, limits = n
             requests += 1
             keep = requests < 100 && !GremlinShutdown.requested?() && gremlin_keep_alive?(request, response)
             gremlin_write_http_response(conn, response, request["method"] != "HEAD", keep)
-            if keep
-              conn.wait_for_next_request()
-              # Give other sockets and ticks a turn even with pipelined input.
-              yield
-              break if conn.closed?() || GremlinShutdown.requested?()
-              conn.begin_next_request()
-              next
-            end
           else
+            keep = false
             http_write_response(conn, response, request["method"] != "HEAD")
+          end
+          if on_event != nil
+            gremlin_emit_event(on_event, {"type": "http_request", "accepted_at": accepted_at,
+              "parse_started_at": parse_started_at, "handler_started_at": handler_started_at,
+              "handler_finished_at": handler_finished_at, "response_finished_at": Time.monotonic(),
+              "request_id": conn.request_id(), "method": request["method"],
+              "status": response[0], "reused": requests > 1}, context, log)
+          end
+          if keep
+            conn.wait_for_next_request()
+            # Give other sockets and ticks a turn even with pipelined input.
+            yield
+            break if conn.closed?() || GremlinShutdown.requested?()
+            conn.begin_next_request()
+            next
           end
         end
         break
@@ -322,7 +347,7 @@ def gremlin_worker(port, handler, tick_interval = nil, on_tick = nil, limits = n
     # race, not a hypothetical one.
     newly_spawned = []
     accepted_this_tick = 0
-    next_tick_at = gremlin_service_tick(next_tick_at, tick_interval, on_tick, context, log)
+    next_tick_at = gremlin_service_tick(next_tick_at, tick_interval, on_tick, context, log, on_event)
     # The listener sits at read_list[0] only while it was polled at all:
     # read_list is empty once shutdown has begun and no connections remain.
     listener_polled = read_list.length() > connections.length()
@@ -346,7 +371,7 @@ def gremlin_worker(port, handler, tick_interval = nil, on_tick = nil, limits = n
             newly_spawned.push(entry)
           end
         end
-        next_tick_at = gremlin_service_tick(next_tick_at, tick_interval, on_tick, context, log)
+        next_tick_at = gremlin_service_tick(next_tick_at, tick_interval, on_tick, context, log, on_event)
         # Keep a full listener backlog from starving existing sockets.
         if accepted_this_tick >= 32 || (limits != nil && accepted_this_tick >= limits["connections"])
           break
@@ -411,13 +436,13 @@ def gremlin_worker(port, handler, tick_interval = nil, on_tick = nil, limits = n
     connections.each_with_index() do |entry, position|
       resume_if_ready(entry, position)
       if next_tick_at != nil
-        next_tick_at = gremlin_service_tick(next_tick_at, tick_interval, on_tick, context, log)
+        next_tick_at = gremlin_service_tick(next_tick_at, tick_interval, on_tick, context, log, on_event)
       end
     end
     connections = still_active.concat(newly_spawned)
 
     # Also service timers when no socket was ready.
-    next_tick_at = gremlin_service_tick(next_tick_at, tick_interval, on_tick, context, log)
+    next_tick_at = gremlin_service_tick(next_tick_at, tick_interval, on_tick, context, log, on_event)
 
     if GremlinShutdown.requested?() && connections.length() == 0
       log.info("server.shutdown_complete", {"forced": false})
@@ -446,19 +471,19 @@ def gremlin_managed_worker(port, handler, tick_interval, on_tick, limits, config
   GremlinShutdown.configure_group(config["channels"], config["deadline"],
     config["timeout"], config["shared_deadline"], config["stop"])
   begin
-    gremlin_worker(port, handler, tick_interval, on_tick, limits, config["host"])
+    gremlin_worker(port, handler, tick_interval, on_tick, limits, config["host"], config["on_event"])
   ensure
     # Also wake siblings if listener setup or the worker loop raises.
     config["stop"].close()
   end
 end
 
-def gremlin_managed_serve(port, handler, threads, tick_interval, on_tick, limits, token, timeout, host = nil)
+def gremlin_managed_serve(port, handler, threads, tick_interval, on_tick, limits, token, timeout, host = nil, on_event = nil)
   shared_deadline = Channel.new(1)
   shared_deadline.send(nil)
   stop = Channel.new(1)
   config = {"channels": token.wait_channels(), "deadline": token.wait_deadline(),
-    "timeout": timeout, "shared_deadline": shared_deadline, "stop": stop, "host": host}
+    "timeout": timeout, "shared_deadline": shared_deadline, "stop": stop, "host": host, "on_event": on_event}
   spawned = []
   failures = []
   begin
@@ -542,10 +567,11 @@ end
 ## - `shutdown_token`, `shutdown_timeout`: drain when a `cancellation` token is cancelled, then return
 ## - `host`: listen on one address only, such as `"127.0.0.1"`
 ## - `keep_alive`: opt in to HTTP/1.1 reuse with bounded request parsing
+## - `on_event`: optional timing callback receiving `(event, context)` on the worker
 ##
 ## A handler that raises gets a 500 and a logged `request.handler_failed`; the server
 ## keeps running. `TERM` or `INT` drains and stops it, unless a token manages shutdown.
-def gremlin_serve(port, handler: Callable[2], threads = 1, tick_interval = nil, on_tick = nil, limits = nil, return_after_shutdown: Bool = false, shutdown_token = nil, shutdown_timeout = 10.0, host = nil, keep_alive: Bool = false)
+def gremlin_serve(port, handler: Callable[2], threads = 1, tick_interval = nil, on_tick = nil, limits = nil, return_after_shutdown: Bool = false, shutdown_token = nil, shutdown_timeout = 10.0, host = nil, keep_alive: Bool = false, on_event = nil)
   if shutdown_token == nil && shutdown_timeout != 10.0 && threads != 1
     raise ArgumentError.new("custom shutdown_timeout without a token requires threads = 1")
   end
@@ -560,7 +586,7 @@ def gremlin_serve(port, handler: Callable[2], threads = 1, tick_interval = nil, 
     raise ArgumentError.new("gremlin_serve threads must be at least 1")
   end
   if shutdown_token != nil && threads > 1
-    return gremlin_managed_serve(port, handler, threads, tick_interval, on_tick, limits, shutdown_token, shutdown_timeout, host)
+    return gremlin_managed_serve(port, handler, threads, tick_interval, on_tick, limits, shutdown_token, shutdown_timeout, host, on_event)
   end
   # Every spawned worker's Thread handle must stay referenced for as long
   # as the server runs -- Thread.new's return value is otherwise a plain
@@ -579,8 +605,8 @@ def gremlin_serve(port, handler: Callable[2], threads = 1, tick_interval = nil, 
   # stays a live GC root for the server's entire lifetime.
   spawned = []
   (threads - 1).times() do |i|
-    spawned.push(Thread.new(gremlin_worker, port, handler, tick_interval, on_tick, limits, host))
+    spawned.push(Thread.new(gremlin_worker, port, handler, tick_interval, on_tick, limits, host, on_event))
   end
-  gremlin_worker(port, handler, tick_interval, on_tick, limits, host)
+  gremlin_worker(port, handler, tick_interval, on_tick, limits, host, on_event)
 end
 
