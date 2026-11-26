@@ -366,6 +366,81 @@ Successful handshakes return a regular blocking TLS socket, owned by the caller;
 application reads/writes remain outside the cancellation contract. Local trust-store
 and certificate loading also remain synchronous filesystem work.
 
+## Gremlin HTTP and timing
+
+Gremlin 0.5.11 can keep HTTP/1.1 connections open between requests. Enable
+`keep_alive: true` on a server that benefits from repeated requests on one
+socket. Each request gets its own deadline. Idle sockets expire, and a busy
+connection serves up to 100 requests before closing.
+
+Pass `on_event:` a callable that accepts the event and worker context.
+
+<!-- doc-check: skip -->
+```ruby
+require_cut "gremlin"
+
+def handler(request, context)
+  [200, {"Content-Type": "text/plain"}, "ok"]
+end
+
+def tick(context)
+  nil
+end
+
+def observe(event, context)
+  if event["type"] == "http_request"
+    puts(event["response_finished_at"] - event["parse_started_at"])
+  elsif event["type"] == "tick"
+    puts(event["started_at"] - event["scheduled_at"])
+  end
+end
+
+gremlin_serve(8080, handler, tick_interval: 1.0, on_tick: tick,
+  host: "127.0.0.1", keep_alive: true, on_event: observe)
+```
+
+The measurements are seconds on the monotonic clock. A request's
+`accepted_at` belongs to the socket and is shared by any requests it serves.
+Use `parse_started_at` to measure a single request. The worker runs observers
+synchronously, so keep them short. With multiple workers, use a callable
+that does not capture local variables.
+
+## HTTP and WebSocket client transports
+
+HTTP 0.2.12 and WebSocket 0.2.6 let an application provide the connected
+stream. Use a connector when an application already owns socket readiness
+and wants to share its connection logic between HTTP and WebSocket clients.
+
+| Client | Where to pass the connector |
+|---|---|
+| `http_request` | `"connector"` in its fifth argument, the options Hash |
+| `HttpSession.new` | `"connector"` in the session options Hash |
+| `websocket_connect` | The `connector:` keyword |
+
+With an adapter named `connect_transport`, pass the same callable to both clients.
+
+<!-- doc-check: skip -->
+```ruby
+require_cut "http"
+require_cut "websocket"
+
+session = HttpSession.new({"connector": connect_transport})
+response = session.request("GET", "https://example.com/status")
+ws = websocket_connect("wss://example.com/live", connector: connect_transport)
+```
+
+The connector receives `(host, port, tls, options)` for each new connection.
+Its stream must return lines without line endings from `gets()`, fill
+`read(n)` unless it reaches EOF, send the entire string in `write(bytes)`,
+and release the socket in `close()`. Handle readiness waits and partial
+writes inside the adapter. For HTTPS and WSS the connector also establishes
+TLS and verifies the certificate for the original host.
+
+With an HTTP session, `"retry_stale" => "safe"` retries GET, HEAD, OPTIONS,
+and TRACE once after an I/O error on an existing socket. Use `"never"`
+to disable retries, or `"always"` only for operations your application can
+safely replay. Redirect handling is configured separately.
+
 ## UDP sockets: `UDPSocket.bind`/`UDPSocket.open`, `.send`/`.receive`
 
 ```ruby

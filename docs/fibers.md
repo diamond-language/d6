@@ -87,6 +87,9 @@ fibers in an Array and decide which one to resume. The Gremlin HTTP server uses
 this approach with non-blocking sockets and `IO.poll`; see
 [`packages/gremlin`](../packages/gremlin/README.md) and the
 [non-blocking I/O guide](networking.md#non-blocking-sockets-tcpserverlisten_nonblocking-socket-iopoll).
+An application-owned scheduler can also provide [HTTP and WebSocket
+client transports](networking.md#http-and-websocket-client-transports)
+that yield while waiting for readiness.
 
 Because scheduling is cooperative, blocking I/O or CPU-heavy work inside one
 fiber blocks every fiber on that OS thread. Use non-blocking I/O with explicit

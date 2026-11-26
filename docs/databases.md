@@ -171,6 +171,20 @@ insert.close()
 db.close()
 ```
 
+This example works with either database when `people` has `name` and `age`
+columns and `db` is an open connection.
+
+<!-- doc-check: skip -->
+```ruby
+lookup = db.prepare("SELECT name FROM people WHERE age >= ? ORDER BY name")
+begin
+  adults = lookup.query([18])
+  seniors = lookup.query([65])
+ensure
+  lookup.close()
+end
+```
+
 Each call takes fresh arguments. An omitted argument or `nil` means zero
 parameters. `execute` returns the affected row count and `query` returns
 rows using the connection's usual decoding rules. MySQL procedures
@@ -183,6 +197,11 @@ Garbage collection queues abandoned statements for release before a later
 operation. PostgreSQL releases those names when the session is idle, so
 closing a statement during a transaction does not issue SQL on that transaction.
 PostgreSQL reserves server statement names starting with `d6_statement_`.
+
+Prepare fresh statements when you replace a connection. Arel 0.35.7 caches
+statements on the connection that prepared them. Arel uses direct execution
+when the connection does not implement `prepare`.
+[Database API reference](api/database.md#statement)
 
 ## PostgreSQL: `PostgreSQL.open`/`.execute`/`.query`/`.prepare`/`.last_insert_row_id`/`.close`
 
@@ -216,7 +235,7 @@ unreached-but-still-open handle closes it as a safety net" GC behavior.
 
 `PostgreSQL.open` is recognized in the compiler the same way `SQLite3.open`
 is, compiling to a single `DIAMOND_OP_POSTGRES_OPEN dest, conninfo`
-instruction. `.execute`/`.query`/`.last_insert_row_id`/`.close` are native
+instruction. `.execute`/`.query`/`.prepare`/`.last_insert_row_id`/`.close` are native
 `DIAMOND_OP_INVOKE` dispatch on a `DIAMOND_OBJECT_POSTGRES` receiver, the
 same mechanism `SQLite3`'s own methods use:
 
@@ -227,6 +246,7 @@ same mechanism `SQLite3`'s own methods use:
 - `.query(sql)` / `.query(sql, params)` runs one statement and collects
   every row into `Array[Hash]` (column name → typed value), same shape
   `SQLite3#query` produces.
+- `.prepare(sql)` returns a [reusable statement](#reusable-postgresql-and-mysql-statements).
 - `.last_insert_row_id()` runs `SELECT lastval()` and returns its `Int`
   result — Postgres has no direct equivalent of `sqlite3_last_insert_
   rowid`, so this approximates it for a `serial`/`GENERATED ALWAYS AS
@@ -315,7 +335,7 @@ safety net" GC behavior.
 `MySQL.open` is recognized in the compiler the same way `SQLite3.open`/
 `PostgreSQL.open` are, compiling to a single
 `DIAMOND_OP_MYSQL_OPEN dest, host, user, password, database, port`
-instruction. `.execute`/`.query`/`.last_insert_row_id`/`.close` are native
+instruction. `.execute`/`.query`/`.prepare`/`.last_insert_row_id`/`.close` are native
 `DIAMOND_OP_INVOKE` dispatch on a `DIAMOND_OBJECT_MYSQL` receiver, the same
 mechanism `SQLite3`/`PostgreSQL`'s own methods use:
 
@@ -327,6 +347,7 @@ mechanism `SQLite3`/`PostgreSQL`'s own methods use:
 - `.query(sql)` / `.query(sql, params)` runs one statement and collects
   every row into `Array[Hash]` (column name → typed value), same shape
   `SQLite3#query`/`PostgreSQL#query` produce.
+- `.prepare(sql)` returns a [reusable statement](#reusable-postgresql-and-mysql-statements).
 - `.last_insert_row_id()` is a direct `mysql_insert_id(conn)` call —
   simpler than `PostgreSQL#last_insert_row_id`'s own `SELECT lastval()`
   round-trip, since MySQL's client library tracks the connection's last
