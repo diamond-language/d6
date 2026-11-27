@@ -7,6 +7,19 @@ come only in minor releases, marked **Breaking** here.
 
 ## Unreleased
 
+### Added
+
+- Inside a module's instance method, a bare `name(...)` calls the including
+  object's method, as it already did inside a class. The call dispatches on
+  self at run time, so a class's override answers; a name no class or module
+  defines is still a compile error.
+
+### Changed
+
+- **Breaking:** `String#sub` and `String#gsub` keep a backslash in the
+  replacement unless it starts `\0`-`\9`, `\&`, or `\\`, as Ruby does.
+  `"a".sub("a", "x\\y")` now gives `x\y` instead of `xy`.
+
 ## 1.7.0
 
 ### Added

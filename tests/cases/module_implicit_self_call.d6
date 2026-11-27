@@ -1,0 +1,44 @@
+# Inside a module's instance method, a bare name(...) with no function of
+# that name calls self's method, as it does inside a class. Self is the
+# including class, so its own method or override answers.
+module Shout
+  def loud(word) = upper(word) + bang()
+  def each_loud(words) = words.map() do |w| loud(w) end
+  def upper(word) = word.upcase()
+end
+
+module Polite
+  include Shout
+  def greet() = "please, " + loud(name())
+end
+
+class Person
+  include Polite
+  def name() = "pat"
+  def bang() = "!"
+end
+
+class Quiet
+  include Shout
+  def bang() = "."
+  def upper(word) = word
+end
+
+# A top-level function of the same name still wins.
+def label() = "function"
+
+module Labeled
+  def show() = label()
+end
+
+class Tag
+  include Labeled
+  def label() = "method"
+end
+
+person = Person.new()
+puts(person.loud("hi"))
+puts(person.each_loud(["a", "b"]).join(","))
+puts(person.greet())
+puts(Quiet.new().loud("shh"))
+puts(Tag.new().show())

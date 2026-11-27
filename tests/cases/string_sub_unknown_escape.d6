@@ -1,0 +1,9 @@
+# A backslash before anything other than a digit, &, or another backslash
+# stays in the replacement, as in Ruby, so replacement text with Windows
+# paths or regex source survives sub and gsub.
+puts("a\\b".sub("a", "x\\y"))
+puts("path".sub("path", "C:\\Users\\pat"))
+puts("re".gsub(Regexp.new("re"), "/\\A\\w+\\z/"))
+# The known escapes keep working.
+puts("cat".sub(Regexp.new("(c)(a)"), "\\2\\1-\\0-\\&-\\\\"))
+puts("x".sub("x", "end\\"))

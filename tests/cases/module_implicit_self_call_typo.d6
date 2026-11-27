@@ -1,0 +1,4 @@
+# No class or module defines nmae, so the bare call is still a compile error.
+module Greets
+  def hi() = nmae()
+end

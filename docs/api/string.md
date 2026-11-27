@@ -287,8 +287,10 @@ The byte at `index` as an `Int`.
 ### `gsub(pattern) do |match| ... end -> String`
 
 Every match of `pattern` (a `Regexp`, or a `String` matched literally)
-replaced by `replacement`, in which `\0` is the whole match and `\1`... the
-capture groups. With a block, each match is replaced by the block's value.
+replaced by `replacement`, in which `\0` (or `\&`) is the whole match, `\1`
+to `\9` are the capture groups, and `\\` is one backslash. Any other
+backslash is kept as written, so `"C:\\Users"` stays `C:\Users`. With a
+block, each match is replaced by the block's value and no escapes apply.
 
 ```ruby
 "a.b.c".gsub(".", "-")                    # => "a-b-c"
