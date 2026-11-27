@@ -264,8 +264,13 @@ tools/test_portable_distros.sh    # packaging/portable_tools_smoke.sh on each di
 
 - `tools/build_portable.sh` builds inside an Alpine container (podman or docker) from the
   checkout's tracked files, so the host needs neither musl nor the static libraries.
-  libxcrypt (for `BCrypt`) and MariaDB Connector/C are built from pinned, checksummed
-  source releases.
+  The container is a builder image from `tools/portable/Containerfile`. It holds the
+  Alpine packages, plus libxcrypt (for `BCrypt`) and MariaDB Connector/C built from
+  pinned, checksummed source releases. The script pulls the image from
+  `ghcr.io/diamond-language/d6-portable-builder`, tagged with a hash of the recipe. If no
+  image has that tag yet, the script builds it, which is the only time a portable build
+  downloads anything. CI pushes the image it builds. `PORTABLE_BUILDER` names another
+  image to build in.
 - Connector/C carries its authentication plugins statically (`caching_sha2_password`,
   `sha256_password`, `client_ed25519`, `parsec`, `dialog`, clear password), since a static
   binary cannot load them at run time. Kerberos (`auth_gssapi`) is left out.

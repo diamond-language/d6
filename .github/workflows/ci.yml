@@ -9,6 +9,7 @@ on:
   workflow_dispatch:
 
 # The jobs only build and test, so the token needs no more than read access to the checkout.
+# test-portable alone may also push its builder image to ghcr.io.
 permissions:
   contents: read
 
@@ -432,9 +433,16 @@ jobs:
   # Builds the portable tools (static musl d6, facet, d6-lsp, d6-dap, in an
   # Alpine container) and runs packaging/portable_tools_smoke.sh with them in clean
   # Ubuntu, Debian, Fedora, Arch, Alpine and openSUSE containers.
+  # The build runs in the prebuilt builder image on ghcr.io
+  # (tools/portable/Containerfile), so it needs no package mirror. When the
+  # recipe changes, the first run builds the image and pushes it; a pull
+  # request from a fork can't push, so it builds its own copy.
   test-portable:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -443,9 +451,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
+      - name: Log in to ghcr.io
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "$GH_TOKEN" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Build the portable tools
         env:
           GH_TOKEN: ${{ github.token }}
+          PORTABLE_BUILDER_PUSH: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'true' || 'false' }}
         run: tools/build_portable.sh
       - name: Smoke-test them on each distribution
         run: tools/test_portable_distros.sh
