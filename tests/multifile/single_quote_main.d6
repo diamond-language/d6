@@ -1,0 +1,2 @@
+require 'single_quote_helper'
+single_quote_value()

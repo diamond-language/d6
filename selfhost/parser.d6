@@ -918,6 +918,7 @@ class Parser
   def error_token_message() -> String
     text = self.token_text(@current)
     return "heredoc has no closing line (its name alone on a line)" if text.start_with?("<<~")
+    return "unterminated string" if text.start_with?("\"") || text.start_with?("'")
     "unexpected character"
   end
 
@@ -12951,11 +12952,35 @@ class Parser
     destination
   end
 
-  def parse_string()
-    span = @previous
-    finish = span.start() + span.length() - 1
-    piece = span.start() + 1
-    result = nil
+# '...' text, as src/compiler.c's STRING_TEXT_SINGLE_QUOTED: \\ and \' are escapes and
+# every other backslash stays.
+def decode_single_quoted(raw)
+  result = ""
+  index = 0
+  while index < raw.length()
+    character = raw[index]
+    if character == "\\" && index + 1 < raw.length() && (raw[index + 1] == "\\" || raw[index + 1] == "'")
+      index = index + 1
+      character = raw[index]
+    end
+    result = result + character
+    index = index + 1
+  end
+  result
+end
+
+def parse_string()
+  span = @previous
+  finish = span.start() + span.length() - 1
+  if @source.byteslice(span.start(), 1) == "'"
+    result = self.allocate_register()
+    literal = self.add_string(self.decode_single_quoted(@source.byteslice(span.start() + 1, span.length() - 2)))
+    self.emit_instruction2(Opcode::STRING, result, literal)
+    self.set_type_fact(result, Type::STRING)
+    return result
+  end
+  piece = span.start() + 1
+  result = nil
     while piece < finish && !@failed
       index = piece
       while index + 1 < finish

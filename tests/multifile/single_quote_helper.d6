@@ -1,0 +1,1 @@
+def single_quote_value() = 'from a single-quoted require'

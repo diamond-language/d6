@@ -95,6 +95,7 @@ class Lexer
     if code == "\"".ord()
       return self.scan_string()
     end
+    return self.scan_single_quoted() if code == "'".ord()
     if self.identifier_start?(code)
       while self.identifier_part?(self.code_at(@current))
         self.advance()
@@ -597,14 +598,27 @@ class Lexer
     self.make_token(:string)
   end
 
-  def scan_interpolation()
+# '...', as src/lexer.c's scan_single_quoted: no interpolation, and a backslash
+# only steps over the next byte so \' does not end the literal.
+def scan_single_quoted()
+  loop do
+    return self.make_token(:error) if self.at_end?()
+    break if self.code_at(@current) == "'".ord()
+    self.advance() if self.code_at(@current) == "\\".ord() && self.code_at(@current + 1) != 0
+    self.advance()
+  end
+  self.advance()
+  self.make_token(:string)
+end
+
+def scan_interpolation()
     self.advance()
     self.advance()
     depth = 1
     while !self.at_end?() && depth > 0
       embedded = self.advance()
-      if embedded == "\"".ord()
-        while !self.at_end?() && self.code_at(@current) != "\"".ord()
+      if embedded == "\"".ord() || embedded == "'".ord()
+        while !self.at_end?() && self.code_at(@current) != embedded
           if self.code_at(@current) == "\\".ord() && self.code_at(@current + 1) != 0
             self.advance()
           end
@@ -625,7 +639,7 @@ class Lexer
     glued = false
     if @start > 0
       prev_code = self.code_at(@start - 1)
-      glued = self.identifier_part?(prev_code) || prev_code == ")".ord() || prev_code == "]".ord() || prev_code == "}".ord() || prev_code == "\"".ord()
+      glued = self.identifier_part?(prev_code) || prev_code == ")".ord() || prev_code == "]".ord() || prev_code == "}".ord() || prev_code == "\"".ord() || prev_code == "'".ord()
     end
     if !glued && self.identifier_start?(self.code_at(@current))
       while self.identifier_part?(self.code_at(@current))

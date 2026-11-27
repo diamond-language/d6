@@ -1,0 +1,13 @@
+plain
+C:\temp\#{name}
+it's
+one \ backslash, trailing \
+tab\tstays \n too
+mixed with double x
+two
+lines
+0
+a}b inside an interpolation
+{brace}: 1, glued: 2}
+matched
+7

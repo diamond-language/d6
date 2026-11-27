@@ -257,7 +257,8 @@ static bool rewrite_path_constants(const char *source,const char *path,char **ou
             rewrite_append(&rewrite,source+copied,start-copied);
             rewrite_append_literal(&rewrite,is_dir?directory:absolute);
             copied=end;
-        } else if(token.kind==DIAMOND_TOKEN_STRING) {
+        } else if(token.kind==DIAMOND_TOKEN_STRING&&source[start]!='\'') {
+            /* A '...' string never interpolates, so it holds no path constant to rewrite. */
             size_t depth=0;
             for(size_t at=start;at<end;at++) {
                 if(depth==0&&source[at]=='\\') {at++;continue;}
@@ -265,8 +266,9 @@ static bool rewrite_path_constants(const char *source,const char *path,char **ou
                 if(depth>0) {
                     /* A string inside the interpolation: skip it as the lexer does, so a brace
                      * in it neither changes the depth nor hides the text that follows. */
-                    if(source[at]=='"') {
-                        for(at++;at<end&&source[at]!='"';at++)if(source[at]=='\\')at++;
+                    if(source[at]=='"'||source[at]=='\'') {
+                        const char quote=source[at];
+                        for(at++;at<end&&source[at]!=quote;at++)if(source[at]=='\\')at++;
                     } else if(source[at]=='{')depth++;
                     else if(source[at]=='}')depth--;
                     else if(path_constant_at(source,at,end,&is_dir,&name_length)) {
@@ -435,13 +437,14 @@ static bool expand_source(Loader *loader,const char *path,const char *source,
         const size_t keyword_end=cursor+keyword_length;
         const bool require_candidate=required &&
             (keyword_end==line_end||source[keyword_end]==' '||
-             source[keyword_end]=='\t'||source[keyword_end]=='"');
+             source[keyword_end]=='\t'||source[keyword_end]=='"'||source[keyword_end]=='\'');
         required=require_candidate;
         size_t quote=cursor+keyword_length;
         while(required&&quote<line_end&&(source[quote]==' '||source[quote]=='\t'))quote++;
-        required=required&&quote<line_end&&source[quote]=='"';
+        /* Either quote works; the path between them is taken as written. */
+        required=required&&quote<line_end&&(source[quote]=='"'||source[quote]=='\'');
         size_t close=required?quote+1:quote;
-        while(required&&close<line_end&&source[close]!='"')close++;
+        while(required&&close<line_end&&source[close]!=source[quote])close++;
         required=required&&close<line_end;
         size_t tail=close+1;
         while(required&&tail<line_end&&(source[tail]==' '||source[tail]=='\t'))tail++;

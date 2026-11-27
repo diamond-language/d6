@@ -881,6 +881,10 @@ actual="$($diamond tests/multifile/main.d6)"
 actual="$($diamond tests/multifile/load_once_main.d6)"
 [[ "$actual" == "42" ]]
 
+# require takes a single-quoted path too.
+actual="$($diamond tests/multifile/single_quote_main.d6)"
+[[ "$actual" == "from a single-quoted require" ]]
+
 # Module and class reopening across files (see docs/syntax.md's
 # "Classes" section) -- reopen_a.d6/reopen_b.d6 each open `module
 # Shared; class Widget; ... end; end` with a different method, and

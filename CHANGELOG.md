@@ -9,6 +9,11 @@ come only in minor releases, marked **Breaking** here.
 
 ### Added
 
+- Single-quoted strings, as in Ruby: `'C:\temp\#{x}'` keeps its text as
+  written, with no interpolation; only `\\` and `\'` are escapes. `require`
+  and `require_cut` accept either quote, and an unclosed quote now reports
+  `unterminated string`, which also lets the REPL keep reading a string that
+  spans lines.
 - Inside a module's instance method, a bare `name(...)` calls the including
   object's method, as it already did inside a class. The call dispatches on
   self at run time, so a class's override answers; a name no class or module

@@ -1133,7 +1133,8 @@ DIAMOND_INTERNAL void publish_array_spread_tooling_type(Compiler *compiler,uint1
         const uint16_t *suffix,size_t suffix_count);
 DIAMOND_INTERNAL void publish_callable_return_type(Compiler *compiler,uint16_t reg,
         int32_t callable_set_index);
-typedef enum StringTextMode {STRING_TEXT_ESCAPES,STRING_TEXT_REGEX,STRING_TEXT_VERBATIM} StringTextMode;
+typedef enum StringTextMode {STRING_TEXT_ESCAPES,STRING_TEXT_REGEX,STRING_TEXT_VERBATIM,
+    STRING_TEXT_SINGLE_QUOTED} StringTextMode;
 DIAMOND_INTERNAL uint16_t add_string_text_mode(Compiler *compiler,const char *text,size_t length,
                               DiamondSpan span,StringTextMode mode);
 DIAMOND_INTERNAL uint16_t add_string_range_mode(Compiler *compiler,size_t start,size_t length,
