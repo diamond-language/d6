@@ -476,6 +476,9 @@ jobs:
       # one case at a time). Moved aside rather than deleted only so the
       # exclusion is visibly reversible in this step's own log; the
       # container itself is discarded once the job ends either way.
+      # heimdall.d6 also needs BCrypt.hash, through Heimdall::Credentials,
+      # so that grep doesn't find it; test-freebsd and test-macos exclude it
+      # for the same reason.
       - name: Exclude the known BCrypt/musl limitation
         run: |
           mkdir -p /tmp/excluded-cases
@@ -483,6 +486,7 @@ jobs:
              tests/cases/active_record_secure_password.expected \
              tests/cases/bcrypt.d6 \
              tests/cases/bcrypt.expected \
+             tests/cases/heimdall.d6 \
              /tmp/excluded-cases/
       # The JIT is validated only on glibc x86-64. Keep musl's baseline on
       # the portable interpreter until a libc-independent backend contract is
@@ -610,6 +614,7 @@ jobs:
                tests/cases/active_record_secure_password.expected \
                tests/cases/bcrypt.d6 \
                tests/cases/bcrypt.expected \
+               tests/cases/heimdall.d6 \
                tests/cases/math_exp_log.d6 \
                tests/cases/math_exp_log.expected \
                tests/cases/math_exp_log_tanh.d6 \
@@ -676,6 +681,7 @@ jobs:
              tests/cases/active_record_secure_password.expected \
              tests/cases/bcrypt.d6 \
              tests/cases/bcrypt.expected \
+             tests/cases/heimdall.d6 \
              /tmp/excluded-cases/
       - name: Exclude glibc-only JIT cases
         run: |
