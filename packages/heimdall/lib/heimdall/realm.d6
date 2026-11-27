@@ -243,6 +243,23 @@ module Heimdall
       true
     end
 
+    # A fresh verification message for whoever owns `email`, for a page that
+    # offers to send the link again before sign-in. Like request_reset it is
+    # always true: an unknown or verified email gets nothing, and a busy email
+    # is dropped silently. Too many requests from one address are refused.
+    def request_verification_by_email(email, ip)
+      if ip != nil
+        wait = @limiter.check_request("verify_request_ip", "verify_request:ip:#{ip}")
+        if wait != nil then Heimdall.fail("RATE_LIMITED", "too many verification requests; try again in #{wait} seconds") end
+      end
+      account = self.find_by_email(email)
+      if account == nil || Heimdall.field(account, "email_verified_at") != nil then return true end
+      bucket = "verify_request:#{@kind}:#{Heimdall.field(account, "id")}"
+      if @limiter.check_request("verify_request_account", bucket) != nil then return true end
+      self.send_verification(account)
+      true
+    end
+
     # Marks the email verified. The token names the account, so this needs
     # no sign-in.
     def verify_email(token, ip)

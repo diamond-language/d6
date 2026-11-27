@@ -68,7 +68,9 @@ realm = Heimdall::Realm.new("user", users,
   verify_url: "https://ada.example/verify?token={token}")
 ```
 
-Pass a nil sender to turn mail off. `Mailer.log_sender(logger)` and
+Pass a nil sender to turn mail off. With the sender `:queue`, the mailer only
+queues messages and another process delivers them, such as a timer job with
+its own Mailer on the same table. `Mailer.log_sender(logger)` and
 `Mailer.directory_sender(dir)` help in development. A sender is any function
 that takes the outbox row and returns true once the message is handed off.
 Call `mailer.deliver_due()` from a worker tick.
@@ -112,6 +114,7 @@ In resolvers, `Heimdall.account!(context)` returns the signed-in account.
 | `change_password(account, current, new, keep_session)` | signs out every other session |
 | `request_reset(email, ip)` / `reset_password(token, new, ip)` | always answers true; a reset signs out everywhere |
 | `send_verification(account)`, `request_verification(account)`, `verify_email(token, ip)` | email verification |
+| `request_verification_by_email(email, ip)` | resend verification before sign-in; always true, like `request_reset` |
 | `delete_account(account, password) do ... end` | checks the password, runs your block, drops sessions and tokens |
 
 Wrong reset and verify tokens count against the client address: 20 an hour.

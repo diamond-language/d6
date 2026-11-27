@@ -9,7 +9,9 @@ module Heimdall
   # `sender` is called with the row and returns true once the message is
   # handed off. Mailer.log_sender, Mailer.directory_sender and
   # Mailer.command_sender cover the usual cases. A nil sender switches mail
-  # off: enqueue returns false and queues nothing.
+  # off: enqueue returns false and queues nothing. The sender :queue only
+  # queues: deliver_due sends nothing, for a process whose mail another
+  # process delivers.
   class Mailer
     def initialize(store, sender, logger = nil, table = "mail_outbox", max_attempts = 5)
       @store = store
@@ -22,6 +24,7 @@ module Heimdall
 
     def schema() = @schema
     def enabled?() = @sender != nil
+    def sends?() = @sender != nil && @sender != :queue
 
     # Queues a message. False, with nothing queued, when mail is off.
     def enqueue(to, subject, body)
@@ -34,7 +37,7 @@ module Heimdall
 
     # Delivers up to 20 due messages. Returns how many were sent.
     def deliver_due(now = nil)
-      if @sender == nil then return 0 end
+      if !self.sends?() then return 0 end
       at = if now == nil then Heimdall.now() else now end
       repo = @store.repo()
       sent = 0

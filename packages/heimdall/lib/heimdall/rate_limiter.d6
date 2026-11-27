@@ -16,7 +16,7 @@ module Heimdall
       "signin_fail_email": [10, 900], "signin_fail_email_ip": [5, 900], "signin_fail_ip": [30, 900],
       "password_fail_account": [5, 900],
       "reset_request_ip": [5, 3600], "reset_request_email": [3, 3600], "token_fail_ip": [20, 3600],
-      "verify_request_account": [3, 3600]
+      "verify_request_account": [3, 3600], "verify_request_ip": [10, 3600]
     }
 
     def initialize(store, policies = {}, table = "rate_limits")

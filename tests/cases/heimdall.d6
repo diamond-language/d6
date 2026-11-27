@@ -169,6 +169,28 @@ def run_tests()
     Minitest.assert_equal("BAD_USER_INPUT", failure_code() do realm.verify_email(token, nil) end)
   end
 
+  suite.test("verification by email answers true and sends only to an unverified owner") do
+    world = fresh_world()
+    realm = world["players"]
+    add_account(world, realm, "ada@example.com", "correct horse")
+    Minitest.assert(realm.request_verification_by_email("nobody@example.com", "198.51.100.1"))
+    Minitest.assert(realm.request_verification_by_email("ADA@example.com", "198.51.100.1"))
+    world["mailer"].deliver_due()
+    Minitest.assert_equal(1, world["outbox"].length())
+    # A busy email is dropped silently: three an hour per account.
+    3.times() do Minitest.assert(realm.request_verification_by_email("ada@example.com", nil)) end
+    world["mailer"].deliver_due()
+    Minitest.assert_equal(3, world["outbox"].length())
+    # A verified email gets nothing.
+    Minitest.assert(realm.verify_email(token_from(world["outbox"][2]["body"]), nil))
+    Minitest.assert(realm.request_verification_by_email("ada@example.com", nil))
+    world["mailer"].deliver_due()
+    Minitest.assert_equal(3, world["outbox"].length())
+    # One address asking too often is refused.
+    8.times() do realm.request_verification_by_email("nobody@example.com", "198.51.100.1") end
+    Minitest.assert_equal("RATE_LIMITED", failure_code() do realm.request_verification_by_email("x@example.com", "198.51.100.1") end)
+  end
+
   suite.test("wrong tokens from one address are locked out") do
     world = fresh_world()
     realm = world["players"]
@@ -223,6 +245,17 @@ def run_tests()
     Minitest.assert_equal(0, world["db"].query("SELECT id FROM mail_outbox", []).length())
     off = Heimdall::Mailer.new(world["store"], nil)
     Minitest.refute(off.enqueue("ada@example.com", "Hello", "Body"))
+    # :queue queues and leaves sending to another mailer on the same table.
+    queued = Heimdall::Mailer.new(world["store"], :queue)
+    Minitest.assert(queued.enqueue("ada@example.com", "Hello", "Body"))
+    Minitest.assert_equal(0, queued.deliver_due(at))
+    sent = []
+    def keep(row)
+      sent.push(row["to_address"])
+      true
+    end
+    Minitest.assert_equal(1, Heimdall::Mailer.new(world["store"], keep).deliver_due(at))
+    Minitest.assert_equal(["ada@example.com"], sent)
   end
 
   suite.test("string ids work the same way") do

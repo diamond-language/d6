@@ -121,8 +121,8 @@
         "mjolnir": "^0.4.4"
       },
       "name": "heimdall",
-      "sha256": "fb96acff2164a51096557c1dc7fbc4261732c5b3979a75c0f9ad5afd6611e192",
-      "size": 57856,
+      "sha256": "6c32b4cb12aa354491c29b0f9a841ca1f8996f01233d6a0c3ffbc6c66e93a4ae",
+      "size": 59904,
       "version": "0.1.0"
     },
     {
