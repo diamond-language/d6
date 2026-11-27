@@ -60,7 +60,7 @@ production record) remain to be confirmed.
 
 ## Public launch inventory
 
-The public selection contains **18** bundled cuts, including `registry`.
+The public selection contains **28** bundled cuts, including `registry`.
 The operator excluded `dials`, `active_auth`, `active_discussion`, `active_karma`,
 `active_social`, and `active_tagging`; these were unpublished and removed from
 the seed selection. Their source packages remain available in this repository. The explicit

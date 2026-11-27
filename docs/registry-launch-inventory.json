@@ -105,6 +105,27 @@
       "version": "0.5.11"
     },
     {
+      "archive": "mjolnir.tar",
+      "dependencies": {
+        "arel": "^0.35.0"
+      },
+      "name": "mjolnir",
+      "sha256": "fa01bea7b0e7cada146f0795b0059012cf16128297c9ccda110b88756335ecf7",
+      "size": 53760,
+      "version": "0.4.4"
+    },
+    {
+      "archive": "heimdall.tar",
+      "dependencies": {
+        "graphql": "^0.3.7",
+        "mjolnir": "^0.4.4"
+      },
+      "name": "heimdall",
+      "sha256": "fb96acff2164a51096557c1dc7fbc4261732c5b3979a75c0f9ad5afd6611e192",
+      "size": 57856,
+      "version": "0.1.0"
+    },
+    {
       "archive": "html.tar",
       "dependencies": {},
       "name": "html",
@@ -143,16 +164,6 @@
       "sha256": "ac9ac514adee3b0bf2d5057e8f7425612fca79c9db59cdb3bde9c75625507068",
       "size": 20992,
       "version": "0.1.4"
-    },
-    {
-      "archive": "mjolnir.tar",
-      "dependencies": {
-        "arel": "^0.35.0"
-      },
-      "name": "mjolnir",
-      "sha256": "fa01bea7b0e7cada146f0795b0059012cf16128297c9ccda110b88756335ecf7",
-      "size": 53760,
-      "version": "0.4.4"
     },
     {
       "archive": "multipart.tar",
