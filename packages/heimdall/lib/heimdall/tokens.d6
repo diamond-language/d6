@@ -1,0 +1,17 @@
+module Heimdall
+  # Secrets handed to clients: a short prefix naming what the token is for,
+  # then 256 random bits as 64 hex characters. Only a token's SHA-256 is
+  # stored. A token is random enough that a fast hash is safe, and a
+  # database leak gives away nothing anyone can sign in with.
+  module Tokens
+    def self.generate(prefix) = prefix + SecureRandom.hex(32)
+
+    def self.digest(token) = Digest.sha256(token)
+
+    # True when `token` is `prefix` followed by 64 lowercase hex characters.
+    def self.shaped?(token, prefix)
+      if token == nil || token.length() != prefix.length() + 64 || !token.start_with?(prefix) then return false end
+      Regexp.new("^[0-9a-f]{64}$").match?(token.slice(prefix.length(), 64))
+    end
+  end
+end

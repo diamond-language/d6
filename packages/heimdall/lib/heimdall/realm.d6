@@ -1,0 +1,274 @@
+module Heimdall
+  # One kind of account and the flows behind its GraphQL mutations. The
+  # accounts table is the app's own; Heimdall reads and writes `id`,
+  # `email`, `password_digest` and `email_verified_at` (an epoch-seconds
+  # integer, nil until verified).
+  #
+  # Every flow is shaped so a response never reveals whether an email is
+  # registered: unknown emails cost the same bcrypt check and count against
+  # the same limits as known ones, and reset requests always answer true.
+  class Realm
+    def initialize(kind, accounts, sessions, tokens, limiter, mailer = nil, app_name = "the app",
+                   reset_url = nil, verify_url = nil, invalid_code = "BAD_USER_INPUT",
+                   reset_prefix = nil, verify_prefix = nil, reset_seconds = 3600, verify_seconds = 3 * 86400)
+      @kind = kind
+      @accounts = accounts
+      @sessions = sessions
+      @tokens = tokens
+      @limiter = limiter
+      @mailer = mailer
+      @app_name = app_name
+      @reset_url = reset_url
+      @verify_url = verify_url
+      @invalid_code = invalid_code
+      initial = kind.slice(0, 1)
+      @reset_prefix = if reset_prefix == nil then "#{initial}r_" else reset_prefix end
+      @verify_prefix = if verify_prefix == nil then "#{initial}v_" else verify_prefix end
+      @reset_seconds = reset_seconds
+      @verify_seconds = verify_seconds
+    end
+
+    def kind() = @kind
+    def accounts() = @accounts
+    def sessions() = @sessions
+    def tokens() = @tokens
+    def limiter() = @limiter
+    def mailer() = @mailer
+    def reset_prefix() = @reset_prefix
+    def verify_prefix() = @verify_prefix
+
+    def repo() = @sessions.store().repo()
+
+    def invalid(message) = Heimdall.fail(@invalid_code, message)
+
+    def find_by_email(email) = self.repo().get_by(@accounts, {"email": Credentials.normalize_email(email)})
+
+    def update_account(account, fields)
+      id = Heimdall.field(account, "id")
+      self.repo().update_all(@accounts.query().where({"id": id}), fields)
+    end
+
+    # The bcrypt digest for a new password, or the realm's invalid-input
+    # error saying what is wrong with it.
+    def password_digest!(password)
+      problem = Credentials.password_problem(password)
+      if problem != nil then self.invalid(problem) end
+      Credentials.hash(password)
+    end
+
+    # The normalized email, or the invalid-input error.
+    def email!(email)
+      problem = Credentials.email_problem(email)
+      if problem != nil then self.invalid(problem) end
+      Credentials.normalize_email(email)
+    end
+
+    # Counts a sign-up against the client address, when there is one.
+    def throttle_signup!(ip)
+      if ip == nil then return nil end
+      wait = @limiter.check_request("signup_ip", "signup:#{@kind}:ip:#{ip}")
+      if wait != nil then Heimdall.fail("RATE_LIMITED", "too many sign-ups; try again in #{wait} seconds") end
+      nil
+    end
+
+    # The account for an email and password, or UNAUTHENTICATED. Lockouts
+    # are checked before any password work and hold even for the right
+    # password. Failures count per email, per email and address, and per
+    # address; a success clears the email's count.
+    def authenticate(email, password, ip)
+      normalized = Credentials.normalize_email(email)
+      buckets = [["signin_fail_email", "signin:#{@kind}:email:#{normalized}"]]
+      if ip != nil
+        buckets.push(["signin_fail_email_ip", "signin:#{@kind}:email_ip:#{normalized}:#{ip}"])
+        buckets.push(["signin_fail_ip", "signin:#{@kind}:ip:#{ip}"])
+      end
+      buckets.each() do |bucket|
+        if @limiter.blocked?(bucket[0], bucket[1])
+          Heimdall.fail("RATE_LIMITED", "too many failed sign-ins; try again in #{@limiter.wait_text(bucket[0])}")
+        end
+      end
+      account = self.find_by_email(normalized)
+      digest = if account == nil then nil else Heimdall.field(account, "password_digest") end
+      if !Credentials.verify(password, digest)
+        buckets.each() do |bucket| @limiter.record_failure(bucket[0], bucket[1]) end
+        Heimdall.fail("UNAUTHENTICATED", "invalid email or password")
+      end
+      @limiter.clear_bucket("signin_fail_email", "signin:#{@kind}:email:#{normalized}")
+      account
+    end
+
+    # Signs in: {"token", "expires_at", "session", "account"}. `extra` and
+    # `lifetime` pass through to Sessions#issue.
+    def sign_in(email, password, ip, extra = {}, lifetime = nil)
+      account = self.authenticate(email, password, ip)
+      self.start_session(account, extra, lifetime)
+    end
+
+    # A session for an account the app has just created or checked itself.
+    def start_session(account, extra = {}, lifetime = nil)
+      issued = @sessions.issue(Heimdall.field(account, "id"), extra, lifetime)
+      issued["account"] = account
+      issued
+    end
+
+    # {"kind", "account", "session"} for a session token, or nil.
+    def principal(token)
+      session = @sessions.find(token)
+      if session == nil then return nil end
+      account = self.repo().get(@accounts, session["owner_id"])
+      if account == nil then return nil end
+      {"kind": @kind, "account": account, "session": session}
+    end
+
+    # Checks the account's current password, 5 failures per 15 minutes.
+    # Returns the failure bucket, which the caller clears once everything
+    # else it checks has passed too.
+    def confirm_password!(account, current)
+      bucket = "password_fail:#{@kind}:#{Heimdall.field(account, "id")}"
+      if @limiter.blocked?("password_fail_account", bucket)
+        Heimdall.fail("RATE_LIMITED", "too many failed attempts; try again in #{@limiter.wait_text("password_fail_account")}")
+      end
+      if !Credentials.verify(current, Heimdall.field(account, "password_digest"))
+        @limiter.record_failure("password_fail_account", bucket)
+        Heimdall.fail("UNAUTHENTICATED", "current password is incorrect")
+      end
+      bucket
+    end
+
+    # Sets a new password after checking the current one, and signs out
+    # every other session (all of them when `keep` is nil).
+    def change_password(account, current, new_password, keep = nil)
+      bucket = self.confirm_password!(account, current)
+      digest = self.password_digest!(new_password)
+      @limiter.clear_bucket("password_fail_account", bucket)
+      self.update_account(account, {"password_digest": digest})
+      id = Heimdall.field(account, "id")
+      if keep == nil then @sessions.end_all(id) else @sessions.end_others(id, keep) end
+      true
+    end
+
+    # Deletes the account after a password check. `remove` deletes the row
+    # (and whatever the app keeps alongside it); Heimdall then drops the
+    # account's sessions and email tokens.
+    def delete_account(account, password, &remove)
+      bucket = self.confirm_password!(account, password)
+      remove(account)
+      id = Heimdall.field(account, "id")
+      @sessions.end_all(id)
+      @tokens.revoke_account(@kind, id)
+      @limiter.clear_bucket("password_fail_account", bucket)
+      true
+    end
+
+    def link(template, token) = if template == nil then nil else template.split("{token}").join(token) end
+
+    # Queues a reset message for the account.
+    def send_reset(account)
+      if @mailer == nil then return false end
+      token = @tokens.issue(@kind, Heimdall.field(account, "id"), "password_reset", @reset_prefix, @reset_seconds)
+      lines = ["Someone asked to reset the password of your #{@app_name} account.", "",
+        "Your reset token (valid for an hour, usable once): #{token}"]
+      link = self.link(@reset_url, token)
+      if link != nil then lines = lines + ["", "Or open: #{link}"] end
+      lines = lines + ["", "If this wasn't you, ignore this message: your password hasn't changed."]
+      @mailer.enqueue(Heimdall.field(account, "email"), "Reset your #{@app_name} password", lines.join("\n"))
+    end
+
+    # Queues a verification message for the account, as after sign-up.
+    def send_verification(account)
+      if @mailer == nil then return false end
+      token = @tokens.issue(@kind, Heimdall.field(account, "id"), "email_verify", @verify_prefix, @verify_seconds)
+      lines = ["Confirm the email address of your #{@app_name} account.", "",
+        "Your verification token (valid for three days): #{token}"]
+      link = self.link(@verify_url, token)
+      if link != nil then lines = lines + ["", "Or open: #{link}"] end
+      @mailer.enqueue(Heimdall.field(account, "email"), "Confirm your #{@app_name} email address", lines.join("\n"))
+    end
+
+    # Always true, whether or not an account has that email. Over-asking for
+    # one address is dropped silently for the same reason; over-asking from
+    # one client address is refused.
+    def request_reset(email, ip)
+      if ip != nil
+        wait = @limiter.check_request("reset_request_ip", "reset_request:ip:#{ip}")
+        if wait != nil then Heimdall.fail("RATE_LIMITED", "too many reset requests; try again in #{wait} seconds") end
+      end
+      normalized = Credentials.normalize_email(email)
+      if @limiter.check_request("reset_request_email", "reset_request:#{@kind}:#{normalized}") != nil then return true end
+      account = self.find_by_email(normalized)
+      if account != nil then self.send_reset(account) end
+      true
+    end
+
+    # Refuses a client address that has guessed too many tokens.
+    def token_guard!(ip)
+      if ip != nil && @limiter.blocked?("token_fail_ip", "token_fail:ip:#{ip}")
+        Heimdall.fail("RATE_LIMITED", "too many failed attempts; try again in #{@limiter.wait_text("token_fail_ip")}")
+      end
+      nil
+    end
+
+    def token_failed(ip)
+      if ip != nil then @limiter.record_failure("token_fail_ip", "token_fail:ip:#{ip}") end
+      nil
+    end
+
+    # Sets a new password from a reset token and signs the account out
+    # everywhere. A wrong token counts against the client address.
+    def reset_password(token, new_password, ip)
+      self.token_guard!(ip)
+      problem = Credentials.password_problem(new_password)
+      if problem != nil then self.invalid(problem) end
+      row = @tokens.consume(token, @kind, "password_reset", @reset_prefix)
+      account = if row == nil then nil else self.repo().get(@accounts, row["account_id"]) end
+      if account == nil
+        self.token_failed(ip)
+        self.invalid("that reset token is invalid or has expired")
+      end
+      id = Heimdall.field(account, "id")
+      self.update_account(account, {"password_digest": Credentials.hash(new_password)})
+      @tokens.revoke_all(@kind, id, "password_reset")
+      @sessions.end_all(id)
+      @limiter.clear_bucket("password_fail_account", "password_fail:#{@kind}:#{id}")
+      true
+    end
+
+    # A signed-in account asks for a fresh verification message, 3 an hour.
+    # An account that is already verified gets nothing.
+    def request_verification(account)
+      if Heimdall.field(account, "email_verified_at") != nil then return true end
+      wait = @limiter.check_request("verify_request_account", "verify_request:#{@kind}:#{Heimdall.field(account, "id")}")
+      if wait != nil then Heimdall.fail("RATE_LIMITED", "too many verification requests; try again in #{wait} seconds") end
+      self.send_verification(account)
+      true
+    end
+
+    # Marks the email verified. The token names the account, so this needs
+    # no sign-in.
+    def verify_email(token, ip)
+      self.token_guard!(ip)
+      row = @tokens.consume(token, @kind, "email_verify", @verify_prefix)
+      if row == nil
+        self.token_failed(ip)
+        self.invalid("that verification token is invalid or has expired")
+      end
+      account = self.repo().get(@accounts, row["account_id"])
+      if account != nil && Heimdall.field(account, "email_verified_at") == nil
+        self.update_account(account, {"email_verified_at": Heimdall.now()})
+      end
+      @tokens.revoke_all(@kind, row["account_id"], "email_verify")
+      true
+    end
+  end
+
+  # The realm whose reset (or verify) tokens look like `token`, for an app
+  # with several kinds of account and one resetPassword mutation. Nil when
+  # none matches.
+  def self.realm_for_token(realms, token, purpose)
+    if token == nil then return nil end
+    realms.find() do |realm|
+      prefix = if purpose == "password_reset" then realm.reset_prefix() else realm.verify_prefix() end
+      token.start_with?(prefix)
+    end
+  end
+end

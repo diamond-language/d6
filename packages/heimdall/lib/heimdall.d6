@@ -1,0 +1,31 @@
+# Accounts for d6 GraphQL apps built on mjolnir: passwords, bearer-token
+# sessions, single-use email tokens (password reset, email verification), a
+# rate limiter shared by every worker, a mail outbox, and the `@auth`
+# schema directive. Each piece takes a Heimdall::Store (a mjolnir Repo plus
+# the id type the app's tables use), so the same code runs on SQLite and
+# PostgreSQL, with integer or string ids.
+#
+# A Realm ties the pieces to one kind of account ("user", or "developer"
+# and "player" side by side) and carries the flows a GraphQL API exposes:
+# sign in, change password, reset password, verify email. Sign-up itself
+# stays in the app, because what an account holds besides an email and a
+# password (a handle, a name) is the app's business; Realm#password_digest!
+# and Heimdall::Credentials.email_problem do the shared checks.
+#
+# Errors are GraphQL::Fail.signal(code, message): UNAUTHENTICATED,
+# FORBIDDEN, RATE_LIMITED, and the realm's invalid-input code
+# (BAD_USER_INPUT unless the app picks another).
+require_cut "mjolnir"
+require_cut "graphql"
+
+require "./heimdall/store"
+require "./heimdall/credentials"
+require "./heimdall/tokens"
+require "./heimdall/sessions"
+require "./heimdall/account_tokens"
+require "./heimdall/rate_limiter"
+require "./heimdall/client_address"
+require "./heimdall/mailer"
+require "./heimdall/realm"
+require "./heimdall/guard"
+require "./heimdall/migrations"

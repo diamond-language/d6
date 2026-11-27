@@ -1,0 +1,34 @@
+module Heimdall
+  # The address to rate-limit a request by, or nil to skip address limits.
+  # With no usable address the limits are skipped, never pooled into one
+  # shared bucket, since that would let one client lock everyone out.
+  #
+  # - `trust_proxy`: the X-Real-IP or first X-Forwarded-For entry. Only safe
+  #   behind a reverse proxy that overwrites those headers.
+  # - otherwise the TCP peer (Gremlin's request["peer_address"]). A loopback
+  #   peer is skipped unless `limit_loopback`, since behind a local proxy
+  #   every request would share it.
+  def self.client_address(request, trust_proxy = false, limit_loopback = false)
+    if trust_proxy
+      headers = request["headers"]
+      value = headers["x-real-ip"]
+      if value == nil
+        forwarded = headers["x-forwarded-for"]
+        if forwarded != nil then value = forwarded.split(",")[0] end
+      end
+      return Heimdall.clean_address(value)
+    end
+    peer = Heimdall.clean_address(request["peer_address"])
+    if peer == nil then return nil end
+    if (peer.start_with?("127.") || peer == "::1") && !limit_loopback then return nil end
+    peer
+  end
+
+  # The address lowercased if it looks like an IPv4 or IPv6 address, else nil.
+  def self.clean_address(value)
+    if value == nil then return nil end
+    trimmed = value.strip()
+    if trimmed.length() < 2 || trimmed.length() > 45 || !Regexp.new("^[0-9a-fA-F:.]+$").match?(trimmed) then return nil end
+    trimmed.downcase()
+  end
+end

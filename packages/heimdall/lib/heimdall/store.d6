@@ -1,0 +1,46 @@
+# Rows come back as plain Hashes.
+def heimdall_row(row) = row
+
+module Heimdall
+  def self.now() = Time.now().to_i()
+
+  def self.fail(code, message) = GraphQL::Fail.signal(code, message)
+
+  # A field of an app's account entity, whether its schema builds Hash rows
+  # or structs.
+  def self.field(entity, name)
+    if entity is Hash then entity[name] else entity.public_send(name) end
+  end
+
+  # The repo and id type every Heimdall table shares. `id_type` is :int for
+  # tables whose ids the database assigns (INTEGER PRIMARY KEY, SERIAL), or
+  # :string for tables whose ids Heimdall makes (32 random hex characters).
+  # It also sets the type of the columns that point at accounts.
+  class Store
+    def initialize(repo, id_type = :int)
+      if id_type != :int && id_type != :string
+        raise ArgumentError.new("Heimdall::Store id_type must be :int or :string")
+      end
+      @repo = repo
+      @id_type = id_type
+    end
+
+    def repo() = @repo
+    def id_type() = @id_type
+
+    # A table with an `id` key and the given fields.
+    def schema(name, fields)
+      all = {"id": @id_type}
+      fields.keys().each() do |key| all[key] = fields[key] end
+      Mjolnir::Schema.new(name, all, heimdall_row)
+    end
+
+    # Inserts a row and returns it.
+    def insert(schema, fields)
+      values = {}
+      fields.keys().each() do |key| values[key] = fields[key] end
+      if @id_type == :string then values["id"] = SecureRandom.hex(16) end
+      @repo.insert!(Mjolnir::Changeset.cast(schema, nil, values, values.keys()))
+    end
+  end
+end
