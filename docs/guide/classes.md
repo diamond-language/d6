@@ -140,11 +140,11 @@ puts("5" is Int)            # => false
 
 A module groups methods that several classes can share. `include` mixes them
 into a class. Inside a module method, call the including object's methods
-through `self.`:
+as you would in the class itself, with or without `self.`:
 
 ```ruby
 module Greets
-  def greet() = "Hello from #{self.name()}"
+  def greet() = "Hello from #{name()}"
 end
 
 class Robot

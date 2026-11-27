@@ -4660,6 +4660,11 @@ class Parser
     end
     if annotations.length() == 0
       return self.compile_implicit_self_call(name_token) if @in_method && @current_class_index != nil
+      # In a module's instance method, self is whichever class included it.
+      if @in_method && !@in_singleton_method && @current_class_index == nil && @current_module_entry != nil &&
+         !self.call_arguments_have_spread_after_paren?()
+        return self.compile_implicit_self_call(name_token, @current_module_entry)
+      end
       if @in_singleton_method && !self.call_arguments_have_spread_after_paren?()
         return self.compile_implicit_self_call(name_token)
       end
@@ -4786,7 +4791,9 @@ class Parser
   # compiler.c, and otherwise it calls self's method. Which one is only
   # known once the whole file is compiled, so both are emitted behind a
   # jump that resolve_forward_references points at one of them.
-  def compile_implicit_self_call(name_token)
+  # sibling_module, inside a module, lets a module_function sibling resolve
+  # statically, as a plain forward call does.
+  def compile_implicit_self_call(name_token, sibling_module = nil)
     self.advance_token()
     self.skip_newlines()
     spread = self.call_arguments_have_spread?()
@@ -4831,7 +4838,7 @@ class Parser
     self.emit_byte(parsed[1]) unless spread
     self.patch_jump(skip, @code_count)
     @forward_calls.push([@current_function_index, offset, self.token_text(name_token),
-                         parsed[1], name_token, [selector, call_start, invoke_start, block]])
+                         parsed[1], name_token, [selector, call_start, invoke_start, block], 0, sibling_module])
     destination
   end
 

@@ -71,7 +71,11 @@ via `<`, and `super(...)`. Inside an instance method, `self.` is optional
 when calling another method of the same object: `render_row(item)` means
 `self.render_row(item)` when the class, a superclass, or an included module
 has a `render_row` method, including a private one. A top-level function of
-the same name takes precedence.
+the same name takes precedence. The same holds inside a module's instance
+method, where self is whichever class included the module: the call
+dispatches on that object at run time, so the class's own method or an
+override answers. It is still a compile error when no class or module
+defines a method of that name.
 
 A program can reopen a built-in (prelude) class or module to add to it,
 the same as its own: `class Range ... def middle() ... end` or

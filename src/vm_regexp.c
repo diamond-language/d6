@@ -194,10 +194,10 @@ static size_t step_past_empty_match(const DiamondString *subject,size_t at) {
 /* Expands a String#sub/String#gsub replacement into `out`, honoring Ruby's
  * backslash escapes: `\0`/`\&` is the whole match, `\1`-`\9` is that capture
  * group (empty if the group didn't participate, e.g. an unmatched `(x)?`),
- * `\\` is a literal backslash, and a backslash before anything else (or a
- * group number past the pattern's actual capture count) is dropped and the
- * following byte copied as-is -- no named (`\k<name>`) backreferences,
- * a scope cut nothing here exercises. */
+ * `\\` is a literal backslash, and a group number past the pattern's actual
+ * capture count expands to nothing. A backslash before anything else stays,
+ * as in Ruby, so `"x\\y"` stays `x\y` instead of losing its backslash. There
+ * are no named (`\k<name>`) backreferences; that text is copied as written. */
 static bool regexp_append_replacement(ByteBuffer *out,const DiamondString *subject,
         const DiamondString *replacement,const reginold_match *match) {
     size_t index=0;
@@ -225,7 +225,7 @@ static bool regexp_append_replacement(ByteBuffer *out,const DiamondString *subje
                 }
                 index+=2;continue;
             }
-            index++;continue;
+            ok=byte_buffer_append(out,"\\",1);index++;continue;
         }
         ok=byte_buffer_append(out,&ch,1);index++;
     }

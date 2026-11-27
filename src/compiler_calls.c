@@ -1208,6 +1208,21 @@ static bool self_has_method(const Compiler *compiler,DiamondSpan name) {
     return false;
 }
 
+/* Does any class or module define an instance method `name`? A module's
+ * instance method runs with self set to whichever class included the
+ * module, which is unknown while the module compiles. The discovery pass
+ * has registered every method by now, including ones defined later. */
+static bool program_has_instance_method(const Compiler *compiler,DiamondSpan name) {
+    for(size_t index=0;index<compiler->program->function_count;index++) {
+        const DiamondFunction *function=compiler->program->functions[index];
+        if(function==nullptr||function->owner_class==DIAMOND_OWNER_NONE||
+           function->owner_class==DIAMOND_OWNER_CAPTURED_SELF)
+            continue;
+        if(singleton_call_name_equals(compiler,function->name,name))return true;
+    }
+    return false;
+}
+
 /* Does the class being compiled, or a superclass, define a singleton method
  * `name`? Class singleton methods are registered before any body compiles,
  * so one defined further down the class counts too. */
@@ -1622,6 +1637,16 @@ uint16_t parse_call(Compiler *compiler, DiamondSpan name) {
        compiler->in_singleton_method&&compiler->current_class>=0&&
        self_has_singleton_method(compiler,name))
         return parse_self_class_method_arguments(compiler,name,false);
+    /* Inside a module's instance method (or a block in one), a bare
+     * `name(...)` with no function of that name is `self.name(...)` when
+     * some class or module defines an instance method `name`. Which class
+     * self is gets settled at run time, exactly as for `self.name(...)`. */
+    if(function_index<0&&!compiler->discovery_pass&&compiler->in_method&&
+       !compiler->in_singleton_method&&compiler->current_class<0&&
+       compiler->current_module>=0&&
+       compiler->function->owner_class!=DIAMOND_OWNER_NONE&&
+       program_has_instance_method(compiler,name))
+        return parse_invoke_named(compiler,0,0,compiler->known_type_sets[0],name);
     /* Last resort for a bare `p(...)`: only when no function, local, or method of
      * self by that name exists (all handled above), so it never changes the meaning
      * of a program that defines its own `p`. */
