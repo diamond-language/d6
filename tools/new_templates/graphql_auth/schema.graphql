@@ -1,0 +1,60 @@
+# The API {{name}} serves. lib/{{name}}.d6 compiles this file in with File.embed and binds
+# a resolver method to each field that needs one; the rest read the value's own fields.
+
+"Refuses the field unless the caller is signed in as the role. heimdall runs the check."
+directive @auth(as: Role!) on FIELD_DEFINITION
+
+enum Role {
+  "Any signed-in account."
+  ANY
+  "A signed-in account whose email address is verified."
+  VERIFIED
+}
+
+type Query {
+  "The signed-in account."
+  me: User! @auth(as: ANY)
+  "The signed-in account's notes, oldest first."
+  notes: [Note!]! @auth(as: ANY)
+}
+
+type Mutation {
+  "Creates an account and signs in. A verification message goes to the email address."
+  signUp(email: String!, name: String!, password: String!): Session!
+  signIn(email: String!, password: String!): Session!
+  "Ends this session."
+  signOut: Boolean! @auth(as: ANY)
+  "Sets a new password and signs out every other session."
+  changePassword(currentPassword: String!, newPassword: String!): Boolean! @auth(as: ANY)
+  "Emails a reset token. Answers true whether or not the email is registered."
+  requestPasswordReset(email: String!): Boolean!
+  "Sets a new password from a reset token and signs out everywhere."
+  resetPassword(token: String!, newPassword: String!): Boolean!
+  "Sends a fresh verification message."
+  requestEmailVerification: Boolean! @auth(as: ANY)
+  verifyEmail(token: String!): Boolean!
+  "Deletes the account and everything in it."
+  deleteAccount(password: String!): Boolean! @auth(as: ANY)
+  "Adds a note. Only a verified account can write."
+  addNote(text: String!): Note! @auth(as: VERIFIED)
+}
+
+"A signed-in session. Send the token as `Authorization: Bearer <token>`."
+type Session {
+  token: String!
+  "When the token stops working, in seconds since 1970, as a string."
+  expiresAt: String!
+  user: User!
+}
+
+type User {
+  id: ID!
+  email: String!
+  name: String!
+  emailVerified: Boolean!
+}
+
+type Note {
+  id: ID!
+  text: String!
+}

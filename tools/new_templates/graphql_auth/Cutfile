@@ -1,0 +1,11 @@
+{
+  "name": "{{name}}",
+  "version": "0.1.0",
+  "dependencies": {
+    "graphql": {"registry": "https://cuts.rolld6.codes", "version": "^0.3.7"},
+    "gremlin": {"registry": "https://cuts.rolld6.codes", "version": "^0.5.11"},
+    "rack": {"registry": "https://cuts.rolld6.codes", "version": "^0.2.5"},
+    "mjolnir": {"registry": "https://cuts.rolld6.codes", "version": "^0.4.4"},
+    "heimdall": {"registry": "https://cuts.rolld6.codes", "version": "^0.1.0"}
+  }
+}
