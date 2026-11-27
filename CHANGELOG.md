@@ -21,6 +21,12 @@ come only in minor releases, marked **Breaking** here.
 
 ### Changed
 
+- String literals and heredocs can be up to 16 MiB, the same limit as
+  `File.embed`. They used to stop compiling at 4096 bytes with
+  `string literal is too long`.
+- A compile error on a very long line shows 160 columns around the caret,
+  with `...` where the line was cut, instead of printing the whole line.
+
 - **Breaking:** `String#sub` and `String#gsub` keep a backslash in the
   replacement unless it starts `\0`-`\9`, `\&`, or `\\`, as Ruby does.
   `"a".sub("a", "x\\y")` now gives `x\y` instead of `xy`.

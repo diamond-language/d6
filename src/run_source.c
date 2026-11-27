@@ -80,9 +80,21 @@ static void print_labeled_diagnostic(const char *name, const char *source,
         name,source,diagnostic,bundle,user_offset);
     fprintf(stderr, "%s:%zu:%zu: %s: %s\n", resolved.path, resolved.line,
             resolved.column, label, diagnostic.message);
-    fprintf(stderr, "%.*s\n",
-            (int)(resolved.line_end - resolved.line_start), source + resolved.line_start);
-    for (size_t column = 1; column < resolved.column; column++) {
+    /* A very long line (a big literal, minified code) shows only a window
+     * around the caret, marked with ... where it was cut. */
+    enum { WINDOW = 160, BEFORE_CARET = 60 };
+    const size_t line_length = resolved.line_end - resolved.line_start;
+    const size_t caret = resolved.column > 0 ? resolved.column - 1 : 0;
+    size_t start = 0, end = line_length;
+    if (line_length > WINDOW) {
+        start = caret > BEFORE_CARET ? caret - BEFORE_CARET : 0;
+        if (start > line_length - WINDOW) start = line_length - WINDOW;
+        end = start + WINDOW;
+    }
+    const char *lead = start > 0 ? "..." : "";
+    fprintf(stderr, "%s%.*s%s\n", lead, (int)(end - start),
+            source + resolved.line_start + start, end < line_length ? "..." : "");
+    for (size_t column = 0; column < strlen(lead) + caret - start; column++) {
         fputc(' ', stderr);
     }
     fputs("^\n", stderr);

@@ -1551,8 +1551,29 @@ static size_t utf8_encode_code_point(unsigned long code_point,char out[4]) {
  * escapes), except that \/ stands for a plain slash; STRING_TEXT_VERBATIM keeps every byte;
  * STRING_TEXT_SINGLE_QUOTED reads only \\ and \' and keeps any other backslash, as Ruby's
  * '...' does. */
+static uint16_t decode_string_text(Compiler *compiler,const char *text,size_t length,
+                                   DiamondSpan span,StringTextMode mode,char *buffer);
+
 uint16_t add_string_text_mode(Compiler *compiler,const char *text,size_t length,
                               DiamondSpan span,StringTextMode mode) {
+    /* Decoding never lengthens text: every escape is at least as long as the
+     * bytes it stands for, so length+1 bytes always hold the result. Short
+     * literals decode on the stack; longer ones get a heap buffer, up to the
+     * limit File.embed and compiled programs share. */
+    if(length>DIAMOND_MAX_STRING_CONSTANT_LENGTH) {
+        fail(compiler,span,"string literal is too long (maximum 16 MiB)");
+        return 0;
+    }
+    char small[DIAMOND_MAX_STRING_LENGTH+1];
+    char *buffer=length<sizeof small?small:malloc(length+1);
+    if(buffer==nullptr) {fail(compiler,span,"out of memory decoding string");return 0;}
+    const uint16_t index=decode_string_text(compiler,text,length,span,mode,buffer);
+    if(buffer!=small)free(buffer);
+    return index;
+}
+
+static uint16_t decode_string_text(Compiler *compiler,const char *text,size_t length,
+                                   DiamondSpan span,StringTextMode mode,char *buffer) {
     const bool raw=mode==STRING_TEXT_REGEX;
     if (compiler->function->string_count == DIAMOND_MAX_STRING_CONSTANTS) {
         fail(compiler, span, "function has too many string literals");
@@ -1564,7 +1585,6 @@ uint16_t add_string_text_mode(Compiler *compiler,const char *text,size_t length,
           compiler->function->string_capacity*2)) {
         fail(compiler,span,"out of memory growing function strings");return 0;
     }
-    char buffer[DIAMOND_MAX_STRING_LENGTH+1];
     DiamondStringConstant temporary={.chars=buffer};
     DiamondStringConstant *string=&temporary;
     for(size_t index=0;index<length;index++) {
@@ -1652,8 +1672,8 @@ uint16_t add_string_text_mode(Compiler *compiler,const char *text,size_t length,
             }
         }
         if(encoded_length==0) {encoded[0]=character;encoded_length=1;}
-        if (string->length+encoded_length > DIAMOND_MAX_STRING_LENGTH) {
-            fail(compiler, span, "string literal is too long");
+        if(string->length+encoded_length>length) {
+            fail(compiler,span,"internal error: decoded string outgrew its text");
             return 0;
         }
         for(size_t byte=0;byte<encoded_length;byte++)
