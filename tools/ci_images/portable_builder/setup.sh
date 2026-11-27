@@ -1,5 +1,5 @@
 #!/bin/sh
-# Runs once while the builder image is built (tools/portable/Containerfile).
+# Runs once while the builder image is built (tools/ci_images/portable_builder/Containerfile).
 # build_portable.sh downloads the two source releases and checks them
 # against the checksums here before the image build starts.
 set -eu

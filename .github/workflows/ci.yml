@@ -433,16 +433,19 @@ jobs:
   # Builds the portable tools (static musl d6, facet, d6-lsp, d6-dap, in an
   # Alpine container) and runs packaging/portable_tools_smoke.sh with them in clean
   # Ubuntu, Debian, Fedora, Arch, Alpine and openSUSE containers.
-  # The build runs in the prebuilt builder image on ghcr.io
-  # (tools/portable/Containerfile), so it needs no package mirror. When the
-  # recipe changes, the first run builds the image and pushes it; a pull
-  # request from a fork can't push, so it builds its own copy.
+  # The build and the seeded distro images are prebuilt on ghcr.io
+  # (tools/ci_images/, tools/ci_image.sh), so a run installs nothing from
+  # package mirrors. When a recipe changes, the first run builds the image
+  # and pushes it; a pull request from a fork can't push, so it builds its
+  # own copy.
   test-portable:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     permissions:
       contents: read
       packages: write
+    env:
+      CI_IMAGE_PUSH: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'true' || 'false' }}
     strategy:
       fail-fast: false
       matrix:
@@ -459,28 +462,54 @@ jobs:
       - name: Build the portable tools
         env:
           GH_TOKEN: ${{ github.token }}
-          PORTABLE_BUILDER_PUSH: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'true' || 'false' }}
         run: tools/build_portable.sh
       - name: Smoke-test them on each distribution
         run: tools/test_portable_distros.sh
 
+  # test-musl runs in a prebuilt Alpine image (tools/ci_images/musl_test/),
+  # so it installs nothing from Alpine's mirrors. A job's container starts
+  # before its steps, so this job makes sure the image is on ghcr.io first,
+  # building and pushing it when its recipe changed. A pull request from a
+  # fork that changes the recipe can't push, so its test-musl fails until a
+  # maintainer's run has pushed the image.
+  musl-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+      - name: Log in to ghcr.io
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "$GH_TOKEN" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+          echo "$GH_TOKEN" | skopeo login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Make sure the image is on ghcr.io
+        id: image
+        env:
+          CI_IMAGE_PUSH: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'true' || 'false' }}
+        run: tools/ci_musl_image.sh
+
   test-musl:
+    needs: musl-image
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container:
-      image: alpine:edge
+      image: ${{ needs.musl-image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
       options: --init # see test-all's own identical comment above
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
-      - name: Install dependencies (Alpine)
-        run: |
-          apk update
-          apk add --no-cache gcc musl-dev make git diffutils findutils \
-            ripgrep bc netcat-openbsd openssl openssl-dev sqlite-dev \
-            libpq-dev mariadb-connector-c-dev zlib-dev libucontext \
-            libucontext-dev tzdata bash coreutils procps sed gawk
       # BCrypt.hash has no bcrypt algorithm to call into on musl at all
       # (docs/portability.md) -- a real, documented libc limitation, not
       # a bug, so every case exercising it is excluded here rather than

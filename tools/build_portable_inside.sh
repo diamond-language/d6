@@ -1,6 +1,6 @@
 #!/bin/sh
 # The container half of tools/build_portable.sh: builds the tools in the
-# builder image (tools/portable/Containerfile), which already holds the
+# builder image (tools/ci_images/portable_builder/Containerfile), which already holds the
 # packages and the static libraries in /opt. Runs as root.
 set -eu
 

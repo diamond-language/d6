@@ -65,7 +65,7 @@ Current behavior: [deployment](deployment.md).
 - **Targets beyond 64-bit little-endian** -- a 32-bit or big-endian target needs a
   portable program image rather than the current struct dump.
 - **MySQL in static kits** -- a static musl kit leaves the MariaDB client out. The portable
-  `d6` already builds Connector/C statically (`tools/portable/setup.sh`); the kit
+  `d6` already builds Connector/C statically (`tools/ci_images/portable_builder/setup.sh`); the kit
   could reuse that recipe.
 - **Static output for glibc and non-Linux targets** -- only musl/Linux is supported.
 

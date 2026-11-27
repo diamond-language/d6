@@ -264,7 +264,7 @@ tools/test_portable_distros.sh    # packaging/portable_tools_smoke.sh on each di
 
 - `tools/build_portable.sh` builds inside an Alpine container (podman or docker) from the
   checkout's tracked files, so the host needs neither musl nor the static libraries.
-  The container is a builder image from `tools/portable/Containerfile`. It holds the
+  The container is a builder image from `tools/ci_images/portable_builder/`. It holds the
   Alpine packages, plus libxcrypt (for `BCrypt`) and MariaDB Connector/C built from
   pinned, checksummed source releases. The script pulls the image from
   `ghcr.io/diamond-language/d6-portable-builder`, tagged with a hash of the recipe. If no
