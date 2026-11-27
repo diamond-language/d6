@@ -25,6 +25,13 @@ facet install
 require_cut "heimdall"
 ```
 
+Hashing a password needs `BCrypt.hash`. That works on glibc Linux with
+libxcrypt, which the d6 packages use, and in the static portable build, which
+bundles libxcrypt. A d6 built natively on musl, FreeBSD or macOS can't
+generate a bcrypt salt, so sign-up and password changes fail there with
+"BCrypt.hash is not supported", while sign-in still works
+([portability](../../docs/portability.md)).
+
 ## Tables
 
 `Heimdall::Migrations.statements(dialect, id_type, session_tables)` returns
