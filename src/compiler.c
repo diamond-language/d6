@@ -1548,7 +1548,9 @@ static size_t utf8_encode_code_point(unsigned long code_point,char out[4]) {
 
 /* A string constant decoded from `text`. STRING_TEXT_ESCAPES reads backslash escapes as a
  * string literal does; STRING_TEXT_REGEX keeps bytes as written (the regex engine reads its own
- * escapes), except that \/ stands for a plain slash; STRING_TEXT_VERBATIM keeps every byte. */
+ * escapes), except that \/ stands for a plain slash; STRING_TEXT_VERBATIM keeps every byte;
+ * STRING_TEXT_SINGLE_QUOTED reads only \\ and \' and keeps any other backslash, as Ruby's
+ * '...' does. */
 uint16_t add_string_text_mode(Compiler *compiler,const char *text,size_t length,
                               DiamondSpan span,StringTextMode mode) {
     const bool raw=mode==STRING_TEXT_REGEX;
@@ -1571,6 +1573,9 @@ uint16_t add_string_text_mode(Compiler *compiler,const char *text,size_t length,
         size_t encoded_length=0;
         if(mode==STRING_TEXT_VERBATIM) {
             /* every byte as written */
+        } else if(mode==STRING_TEXT_SINGLE_QUOTED) {
+            if(character=='\\'&&index+1<length&&(text[index+1]=='\\'||text[index+1]=='\''))
+                character=text[++index];
         } else         if(raw) {
             if(character=='\\'&&index+1<length) {
                 if(text[index+1]=='/')character=text[++index];
@@ -1670,7 +1675,11 @@ uint16_t add_string_range(Compiler *compiler,size_t start,size_t length,
     return add_string_range_mode(compiler,start,length,span,false);
 }
 
+/* A string token's text, without its quotes. */
 uint16_t add_string(Compiler *compiler,DiamondSpan span) {
+    if(compiler->source[span.start]=='\'')
+        return add_string_text_mode(compiler,compiler->source+span.start+1,span.length-2,span,
+            STRING_TEXT_SINGLE_QUOTED);
     return add_string_range(compiler,span.start+1,span.length-2,span);
 }
 
@@ -2247,7 +2256,9 @@ uint16_t parse_float(Compiler *compiler) {
 uint16_t parse_string(Compiler *compiler) {
     const DiamondSpan span=compiler->previous.span;
     const size_t end=span.start+span.length-1;
-    size_t piece=span.start+1;uint16_t result=UINT16_MAX;
+    /* '...' never interpolates: skipping the loop leaves the one constant below. */
+    size_t piece=compiler->source[span.start]=='\''?end:span.start+1;
+    uint16_t result=UINT16_MAX;
     while(piece<end&&!compiler->failed) {
         size_t index=piece;
         while(index+1<end) {

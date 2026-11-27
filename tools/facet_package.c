@@ -691,10 +691,11 @@ static bool audit_source_imports(char *source, const char *relative,
             if (cut || local) {
                 p += cut ? 11 : 7;
                 while (*p == ' ' || *p == '\t') p++;
-                if (*p == '"') {
+                if (*p == '"' || *p == '\'') {
+                    const char quote = *p;
                     char *value = ++p;
-                    while (*p != '\0' && *p != '"') p++;
-                    if (*p == '"') {
+                    while (*p != '\0' && *p != quote) p++;
+                    if (*p == quote) {
                         *p = '\0';
                         if (cut && (dependencies == NULL ||
                             diamond_manifest_get(dependencies, value) == NULL)) {

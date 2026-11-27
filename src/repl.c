@@ -546,11 +546,12 @@ static bool try_compile(const char *source, DiamondProgram *program,
             "<repl>", combined, diagnostic, &bundle, prelude_length + reset_length);
         (void)snprintf(error_buffer, error_buffer_size, "%zu:%zu: error: %s",
                        resolved.line, resolved.column, diagnostic.message);
-        /* A heredoc still waiting for its closing line reports at its opener, which may be
-         * lines back. */
+        /* A heredoc still waiting for its closing line, or a string still waiting for its
+         * closing quote, reports at its opener, which may be lines back. */
         *out_incomplete = strcmp(resolved.path, "<repl>") == 0 &&
             (resolved.line >= count_lines(source) ||
-             strstr(diagnostic.message, "heredoc has no closing line") != nullptr);
+             strstr(diagnostic.message, "heredoc has no closing line") != nullptr ||
+             strstr(diagnostic.message, "unterminated string") != nullptr);
     }
     free(combined);
     diamond_source_bundle_free(&bundle);
@@ -591,7 +592,8 @@ static bool run_candidate(DiamondProgram *program, DiamondValue *out_result,
 static bool is_require_line(const char *source) {
     const size_t length = strncmp(source, "require_cut", 11) == 0 ? 11 :
         strncmp(source, "require", 7) == 0 ? 7 : 0;
-    return length > 0 && (source[length] == ' ' || source[length] == '\t' || source[length] == '"');
+    return length > 0 && (source[length] == ' ' || source[length] == '\t' ||
+        source[length] == '"' || source[length] == '\'');
 }
 
 static bool repl_pending_is_declaration(const char *source) {

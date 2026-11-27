@@ -102,6 +102,17 @@ Strings are double-quoted, with `#{expression}` interpolation. These are the esc
 For example: `"\x89PNG\r\n"`, `"caf\u00e9"`, `"\u{1F600}"`. Any other backslash pair is a
 compile error, so a Windows path needs doubled backslashes: `"C:\\temp"`.
 
+Single-quoted strings keep their text as written. They don't interpolate, and only two
+escapes apply: `\\` is one backslash and `\'` is a quote. Every other backslash stays, as in
+Ruby:
+
+```ruby
+'C:\temp\#{x}'   # => "C:\\temp\\#{x}"
+'it\'s'          # => "it's"
+```
+
+`require` and `require_cut` take either kind of quote.
+
 ## Heredocs
 
 A heredoc is a String written as the lines below its opener. `<<~NAME` starts one; the

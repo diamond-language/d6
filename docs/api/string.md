@@ -12,7 +12,7 @@ ASCII letters only.
 
 Literals are written `"text"`, with `#{expr}` interpolation and backslash
 escapes (`\n`, `\t`, `\f`, `\xHH`, `\u{H...}` and the rest, listed in
-[core syntax](../core-syntax.md)). Positions start at `0`; where a method takes an index, a
+[core syntax](../core-syntax.md)), or `'text'`, kept as written apart from `\\` and `\'`. Positions start at `0`; where a method takes an index, a
 negative one counts from the end.
 
 ## Operators

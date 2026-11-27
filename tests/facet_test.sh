@@ -1137,7 +1137,7 @@ grep -q '^facet: verified checkcut 1.2.0 (5 files)$' verify_output
 
 # A crafted archive must not bypass the literal-import checks used by
 # `facet check`. Change only payload bytes, keeping canonical tar headers.
-for import in 'require "../../x"' 'require_cut "missing"'; do
+for import in 'require "../../x"' 'require_cut "missing"' "require '../../x'" "require_cut 'missing'"; do
     cp one.tar imported.tar
     overwrite_payload imported.tar 'def checkcut_value() = 1' "$import"
     error_file="$(mktemp)"

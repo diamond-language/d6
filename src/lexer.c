@@ -327,6 +327,21 @@ static DiamondToken scan_number(DiamondLexer *lexer) {
     return token(lexer, is_float ? DIAMOND_TOKEN_FLOAT : DIAMOND_TOKEN_INTEGER);
 }
 
+/* A single-quoted literal whose opening quote was just consumed, through its closing
+ * quote. There is no interpolation; a backslash only matters before \ or ', so it is
+ * skipped over together with the next byte. The token is a DIAMOND_TOKEN_STRING, and
+ * the compiler tells the two kinds apart by the span's first byte. */
+static DiamondToken scan_single_quoted(DiamondLexer *lexer) {
+    while (!at_end(lexer) && lexer->source[lexer->current] != '\'') {
+        if (lexer->source[lexer->current] == '\\' && lexer->source[lexer->current + 1] != '\0')
+            advance(lexer);
+        advance(lexer);
+    }
+    if (at_end(lexer)) return token(lexer, DIAMOND_TOKEN_ERROR);
+    advance(lexer);
+    return token(lexer, DIAMOND_TOKEN_STRING);
+}
+
 /* A string literal whose opening '"' was just consumed, through its
  * closing quote, including `#{...}` interpolations (which may hold
  * strings of their own). */
@@ -339,6 +354,13 @@ static DiamondToken scan_string(DiamondLexer *lexer) {
                 const char embedded=advance(lexer);
                 if(embedded=='"') {
                     while(!at_end(lexer)&&lexer->source[lexer->current]!='"') {
+                        if(lexer->source[lexer->current]=='\\'&&
+                           lexer->source[lexer->current+1]!='\0')advance(lexer);
+                        advance(lexer);
+                    }
+                    if(!at_end(lexer))advance(lexer);
+                } else if(embedded=='\'') {
+                    while(!at_end(lexer)&&lexer->source[lexer->current]!='\'') {
                         if(lexer->source[lexer->current]=='\\'&&
                            lexer->source[lexer->current+1]!='\0')advance(lexer);
                         advance(lexer);
@@ -376,7 +398,8 @@ static DiamondToken scan_colon(DiamondLexer *lexer) {
          lexer->source[lexer->start - 1] == ')' ||
          lexer->source[lexer->start - 1] == ']' ||
          lexer->source[lexer->start - 1] == '}' ||
-         lexer->source[lexer->start - 1] == '"');
+         lexer->source[lexer->start - 1] == '"' ||
+         lexer->source[lexer->start - 1] == '\'');
     if (!glued && identifier_start(lexer->source[lexer->current])) {
         while (identifier_part(lexer->source[lexer->current])) advance(lexer);
         if(lexer->source[lexer->current]=='?'||
@@ -451,6 +474,8 @@ const char *diamond_lexer_error_message(const char *source, DiamondSpan span) {
     if (span.length >= 3 && source[span.start] == '<' && source[span.start + 1] == '<' &&
         source[span.start + 2] == '~')
         return "heredoc has no closing line (its name alone on a line)";
+    if (span.length >= 1 && (source[span.start] == '"' || source[span.start] == '\''))
+        return "unterminated string";
     return "unexpected character";
 }
 
@@ -472,6 +497,7 @@ static DiamondToken lexer_scan(DiamondLexer *lexer) {
     }
     if (character >= '0' && character <= '9') return scan_number(lexer);
     if (character == '"') return scan_string(lexer);
+    if (character == '\'') return scan_single_quoted(lexer);
     if (identifier_start(character)) {
         while (identifier_part(lexer->source[lexer->current])) {
             advance(lexer);

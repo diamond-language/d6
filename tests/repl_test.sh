@@ -152,6 +152,23 @@ response="$(read_until_prompt)"
 [[ "$response" == *'first\n  second\n'*"{> " ]]
 count=$((count + 1))
 
+# --- an open '...' string keeps reading, and keeps its backslashes ---
+
+printf "path = 'C:\\\\temp\n" >&"${REPL[1]}"
+response="$(read_until_prompt)"
+[[ "$response" == "... " ]]
+count=$((count + 1))
+
+printf "two'\n" >&"${REPL[1]}"
+response="$(read_until_prompt)"
+[[ "$response" == *"{> " ]]
+count=$((count + 1))
+
+printf 'path.inspect()\n' >&"${REPL[1]}"
+response="$(read_until_prompt)"
+[[ "$response" == *'C:\\temp\ntwo'*"{> " ]]
+count=$((count + 1))
+
 # --- multi-line function definitions, then calling the defined function ---
 
 printf 'def add(a, b)\n' >&"${REPL[1]}"

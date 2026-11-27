@@ -83,15 +83,17 @@ is always explicit: `3.7.to_i()` is `3`, `3.to_f()` is `3.0`.
 ## Strings
 
 Strings are written in double quotes, and `#{...}` inside one interpolates
-any expression. There are no single-quoted strings. For text that should
-keep its backslashes and `#{` as written, such as a Windows path or source
-code, use a raw heredoc, `<<~'NAME'` (see [heredocs](../core-syntax.md#heredocs)).
+any expression. Single quotes write text exactly as it is: no interpolation,
+and a backslash only escapes another backslash or a `'`. That suits Windows
+paths, regular expressions and source code. For several lines of raw text, use
+a raw heredoc, `<<~'NAME'` (see [heredocs](../core-syntax.md#heredocs)).
 
 ```ruby
 name = "Ada"
 born = 1815
 puts("#{name} was born in #{born}.")   # => Ada was born in 1815.
 puts("tab:\tafter")                    # => tab:	after
+puts('C:\temp\#{born}')               # => C:\temp\#{born}
 ```
 
 Strings are immutable. Methods like `upcase` return a new string, and

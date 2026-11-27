@@ -109,9 +109,9 @@
     "symbols": {
       "patterns": [
         {
-          "comment": "A colon starts a Symbol literal only when it isn't glued onto a preceding identifier/)/]/}/\" -- matching src/lexer.c's own disambiguation against type annotations (x: Int) and hash-literal separators ({a: b})",
+          "comment": "A colon starts a Symbol literal only when it isn't glued onto a preceding identifier/)/]/}/\"/' -- matching src/lexer.c's own disambiguation against type annotations (x: Int) and hash-literal separators ({a: b})",
           "name": "constant.other.symbol.diamond",
-          "match": "(?<![A-Za-z0-9_)\\]}\"]):[A-Za-z_][A-Za-z0-9_]*[?!]?"
+          "match": "(?<![A-Za-z0-9_)\\]}\"']):[A-Za-z_][A-Za-z0-9_]*[?!]?"
         }
       ]
     },
@@ -182,6 +182,18 @@
                 "0": { "name": "punctuation.section.embedded.end.diamond" }
               },
               "patterns": [{ "include": "$self" }]
+            }
+          ]
+        },
+        {
+          "comment": "'...' has no interpolation; only \\\\ and \\' are escapes",
+          "name": "string.quoted.single.diamond",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.diamond",
+              "match": "\\\\[\\\\']"
             }
           ]
         }

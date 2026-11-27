@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Highlighting for heredocs (`<<~NAME` and raw `<<~'NAME'`).
+- Highlighting and auto-closing for single-quoted strings (`'...'`).
 
 ## 0.8.0
 

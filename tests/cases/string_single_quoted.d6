@@ -1,0 +1,21 @@
+# Single-quoted strings keep their text as written: no interpolation, and only
+# \\ and \' are escapes, as in Ruby.
+name = "x"
+puts('plain')
+puts('C:\temp\#{name}')
+puts('it\'s')
+puts('one \\ backslash, trailing \\')
+puts('tab\tstays \n too')
+puts('mixed with ' + "double #{name}")
+puts('two
+lines')
+puts(''.length())
+puts("#{'a}b'} inside an interpolation")
+
+# A single-quoted string works anywhere a double-quoted one does.
+keys = {'brace}': 1, 'glued':2}
+puts(keys)
+case 'k'
+when 'k' then puts('matched')
+end
+'C:\temp'.length()
