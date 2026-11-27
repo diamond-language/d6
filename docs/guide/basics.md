@@ -83,7 +83,9 @@ is always explicit: `3.7.to_i()` is `3`, `3.to_f()` is `3.0`.
 ## Strings
 
 Strings are written in double quotes, and `#{...}` inside one interpolates
-any expression. There are no single-quoted strings.
+any expression. There are no single-quoted strings. For text that should
+keep its backslashes and `#{` as written, such as a Windows path or source
+code, use a raw heredoc, `<<~'NAME'` (see [heredocs](../core-syntax.md#heredocs)).
 
 ```ruby
 name = "Ada"
