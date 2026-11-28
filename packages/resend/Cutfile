@@ -1,0 +1,1 @@
+{"name": "resend", "version": "0.1.0", "summary": "Email through the Resend API: a Heimdall::Mailer sender and a sendmail-compatible command", "license": "MIT", "d6": ">=1.4.0", "maintainers": [{"name": "Chad 'Matrix9180' Ingram", "contact": "https://github.com/diamond-language/d6"}], "dependencies": {"http": "^0.2.8"}}

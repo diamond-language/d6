@@ -1,0 +1,36 @@
+# A sendmail-compatible command that delivers through Resend, for apps that
+# pipe mail to `sendmail -i -t` (Heimdall::Mailer.command_sender, cron, ...):
+#
+#     d6 bin/resend-sendmail.d6 -i -t < message.eml
+#
+# The key comes from Resend.api_key: the systemd credential `resend-api-key`,
+# RESEND_API_KEY_FILE, or RESEND_API_KEY. RESEND_URL overrides the endpoint
+# for testing. Exits 0 when Resend accepted the message, 2 for a message it
+# can't send (not text/plain, missing headers), 1 for any other failure.
+require "../lib/resend"
+
+if ARGV != ["-i", "-t"]
+  warn("usage: resend-sendmail -i -t < message")
+  exit(2)
+end
+
+# Read the key before stdin so a misconfigured unit fails fast.
+key = nil
+begin
+  key = Resend.api_key(ENV["RESEND_API_KEY_FILE"])
+rescue error: ArgumentError
+  warn(error.message())
+  exit(1)
+end
+
+raw = STDIN.read()
+error = Resend.deliver(raw, key, ENV["RESEND_URL"] || Resend::ENDPOINT)
+if error == "unsupported message"
+  warn(error)
+  exit(2)
+end
+if error != nil
+  warn(error)
+  exit(1)
+end
+exit(0)
