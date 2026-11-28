@@ -249,7 +249,7 @@ greeter/
 ```
 
 Other kinds: `web` (an HTTP application on gremlin and rack), `graphql` (a GraphQL API
-built from a schema file), `tcp` (a line-based server), `udp`, and `lib` (a library to
+built from a schema file; add `--auth` for accounts), `tcp` (a line-based server), `udp`, and `lib` (a library to
 publish to the registry).
 All of them share this layout; see [packages](packages.md#facet-new).
 

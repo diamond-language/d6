@@ -63,6 +63,18 @@ for kind in cli web graphql tcp udp lib; do
     ok
 done
 
+# --- graphql --auth adds accounts through heimdall ---
+"$facet" new graphql demo_auth --auth >/dev/null || fail "facet new graphql --auth"
+grep -q '"heimdall"' demo_auth/Cutfile || fail "--auth: no heimdall in the Cutfile"
+grep -q '{{' -r demo_auth && fail "--auth: unsubstituted placeholder"
+bash "$root/tools/install_local_cuts.sh" demo_auth >/dev/null
+output="$(bash demo_auth/test.sh 2>&1)" || fail "--auth: generated tests failed: $output"
+[[ "$output" == *" 0 failed, 0 errors"* ]] || fail "--auth: unexpected test output: $output"
+"$facet" new --auth graphql before_path >/dev/null 2>&1 && fail "--auth before the kind was accepted"
+"$facet" new graphql --auth flag_first >/dev/null || fail "--auth before the path"
+[[ -f flag_first/lib/flag_first.d6 ]] || fail "--auth before the path made no project"
+ok
+
 # --- the entry points run ---
 [[ "$("$diamond" demo_cli/main.d6 Ada)" == "Hello, Ada!" ]] || fail "cli greeting"
 # --version reads the Cutfile version, from any working directory.
@@ -92,6 +104,18 @@ reply="$(curl -s --max-time 5 "http://127.0.0.1:$port/graphql" -d '{"query": "{ 
 [[ "$reply" == '{"data":{"hello":"Hello, d6!"}}' ]] || fail "graphql POST /graphql: $reply"
 curl -s --max-time 5 "http://127.0.0.1:$port/schema.graphql" | grep -q '^type Note {' ||
     fail "graphql GET /schema.graphql"
+stop_server
+ok
+
+port="$(free_port)"
+(builtin cd demo_auth && PORT="$port" DATABASE="$work/demo_auth.sqlite3" exec "$diamond" main.d6 >"$work/demo_auth.log" 2>&1) &
+server_pid=$!
+wait_for_tcp "$port" || fail "graphql --auth server did not start"
+reply="$(curl -s --max-time 10 "http://127.0.0.1:$port/graphql" \
+    -d '{"query": "mutation { signUp(email: \"ada@example.com\", name: \"Ada\", password: \"correct horse\") { token } }"}')"
+token="$(grep -oE 'ust_[0-9a-f]{64}' <<<"$reply")" || fail "graphql --auth signUp: $reply"
+reply="$(curl -s --max-time 5 "http://127.0.0.1:$port/graphql" -H "authorization: Bearer $token" -d '{"query": "{ me { name } }"}')"
+[[ "$reply" == '{"data":{"me":{"name":"Ada"}}}' ]] || fail "graphql --auth me: $reply"
 stop_server
 ok
 
@@ -158,6 +182,11 @@ refuses 64 "module SecurityHeaders" new web security_headers
 refuses 64 "already uses" new graphql graphql
 refuses 64 "module GraphQL" new graphql graph_q_l
 refuses 64 "module Note" new graphql note
+refuses 64 "--auth works only with" new web web_auth --auth
+refuses 64 "usage: facet new" new graphql one two
+refuses 64 "usage: facet new" new graphql only --auth --auth
+refuses 64 "already uses" new graphql heimdall
+refuses 64 "module AppState" new graphql app_state
 [[ ! -e app && ! -e missing_parent ]] || fail "a refused command left files behind"
 "$facet" new web trailing_slash/ >/dev/null && [[ -f trailing_slash/lib/trailing_slash.d6 ]] ||
     fail "a trailing slash on the path"
@@ -220,6 +249,20 @@ done
 for name in $(grep -oE '^(class|module|struct) [A-Z][A-Za-z0-9]*' "$root/tools/new_templates/graphql/lib.d6" | awk '{print $2}'); do
     check_reserved graphql "$name"
 done
+# --auth adds heimdall and what it needs, and classes of its own.
+for dep in heimdall mjolnir arel; do
+    refuses 64 "already uses" new graphql "$dep"
+    for transitive in $(client deps "$root/packages/$dep/Cutfile"); do
+        [[ " $graphql_deps heimdall mjolnir arel " == *" $transitive "* ]] ||
+            fail "graphql --auth dependency $dep needs $transitive, which is not reserved"
+    done
+    for name in $(grep -rhoE '^(class|module|struct) [A-Z][A-Za-z0-9]*' "$root/packages/$dep/lib" | awk '{print $2}' | sort -u); do
+        check_reserved graphql "$name"
+    done
+done
+for name in $(grep -oE '^(class|module|struct) [A-Z][A-Za-z0-9]*' "$root/tools/new_templates/graphql_auth/lib.d6" | awk '{print $2}'); do
+    check_reserved graphql "$name"
+done
 ok
 
 # --- the templates' constraints accept the versions in packages/ ---
@@ -232,9 +275,9 @@ while read -r name wanted; do
         fail "a template wants $name ^$wanted, packages/ has older $have"
 done < <(sed -nE 's/^ *"([a-z_0-9]+)": \{"registry": "[^"]*", "version": "\^([0-9.]+)"\}.*/\1 \2/p' \
     "$root/tools/new_templates/web/Cutfile" "$root/tools/new_templates/graphql/Cutfile" \
-    "$root/tools/new_templates/common/Cutfile.dev")
+    "$root/tools/new_templates/graphql_auth/Cutfile" "$root/tools/new_templates/common/Cutfile.dev")
 [[ "$(cat "$root/tools/new_templates/web/Cutfile" "$root/tools/new_templates/graphql/Cutfile" \
-    "$root/tools/new_templates/common/Cutfile.dev" | grep -c '"version": "^')" == 6 ]] ||
+    "$root/tools/new_templates/graphql_auth/Cutfile" "$root/tools/new_templates/common/Cutfile.dev" | grep -c '"version": "^')" == 11 ]] ||
     fail "template dependency lines did not parse"
 ok
 

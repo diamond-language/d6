@@ -1,0 +1,70 @@
+module Heimdall
+  # Bearer-token sessions for one kind of account, in their own table:
+  # id, owner_id, token_digest (unique), expires_at, created_at, plus any
+  # `extra_fields` the app adds (Pheint ties some player sessions to one
+  # game). Tokens look like `<prefix><64 hex>` and are shown once.
+  class Sessions
+    def initialize(store, table, prefix, lifetime = 30 * 86400, extra_fields = {})
+      @store = store
+      @prefix = prefix
+      @lifetime = lifetime
+      fields = {"owner_id": store.id_type(), "token_digest": :string, "expires_at": :int, "created_at": :int}
+      extra_fields.keys().each() do |key| fields[key] = extra_fields[key] end
+      @schema = store.schema(table, fields)
+    end
+
+    def schema() = @schema
+    def prefix() = @prefix
+    def store() = @store
+
+    # A new session for `owner_id`: {"token", "expires_at", "session"}. The
+    # token can't be recovered later. `extra` fills extra fields.
+    def issue(owner_id, extra = {}, lifetime = nil)
+      token = Tokens.generate(@prefix)
+      now = Heimdall.now()
+      expires_at = now + (if lifetime == nil then @lifetime else lifetime end)
+      fields = {"owner_id": owner_id, "token_digest": Tokens.digest(token), "expires_at": expires_at, "created_at": now}
+      extra.keys().each() do |key| fields[key] = extra[key] end
+      session = @store.insert(@schema, fields)
+      {"token": token, "expires_at": expires_at, "session": session}
+    end
+
+    # The live session for a token, or nil. An expired one is removed.
+    def find(token)
+      if !Tokens.shaped?(token, @prefix) then return nil end
+      repo = @store.repo()
+      session = repo.get_by(@schema, {"token_digest": Tokens.digest(token)})
+      if session == nil then return nil end
+      if session["expires_at"] <= Heimdall.now()
+        repo.delete(@schema, session["id"])
+        return nil
+      end
+      session
+    end
+
+    # The token from an `Authorization: Bearer <token>` header, or nil.
+    def self.bearer(authorization)
+      if authorization == nil || !authorization.start_with?("Bearer ") then return nil end
+      authorization.slice(7, authorization.length()).strip()
+    end
+
+    def end_session(session) = @store.repo().delete(@schema, session["id"])
+
+    # Ends every session of the owner: after a password reset, nobody stays
+    # signed in with a stolen token.
+    def end_all(owner_id) = @store.repo().delete_all(@schema.query().where({"owner_id": owner_id}))
+
+    # Ends every session of the owner except `keep`, so a changed password
+    # signs out other devices but not this one.
+    def end_others(owner_id, keep)
+      query = @schema.query().where({"owner_id": owner_id}).where(@schema.column("id").not_eq(keep["id"]))
+      @store.repo().delete_all(query)
+    end
+
+    # Removes expired sessions. Returns how many.
+    def sweep(now = nil)
+      cutoff = if now == nil then Heimdall.now() else now end
+      @store.repo().delete_all(@schema.query().where(@schema.column("expires_at").lteq(cutoff)))
+    end
+  end
+end

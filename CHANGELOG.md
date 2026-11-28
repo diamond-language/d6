@@ -9,6 +9,17 @@ come only in minor releases, marked **Breaking** here.
 
 ### Added
 
+- The `heimdall` cut: accounts for GraphQL apps on mjolnir, taken from Pheint's
+  account code. It provides:
+  - bcrypt passwords, with sign-in timing that doesn't reveal which emails exist;
+  - prefixed bearer-token sessions, stored as digests;
+  - single-use reset and verify tokens;
+  - rate limits shared by every worker on SQLite or PostgreSQL;
+  - a retrying mail outbox;
+  - the `@auth` schema directive.
+- `facet new graphql <path> --auth` generates a GraphQL API with accounts on
+  heimdall and SQLite. It has sign-up, sign-in, password reset, email
+  verification and account deletion, plus tests for each.
 - Single-quoted strings, as in Ruby: `'C:\temp\#{x}'` keeps its text as
   written, with no interpolation; only `\\` and `\'` are escapes. `require`
   and `require_cut` accept either quote, and an unclosed quote now reports

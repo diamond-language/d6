@@ -1,0 +1,252 @@
+# {{name}}: a GraphQL API with accounts. lib/schema.graphql says what it serves; the
+# resolver classes here compute the fields that need code. heimdall does the account
+# work: passwords, sessions, reset and verify tokens, rate limits and the mail outbox.
+# POST /graphql runs a query, GET /schema.graphql shows the schema.
+require_cut "graphql"
+require_cut "rack"
+require_cut "heimdall"
+
+def plain_row(row) = row
+
+# One worker's database and accounts. Each gremlin worker builds its own, the first
+# time it serves a request.
+class AppState
+  # Each migration runs once, in order, and is recorded in schema_migrations.
+  def self.migrations() = [
+    ["001_users", [
+      "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT NOT NULL, " +
+        "password_digest TEXT NOT NULL, email_verified_at INTEGER, created_at INTEGER NOT NULL)"
+    ]],
+    ["002_heimdall", Heimdall::Migrations.statements("sqlite", :int, {"user_sessions": "users"})],
+    ["003_notes", [
+      "CREATE TABLE notes (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, " +
+        "text TEXT NOT NULL, created_at INTEGER NOT NULL)",
+      "CREATE INDEX notes_user_idx ON notes(user_id)"
+    ]]
+  ]
+
+  # Every worker migrates on start. BEGIN IMMEDIATE takes the write lock first,
+  # and the check runs inside it, so two workers never apply one migration twice.
+  def self.migrate(db)
+    db.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY)")
+    AppState.migrations().each() do |migration|
+      db.execute("BEGIN IMMEDIATE")
+      begin
+        done = db.query("SELECT version FROM schema_migrations WHERE version = ?", [migration[0]])
+        if done.length() == 0
+          migration[1].each() do |statement| db.execute(statement) end
+          db.execute("INSERT INTO schema_migrations (version) VALUES (?)", [migration[0]])
+        end
+        db.execute("COMMIT")
+      rescue error: StandardError
+        db.execute("ROLLBACK")
+        raise error
+      end
+    end
+  end
+
+  # One connection per worker: foreign keys on, WAL so readers don't block the
+  # writer, and a wait instead of an instant "database is locked".
+  def self.open(database)
+    db = SQLite3.open(database)
+    db.execute("PRAGMA foreign_keys = ON")
+    db.query("PRAGMA journal_mode = WAL")
+    db.execute("PRAGMA busy_timeout = 5000")
+    db
+  end
+
+  # `sender` delivers mail (see Heimdall::Mailer). nil turns mail off.
+  def initialize(database, sender)
+    @db = AppState.open(database)
+    AppState.migrate(@db)
+    @repo = Mjolnir::Repo.new(@db)
+    store = Heimdall::Store.new(@repo, :int)
+    @users = Mjolnir::Schema.new("users", {"id": :int, "email": :string, "name": :string,
+      "password_digest": :string, "email_verified_at": :int, "created_at": :int}, plain_row)
+    @notes = Mjolnir::Schema.new("notes", {"id": :int, "user_id": :int, "text": :string, "created_at": :int}, plain_row)
+    @mailer = Heimdall::Mailer.new(store, sender)
+    @realm = Heimdall::Realm.new("user", @users, Heimdall::Sessions.new(store, "user_sessions", "ust_"),
+      Heimdall::AccountTokens.new(store), Heimdall::RateLimiter.new(store), @mailer,
+      app_name: "{{name}}", reset_url: ENV["RESET_URL"], verify_url: ENV["VERIFY_URL"])
+  end
+
+  def db() = @db
+  def repo() = @repo
+  def users() = @users
+  def notes() = @notes
+  def mailer() = @mailer
+  def realm() = @realm
+end
+
+# One method per field that needs code, named after it in snake_case and called as
+# (object, args, context). @auth in the schema has already checked the caller.
+class QueryResolvers
+  def me(_, args, context) = Heimdall.account!(context)
+
+  def notes(_, args, context)
+    state = context["state"]
+    user = Heimdall.account!(context)
+    state.repo().all(state.notes().query().where({"user_id": user["id"]}).order_by("id"))
+  end
+end
+
+class MutationResolvers
+  def sign_up(_, args, context)
+    state = context["state"]
+    realm = state.realm()
+    realm.throttle_signup!(context["client_ip"])
+    email = realm.email!(args["email"])
+    name = args["name"].strip()
+    if name == "" || name.length() > 80 then GraphQL::Fail.signal("BAD_USER_INPUT", "a name needs 1 to 80 characters") end
+    digest = realm.password_digest!(args["password"])
+    fields = {"email": email, "name": name, "password_digest": digest, "created_at": Heimdall.now()}
+    changeset = Mjolnir::Changeset.cast(state.users(), nil, fields, fields.keys()).unique_constraint("email")
+    result = state.repo().insert(changeset)
+    if result is Mjolnir::Err then GraphQL::Fail.signal("CONFLICT", "that email is already registered") end
+    user = result.value()
+    realm.send_verification(user)
+    realm.start_session(user)
+  end
+
+  def sign_in(_, args, context) = context["state"].realm().sign_in(args["email"], args["password"], context["client_ip"])
+
+  def sign_out(_, args, context)
+    principal = Heimdall.signed_in!(context)
+    context["state"].realm().sessions().end_session(principal["session"])
+    true
+  end
+
+  def change_password(_, args, context)
+    principal = Heimdall.signed_in!(context)
+    context["state"].realm().change_password(principal["account"], args["currentPassword"], args["newPassword"], principal["session"])
+  end
+
+  def request_password_reset(_, args, context) = context["state"].realm().request_reset(args["email"], context["client_ip"])
+
+  def reset_password(_, args, context) = context["state"].realm().reset_password(args["token"], args["newPassword"], context["client_ip"])
+
+  def request_email_verification(_, args, context) = context["state"].realm().request_verification(Heimdall.account!(context))
+
+  def verify_email(_, args, context) = context["state"].realm().verify_email(args["token"], context["client_ip"])
+
+  # Notes go with the account: notes.user_id cascades on delete.
+  def delete_account(_, args, context)
+    state = context["state"]
+    state.realm().delete_account(Heimdall.account!(context), args["password"]) do |user|
+      state.repo().delete(state.users(), user["id"])
+    end
+  end
+
+  def add_note(_, args, context)
+    state = context["state"]
+    text = args["text"].strip()
+    if text == "" then GraphQL::Fail.signal("BAD_USER_INPUT", "a note needs some text") end
+    fields = {"user_id": Heimdall.account!(context)["id"], "text": text, "created_at": Heimdall.now()}
+    state.repo().insert!(Mjolnir::Changeset.cast(state.notes(), nil, fields, fields.keys()))
+  end
+end
+
+class SessionResolvers
+  def expires_at(session, args, context) = session["expires_at"].to_s()
+  def user(session, args, context) = session["account"]
+end
+
+class UserResolvers
+  def email_verified(user, args, context) = user["email_verified_at"] != nil
+end
+
+class {{Name}}
+  SCHEMA_TEXT = File.embed("schema.graphql")
+
+  # build() raises one error listing every field that has no way to resolve.
+  def self.schema()
+    GraphQL::App.new(SCHEMA_TEXT)
+      .resolvers("Query", QueryResolvers.new())
+      .resolvers("Mutation", MutationResolvers.new())
+      .resolvers("Session", SessionResolvers.new())
+      .resolvers("User", UserResolvers.new())
+      .directive("auth", Heimdall.directive(Heimdall.roles([])))
+      .build()
+  end
+
+  # Prints each message, so a reset or verify token shows in the server log until
+  # MAIL_COMMAND names a sendmail-style command (`sendmail -t`, say).
+  def self.print_mail(row)
+    puts("mail to #{row["to_address"]}: #{row["subject"]}\n#{row["body"]}\n")
+    true
+  end
+
+  def self.sender()
+    command = ENV["MAIL_COMMAND"]
+    if command == nil then {{Name}}.print_mail else Heimdall::Mailer.command_sender(command, ENV["MAIL_FROM"] || "{{name}}@localhost") end
+  end
+
+  # This worker's state. A test puts "database" and "mail_sender" in the context first.
+  def self.state(context)
+    if context["state"] == nil
+      database = context["database"] || ENV["DATABASE"] || "{{name}}.sqlite3"
+      sender = if context.has_key?("mail_sender") then context["mail_sender"] else {{Name}}.sender() end
+      context["state"] = AppState.new(database, sender)
+    end
+    context["state"]
+  end
+
+  def self.json(status, value) = [status, {"Content-Type": "application/json"}, JSON.stringify(value)]
+
+  def self.bad_request(message)
+    {{Name}}.json(400, {"errors": [{"message": message, "extensions": {"code": "BAD_REQUEST"}}]})
+  end
+
+  # Runs one request body, {"query": ..., "variables": ..., "operationName": ...}.
+  # Every error in the result carries a code, so a client can branch on
+  # extensions.code and never on the message text.
+  def self.execute(request, context)
+    payload = nil
+    begin
+      payload = JSON.parse(request["body"])
+    rescue JSONError
+      return {{Name}}.bad_request("the body must be JSON")
+    end
+    if !(payload.is_a?(Hash)) || !(payload["query"].is_a?(String))
+      return {{Name}}.bad_request("the body needs a \"query\" string")
+    end
+    variables = payload["variables"].is_a?(Hash) ? payload["variables"] : {}
+    context["schema"] ||= {{Name}}.schema()
+    state = {{Name}}.state(context)
+    # A fresh context per request: who is calling, and from where. TRUST_PROXY=1
+    # reads the address from X-Forwarded-For, which is only safe behind a proxy
+    # that overwrites it.
+    request_context = {"state": state,
+      "principal": Heimdall.principal([state.realm()], request["headers"]["authorization"]),
+      "client_ip": Heimdall.client_address(request, ENV["TRUST_PROXY"] == "1")}
+    result = context["schema"].execute(payload["query"], variables, request_context, nil, payload["operationName"])
+    {{Name}}.json(200, GraphQL::Fail.annotate(result))
+  end
+
+  def self.route(request, context)
+    method = request["method"]
+    path = request["path"]
+    if path == "/graphql" && method == "POST"
+      {{Name}}.execute(request, context)
+    elsif path == "/graphql"
+      [405, {"Allow": "POST", "Content-Type": "text/plain; charset=utf-8"}, "POST a JSON query to /graphql\n"]
+    elsif method == "GET" && path == "/schema.graphql"
+      [200, {"Content-Type": "text/plain; charset=utf-8"}, SCHEMA_TEXT]
+    elsif method == "GET" && path == "/health"
+      [200, {"Content-Type": "application/json"}, "{\"status\": \"ok\"}\n"]
+    else
+      [404, {"Content-Type": "text/plain; charset=utf-8"}, "Not found\n"]
+    end
+  end
+
+  # Runs on every worker about once a second: sends the mail that is due.
+  def self.tick(context) = {{Name}}.state(context).mailer().deliver_due()
+
+  # Middleware runs in the order listed, outermost first. SecurityHeaders
+  # adds nosniff, frame and referrer headers the route did not set.
+  def self.build_chain() = rack_compose([SecurityHeaders.call], {{Name}}.route)
+
+  # The handler gremlin calls. Each gremlin worker runs in its own VM, so
+  # RackChain builds the chain once per worker.
+  def self.call(request, context) = rack_run_chain(RackChain.get({{Name}}.build_chain), 0, request, context)
+end

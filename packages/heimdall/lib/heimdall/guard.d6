@@ -1,0 +1,63 @@
+module Heimdall
+  # The caller for an `Authorization: Bearer <token>` header:
+  # {"kind", "account", "session"}, or nil. Each realm's session prefix
+  # says which table to look in, so a token never resolves to the wrong
+  # kind of account. Put it in the GraphQL context as "principal".
+  def self.principal(realms, authorization)
+    token = Sessions.bearer(authorization)
+    if token == nil then return nil end
+    realm = realms.find() do |candidate| token.start_with?(candidate.sessions().prefix()) end
+    if realm == nil then nil else realm.principal(token) end
+  end
+
+  # The signed-in principal, or UNAUTHENTICATED. With `kind`, another kind of
+  # account is FORBIDDEN.
+  def self.signed_in!(context, kind = nil)
+    principal = context["principal"]
+    if principal == nil then Heimdall.fail("UNAUTHENTICATED", "sign in first") end
+    if kind != nil && principal["kind"] != kind then Heimdall.fail("FORBIDDEN", "this requires a #{kind} account") end
+    principal
+  end
+
+  # The signed-in account, or UNAUTHENTICATED.
+  def self.account!(context, kind = nil) = Heimdall.signed_in!(context, kind)["account"]
+
+  # The signed-in account with a verified email, or FORBIDDEN.
+  def self.verified!(context, kind = nil)
+    account = Heimdall.account!(context, kind)
+    if Heimdall.field(account, "email_verified_at") == nil then Heimdall.fail("FORBIDDEN", "verify your email first") end
+    account
+  end
+
+  # The checks for `@auth(as: ROLE)`: "ANY" (any signed-in account),
+  # "VERIFIED" (a verified email), and each realm's kind in capitals
+  # ("USER", "PLAYER"). Add or replace roles in the Hash before passing it
+  # to Heimdall.directive.
+  def self.roles(realms)
+    def any_account(context) = Heimdall.signed_in!(context)
+    def verified_account(context) = Heimdall.verified!(context)
+    roles = {"ANY": any_account, "VERIFIED": verified_account}
+    realms.each() do |realm|
+      roles[realm.kind().upcase()] = Heimdall.kind_check(realm.kind())
+    end
+    roles
+  end
+
+  def self.kind_check(kind)
+    def check_kind(context) = Heimdall.signed_in!(context, kind)
+    check_kind
+  end
+
+  # The resolver wrapper for `directive @auth(as: Role!) on FIELD_DEFINITION`,
+  # for GraphQL::App#directive("auth", ...). Each role's check runs before
+  # the field and raises to refuse it.
+  def self.directive(roles)
+    def check_auth(directive, object, args, context, resolve)
+      check = roles[directive["as"]]
+      if check == nil then raise ArgumentError.new("@auth has no role named #{directive["as"]}") end
+      check.call(context)
+      resolve(object, args, context)
+    end
+    check_auth
+  end
+end

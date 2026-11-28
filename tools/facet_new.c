@@ -87,6 +87,30 @@ static constexpr unsigned char GRAPHQL_README[] = {
 #embed "new_templates/graphql/README.md" suffix(,)
     0
 };
+static constexpr unsigned char GRAPHQL_AUTH_MAIN[] = {
+#embed "new_templates/graphql_auth/main.d6" suffix(,)
+    0
+};
+static constexpr unsigned char GRAPHQL_AUTH_LIB[] = {
+#embed "new_templates/graphql_auth/lib.d6" suffix(,)
+    0
+};
+static constexpr unsigned char GRAPHQL_AUTH_SCHEMA[] = {
+#embed "new_templates/graphql_auth/schema.graphql" suffix(,)
+    0
+};
+static constexpr unsigned char GRAPHQL_AUTH_TEST[] = {
+#embed "new_templates/graphql_auth/test.d6" suffix(,)
+    0
+};
+static constexpr unsigned char GRAPHQL_AUTH_CUT[] = {
+#embed "new_templates/graphql_auth/Cutfile" suffix(,)
+    0
+};
+static constexpr unsigned char GRAPHQL_AUTH_README[] = {
+#embed "new_templates/graphql_auth/README.md" suffix(,)
+    0
+};
 static constexpr unsigned char TCP_MAIN[] = {
 #embed "new_templates/tcp/main.d6" suffix(,)
     0
@@ -184,6 +208,14 @@ static const NewFile GRAPHQL_FILES[] = {
     {"lib/schema.graphql", GRAPHQL_SCHEMA, false, false},
     {"test/{{name}}_test.d6", GRAPHQL_TEST, false, false}, COMMON_FILES,
 };
+/* `facet new graphql --auth`: the same project with accounts through heimdall. */
+static const NewFile GRAPHQL_AUTH_FILES[] = {
+    {"Cutfile", GRAPHQL_AUTH_CUT, false, false}, {"README.md", GRAPHQL_AUTH_README, false, false},
+    {".gitignore", APP_GITIGNORE, false, false}, {"main.d6", GRAPHQL_AUTH_MAIN, false, false},
+    {"lib/{{name}}.d6", GRAPHQL_AUTH_LIB, false, false},
+    {"lib/schema.graphql", GRAPHQL_AUTH_SCHEMA, false, false},
+    {"test/{{name}}_test.d6", GRAPHQL_AUTH_TEST, false, false}, COMMON_FILES,
+};
 static const NewFile TCP_FILES[] = {
     {"Cutfile", TCP_CUT, false, false}, {"README.md", TCP_README, false, false},
     {".gitignore", APP_GITIGNORE, false, false}, {"main.d6", TCP_MAIN, false, false},
@@ -220,7 +252,10 @@ static const char *const GRAPHQL_RESERVED[] = {
     "GremlinShutdown", "NonblockingConnection", "ContentNegotiation", "Cors",
     "RackChain", "RackHeaders", "RateLimit", "SecurityHeaders", "StaticFiles", "HeadAsGet",
     "HttpRequestError", "HttpSession", "Logger", "RequestLogging",
-    "GraphQL", "Note", "NoteStore", "QueryResolvers", "MutationResolvers", nullptr,
+    "GraphQL", "Note", "NoteStore", "QueryResolvers", "MutationResolvers",
+    /* --auth adds heimdall, mjolnir and arel, and these classes of its own. */
+    "heimdall", "mjolnir", "arel", "Heimdall", "Mjolnir", "Arel",
+    "AppState", "SessionResolvers", "UserResolvers", nullptr,
 };
 
 static const struct {
@@ -382,13 +417,23 @@ void print_new_kind_names(void) {
 }
 
 static void print_new_usage(void) {
-    fputs("usage: facet new <kind> <path>\n\nkinds:\n", stderr);
+    fputs("usage: facet new <kind> <path> [--auth]\n\nkinds:\n", stderr);
     for (size_t index = 0; index < sizeof KINDS / sizeof KINDS[0]; index++)
         fprintf(stderr, "  %-7s  %s\n", KINDS[index].kind, KINDS[index].summary);
+    fputs("\n--auth (graphql only) adds accounts through heimdall: sign-up, sign-in, sessions,\n"
+          "password reset, email verification and the @auth directive, on SQLite.\n", stderr);
 }
 
 int cmd_new(int argc, char **argv) {
-    if (argc != 4) {
+    /* `--auth` may come before or after the path. */
+    bool auth = false;
+    const char *target = nullptr;
+    for (int index = 3; index < argc; index++) {
+        if (strcmp(argv[index], "--auth") == 0 && !auth) auth = true;
+        else if (target == nullptr && argv[index][0] != '-') target = argv[index];
+        else target = nullptr, argc = -1;
+    }
+    if (argc < 4 || target == nullptr) {
         print_new_usage();
         return 64;
     }
@@ -400,11 +445,18 @@ int cmd_new(int argc, char **argv) {
         print_new_usage();
         return 64;
     }
+    if (auth && strcmp(argv[2], "graphql") != 0) {
+        fprintf(stderr, "facet: --auth works only with `facet new graphql`\n");
+        return 64;
+    }
+    const NewFile *files = auth ? GRAPHQL_AUTH_FILES : KINDS[kind].files;
+    const size_t file_count = auth ? sizeof GRAPHQL_AUTH_FILES / sizeof GRAPHQL_AUTH_FILES[0]
+                                   : KINDS[kind].file_count;
 
     /* The project name is the path's last component. */
     char root[FACET_MAX_PATH];
-    if (snprintf(root, sizeof root, "%s", argv[3]) >= (int)sizeof root) {
-        fprintf(stderr, "facet: path '%s' is too long\n", argv[3]);
+    if (snprintf(root, sizeof root, "%s", target) >= (int)sizeof root) {
+        fprintf(stderr, "facet: path '%s' is too long\n", target);
         return 64;
     }
     size_t root_length = strlen(root);
@@ -463,15 +515,15 @@ int cmd_new(int argc, char **argv) {
     bool ok = mkdir(lib_dir, 0755) == 0 && mkdir(test_dir, 0755) == 0;
     if (!ok) (void)snprintf(error, sizeof error, "cannot create directories in '%s': %s",
                             root, strerror(errno));
-    for (size_t index = 0; ok && index < KINDS[kind].file_count; index++)
-        ok = write_new_file(root, &KINDS[kind].files[index], &values, error, sizeof error);
+    for (size_t index = 0; ok && index < file_count; index++)
+        ok = write_new_file(root, &files[index], &values, error, sizeof error);
     if (!ok) {
         fprintf(stderr, "facet: %s\n", error);
         (void)remove_directory_recursive(root);
         return 73;
     }
 
-    printf("facet: created %s %s in %s\n", argv[2], values.name, root);
+    printf("facet: created %s%s %s in %s\n", argv[2], auth ? " (with accounts)" : "", values.name, root);
     if (placeholder_maintainer)
         printf("facet: set the maintainer in Cutfile and LICENSE "
                "(git config user.name/user.email were not usable)\n");

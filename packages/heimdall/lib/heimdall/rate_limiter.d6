@@ -1,0 +1,110 @@
+module Heimdall
+  # Fixed-window rate limits kept in the database, because each worker has
+  # its own memory: in-process counters would be per worker and reset on
+  # restart. The table is rate_limits(bucket, window_start, count) with
+  # (bucket, window_start) as its primary key. Buckets are stored as their
+  # SHA-256, so emails and addresses in bucket names never sit in the table.
+  #
+  # Counting uses an insert, then a compare-and-set update, so every worker
+  # agrees on the count on SQLite and PostgreSQL alike, with no
+  # dialect-specific upsert or row lock.
+  class RateLimiter
+    # [limit, window_seconds] for the policies Realm uses. Apps add their own
+    # (per-request limits, say) and override these through `policies`.
+    def self.defaults() = {
+      "signup_ip": [10, 3600],
+      "signin_fail_email": [10, 900], "signin_fail_email_ip": [5, 900], "signin_fail_ip": [30, 900],
+      "password_fail_account": [5, 900],
+      "reset_request_ip": [5, 3600], "reset_request_email": [3, 3600], "token_fail_ip": [20, 3600],
+      "verify_request_account": [3, 3600], "verify_request_ip": [10, 3600]
+    }
+
+    def initialize(store, policies = {}, table = "rate_limits")
+      @store = store
+      @policies = RateLimiter.defaults()
+      policies.keys().each() do |name| @policies[name] = policies[name] end
+      @schema = Mjolnir::Schema.new(table, {"bucket": :string, "window_start": :int, "count": :int},
+        heimdall_row, primary_key: ["bucket", "window_start"])
+    end
+
+    def schema() = @schema
+
+    # [limit, window_seconds] for a policy name.
+    def policy(name)
+      chosen = @policies[name]
+      if chosen == nil then raise ArgumentError.new("no rate limit policy named #{name}") end
+      chosen
+    end
+
+    def window_start(now, window) = now - (now % window)
+    def retry_after(window) = window - (Heimdall.now() % window)
+
+    def key(bucket, window) = {"bucket": Tokens.digest(bucket), "window_start": self.window_start(Heimdall.now(), window)}
+
+    # Records one event in `bucket` and returns the count for the window.
+    def hit(bucket, window)
+      repo = @store.repo()
+      key = self.key(bucket, window)
+      query = @schema.query().where(key)
+      while true
+        row = repo.one(query)
+        if row == nil
+          fields = {"bucket": key["bucket"], "window_start": key["window_start"], "count": 1}
+          change = Mjolnir::Changeset.cast(@schema, nil, fields, fields.keys())
+            .unique_constraint("bucket", columns: ["bucket", "window_start"])
+          if repo.insert(change) is Mjolnir::Ok
+            # Old windows are swept now and then (about 1 hit in 256), so
+            # the table stays small.
+            if SecureRandom.hex(1) == "00" then self.sweep() end
+            return 1
+          end
+        else
+          count = row["count"]
+          if repo.update_all(query.where({"count": count}), {"count": count + 1}) == 1 then return count + 1 end
+        end
+      end
+    end
+
+    # Events in the current window, without recording one.
+    def count(bucket, window)
+      row = @store.repo().one(@schema.query().where(self.key(bucket, window)))
+      if row == nil then 0 else row["count"] end
+    end
+
+    def clear(bucket, window) = @store.repo().delete_all(@schema.query().where(self.key(bucket, window)))
+
+    # True when `bucket` is at or over the named policy's limit.
+    def blocked?(name, bucket)
+      chosen = self.policy(name)
+      self.count(bucket, chosen[1]) >= chosen[0]
+    end
+
+    def record_failure(name, bucket) = self.hit(bucket, self.policy(name)[1])
+    def clear_bucket(name, bucket) = self.clear(bucket, self.policy(name)[1])
+
+    # "37 seconds" or "5 minutes", for a lockout message.
+    def wait_text(name)
+      seconds = self.retry_after(self.policy(name)[1])
+      if seconds >= 120 then "#{(seconds + 59) / 60} minutes" else "#{seconds} seconds" end
+    end
+
+    # Counts one request against `bucket`. Returns the seconds to wait when
+    # the policy is exceeded, else nil.
+    def check_request(name, bucket)
+      chosen = self.policy(name)
+      if self.hit(bucket, chosen[1]) > chosen[0] then self.retry_after(chosen[1]) else nil end
+    end
+
+    # Like check_request, but raises RATE_LIMITED instead of returning.
+    def check_request!(name, bucket, what = "requests")
+      wait = self.check_request(name, bucket)
+      if wait != nil then Heimdall.fail("RATE_LIMITED", "too many #{what}; try again in #{wait} seconds") end
+      nil
+    end
+
+    # Removes windows older than two days.
+    def sweep()
+      @store.repo().delete_all(@schema.query().where(@schema.column("window_start").lt(Heimdall.now() - 172800)))
+    end
+  end
+end

@@ -1,0 +1,63 @@
+module Heimdall
+  # Single-use tokens sent by email (password reset, email verification), in
+  # one table for every kind of account: id, kind, account_id, purpose,
+  # token_digest (unique), expires_at, created_at. There is one live token
+  # per account and purpose. Issuing a new one revokes the last, and a token
+  # dies when used or expired.
+  class AccountTokens
+    def initialize(store, table = "account_tokens")
+      @store = store
+      @schema = store.schema(table, {"kind": :string, "account_id": store.id_type(), "purpose": :string,
+        "token_digest": :string, "expires_at": :int, "created_at": :int})
+    end
+
+    def schema() = @schema
+
+    # A fresh token for the account and purpose. Any earlier one stops working.
+    def issue(kind, account_id, purpose, prefix, seconds)
+      self.revoke_all(kind, account_id, purpose)
+      token = Tokens.generate(prefix)
+      now = Heimdall.now()
+      @store.insert(@schema, {"kind": kind, "account_id": account_id, "purpose": purpose,
+        "token_digest": Tokens.digest(token), "expires_at": now + seconds, "created_at": now})
+      token
+    end
+
+    # The live row for `token`, or nil. The token must carry `prefix` and
+    # belong to `kind` and `purpose`. An expired row is removed.
+    def find(token, kind, purpose, prefix)
+      if !Tokens.shaped?(token, prefix) then return nil end
+      repo = @store.repo()
+      row = repo.get_by(@schema, {"token_digest": Tokens.digest(token)})
+      if row == nil || row["kind"] != kind || row["purpose"] != purpose then return nil end
+      if row["expires_at"] <= Heimdall.now()
+        repo.delete(@schema, row["id"])
+        return nil
+      end
+      row
+    end
+
+    # Like find, but uses the token up: of two requests racing with the same
+    # token, only one gets the row.
+    def consume(token, kind, purpose, prefix)
+      row = self.find(token, kind, purpose, prefix)
+      if row == nil then return nil end
+      if @store.repo().delete_all(@schema.query().where({"id": row["id"]})) != 1 then return nil end
+      row
+    end
+
+    def revoke_all(kind, account_id, purpose)
+      @store.repo().delete_all(@schema.query().where({"kind": kind, "account_id": account_id, "purpose": purpose}))
+    end
+
+    # Every token of an account that is going away.
+    def revoke_account(kind, account_id)
+      @store.repo().delete_all(@schema.query().where({"kind": kind, "account_id": account_id}))
+    end
+
+    def sweep(now = nil)
+      cutoff = if now == nil then Heimdall.now() else now end
+      @store.repo().delete_all(@schema.query().where(@schema.column("expires_at").lteq(cutoff)))
+    end
+  end
+end

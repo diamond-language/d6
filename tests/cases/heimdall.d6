@@ -1,0 +1,282 @@
+require "../../packages/heimdall/lib/heimdall"
+require "../../lib/minitest"
+
+# Two kinds of account, as Pheint has: players with integer ids built as
+# structs, and developers as plain Hash rows.
+struct TestPlayer(id: Int | String, email: String, password_digest: String, email_verified_at: Int | Nil)
+end
+
+def build_test_player(row) = TestPlayer.new(row["id"], row["email"], row["password_digest"], row["email_verified_at"])
+
+def account_fields() = {"id": :int, "email": :string, "password_digest": :string, "email_verified_at": :int}
+
+# DIAMOND_PG_TEST_CONNINFO runs the suite on PostgreSQL instead of SQLite
+# (packages/heimdall/test_postgres.sh starts a throwaway server).
+def postgres?() = ENV["DIAMOND_PG_TEST_CONNINFO"] != nil
+
+def open_test_db()
+  if !postgres?() then return SQLite3.open(":memory:") end
+  db = PostgreSQL.open(ENV["DIAMOND_PG_TEST_CONNINFO"])
+  tables = ["player_sessions", "developer_sessions", "account_tokens", "rate_limits", "mail_outbox", "players", "developers"]
+  tables.each() do |table| db.execute("DROP TABLE IF EXISTS #{table} CASCADE") end
+  db
+end
+
+def fresh_world(id_type = :int)
+  db = open_test_db()
+  dialect = if postgres?() then "postgres" else "sqlite" end
+  visitor = if postgres?() then Arel::PostgreSQLVisitor.new() else nil end
+  account_id = Heimdall::Migrations.id_column(dialect, id_type)
+  db.execute("CREATE TABLE players (#{account_id}, email TEXT NOT NULL UNIQUE, password_digest TEXT NOT NULL, email_verified_at INTEGER)")
+  db.execute("CREATE TABLE developers (#{account_id}, email TEXT NOT NULL UNIQUE, password_digest TEXT NOT NULL, email_verified_at INTEGER)")
+  tables = {"player_sessions": "players", "developer_sessions": "developers"}
+  Heimdall::Migrations.statements(dialect, id_type, tables).each() do |statement| db.execute(statement) end
+  store = Heimdall::Store.new(Mjolnir::Repo.new(db, visitor), id_type)
+  outbox = []
+  def capture(row)
+    outbox.push(row)
+    true
+  end
+  mailer = Heimdall::Mailer.new(store, capture)
+  limiter = Heimdall::RateLimiter.new(store)
+  tokens = Heimdall::AccountTokens.new(store)
+  fields = account_fields()
+  fields["id"] = id_type
+  players = Mjolnir::Schema.new("players", fields, build_test_player)
+  developers = store.schema("developers", {"email": :string, "password_digest": :string, "email_verified_at": :int})
+  player_realm = Heimdall::Realm.new("player", players, Heimdall::Sessions.new(store, "player_sessions", "ppt_"),
+    tokens, limiter, mailer, app_name: "Arcade", reset_url: "https://arcade.test/reset?token={token}")
+  developer_realm = Heimdall::Realm.new("developer", developers, Heimdall::Sessions.new(store, "developer_sessions", "pdt_"),
+    tokens, limiter, mailer, app_name: "Arcade", invalid_code: "VALIDATION")
+  {"db": db, "store": store, "outbox": outbox, "mailer": mailer, "limiter": limiter, "tokens": tokens,
+   "players": player_realm, "developers": developer_realm}
+end
+
+def add_account(world, realm, email, password)
+  store = world["store"]
+  store.insert(realm.accounts(), {"email": email, "password_digest": realm.password_digest!(password)})
+  realm.find_by_email(email)
+end
+
+# The code a block's GraphQL failure carries.
+def failure_code(&action)
+  begin
+    action()
+  rescue error: StandardError
+    return GraphQL::Fail.code(error)
+  end
+  "none"
+end
+
+def token_from(body)
+  match = Regexp.new("usable once\\): ([a-z_]+[0-9a-f]{64})").match(body)
+  if match == nil then Regexp.new("three days\\): ([a-z_]+[0-9a-f]{64})").match(body)[1] else match[1] end
+end
+
+def run_tests()
+  suite = Minitest.new()
+
+  suite.test("credentials reject bad emails and passwords and verify against a dummy digest") do
+    Minitest.assert_nil(Heimdall::Credentials.email_problem("  Ada@Example.COM "))
+    Minitest.refute_nil(Heimdall::Credentials.email_problem("ada@localhost"))
+    Minitest.refute_nil(Heimdall::Credentials.password_problem("short"))
+    Minitest.refute_nil(Heimdall::Credentials.password_problem("x" * 73))
+    Minitest.assert_nil(Heimdall::Credentials.password_problem("long enough"))
+    digest = Heimdall::Credentials.hash("long enough")
+    Minitest.assert(Heimdall::Credentials.verify("long enough", digest))
+    Minitest.refute(Heimdall::Credentials.verify("wrong guess", digest))
+    Minitest.refute(Heimdall::Credentials.verify("long enough", nil))
+  end
+
+  suite.test("sessions issue prefixed tokens, store only digests, and expire") do
+    world = fresh_world()
+    realm = world["players"]
+    player = add_account(world, realm, "ada@example.com", "correct horse")
+    issued = realm.start_session(player)
+    Minitest.assert(issued["token"].start_with?("ppt_"))
+    Minitest.assert_equal(68, issued["token"].length())
+    rows = world["db"].query("SELECT token_digest FROM player_sessions", [])
+    Minitest.assert_equal(Digest.sha256(issued["token"]), rows[0]["token_digest"])
+    principal = Heimdall.principal([realm, world["developers"]], "Bearer #{issued["token"]}")
+    Minitest.assert_equal("player", principal["kind"])
+    Minitest.assert_equal("ada@example.com", principal["account"].email())
+    Minitest.assert_nil(Heimdall.principal([world["developers"]], "Bearer #{issued["token"]}"))
+    world["db"].execute("UPDATE player_sessions SET expires_at = 1", [])
+    Minitest.assert_nil(realm.sessions().find(issued["token"]))
+    Minitest.assert_equal(0, world["db"].query("SELECT id FROM player_sessions", []).length())
+  end
+
+  suite.test("sign-in locks out after repeated failures, even for the right password") do
+    world = fresh_world()
+    realm = world["players"]
+    add_account(world, realm, "ada@example.com", "correct horse")
+    Minitest.assert_equal("UNAUTHENTICATED", failure_code() do realm.sign_in("nobody@example.com", "whatever1", "10.0.0.1") end)
+    5.times() do Minitest.assert_equal("UNAUTHENTICATED", failure_code() do realm.sign_in("ada@example.com", "wrong guess", "10.0.0.1") end) end
+    Minitest.assert_equal("RATE_LIMITED", failure_code() do realm.sign_in("ada@example.com", "correct horse", "10.0.0.1") end)
+    other = realm.sign_in("ada@example.com", "correct horse", "10.0.0.2")
+    Minitest.assert(other["token"].start_with?("ppt_"))
+  end
+
+  suite.test("changing a password keeps this session and ends the others") do
+    world = fresh_world()
+    realm = world["developers"]
+    developer = add_account(world, realm, "dev@example.com", "first password")
+    here = realm.sign_in("dev@example.com", "first password", nil)
+    there = realm.sign_in("dev@example.com", "first password", nil)
+    Minitest.assert_equal("UNAUTHENTICATED", failure_code() do realm.change_password(developer, "wrong one", "second password", here["session"]) end)
+    Minitest.assert_equal("VALIDATION", failure_code() do realm.change_password(developer, "first password", "short", here["session"]) end)
+    realm.change_password(developer, "first password", "second password", here["session"])
+    Minitest.refute_nil(realm.sessions().find(here["token"]))
+    Minitest.assert_nil(realm.sessions().find(there["token"]))
+    Minitest.refute_nil(realm.sign_in("dev@example.com", "second password", nil))
+  end
+
+  suite.test("a reset token works once, replaces the last one, and signs out everywhere") do
+    world = fresh_world()
+    realm = world["players"]
+    add_account(world, realm, "ada@example.com", "correct horse")
+    session = realm.sign_in("ada@example.com", "correct horse", nil)
+    Minitest.assert(realm.request_reset("nobody@example.com", "10.0.0.1"))
+    Minitest.assert_equal(0, world["outbox"].length())
+    realm.request_reset("ADA@example.com", "10.0.0.1")
+    realm.request_reset("ada@example.com", "10.0.0.1")
+    world["mailer"].deliver_due(Heimdall.now())
+    Minitest.assert_equal(2, world["outbox"].length())
+    first = token_from(world["outbox"][0]["body"])
+    second = token_from(world["outbox"][1]["body"])
+    Minitest.assert(first.start_with?("pr_"))
+    Minitest.assert(world["outbox"][1]["body"].include?("https://arcade.test/reset?token=#{second}"))
+    Minitest.assert_equal("BAD_USER_INPUT", failure_code() do realm.reset_password(first, "new password", "10.0.0.1") end)
+    Minitest.assert(realm.reset_password(second, "new password", "10.0.0.1"))
+    Minitest.assert_equal("BAD_USER_INPUT", failure_code() do realm.reset_password(second, "newer password", "10.0.0.1") end)
+    Minitest.assert_nil(realm.sessions().find(session["token"]))
+    Minitest.refute_nil(realm.sign_in("ada@example.com", "new password", nil))
+    Minitest.assert_equal(realm, Heimdall.realm_for_token([world["developers"], realm], second, "password_reset"))
+  end
+
+  suite.test("verification marks the email and guards act on it") do
+    world = fresh_world()
+    realm = world["players"]
+    player = add_account(world, realm, "ada@example.com", "correct horse")
+    context = {"principal": realm.principal(realm.start_session(player)["token"])}
+    Minitest.assert_equal("FORBIDDEN", failure_code() do Heimdall.verified!(context) end)
+    realm.send_verification(player)
+    world["mailer"].deliver_due()
+    token = token_from(world["outbox"][0]["body"])
+    Minitest.assert(token.start_with?("pv_"))
+    Minitest.assert(realm.verify_email(token, nil))
+    Minitest.refute_nil(realm.find_by_email("ada@example.com").email_verified_at())
+    Minitest.assert_equal("BAD_USER_INPUT", failure_code() do realm.verify_email(token, nil) end)
+  end
+
+  suite.test("verification by email answers true and sends only to an unverified owner") do
+    world = fresh_world()
+    realm = world["players"]
+    add_account(world, realm, "ada@example.com", "correct horse")
+    Minitest.assert(realm.request_verification_by_email("nobody@example.com", "198.51.100.1"))
+    Minitest.assert(realm.request_verification_by_email("ADA@example.com", "198.51.100.1"))
+    world["mailer"].deliver_due()
+    Minitest.assert_equal(1, world["outbox"].length())
+    # A busy email is dropped silently: three an hour per account.
+    3.times() do Minitest.assert(realm.request_verification_by_email("ada@example.com", nil)) end
+    world["mailer"].deliver_due()
+    Minitest.assert_equal(3, world["outbox"].length())
+    # A verified email gets nothing.
+    Minitest.assert(realm.verify_email(token_from(world["outbox"][2]["body"]), nil))
+    Minitest.assert(realm.request_verification_by_email("ada@example.com", nil))
+    world["mailer"].deliver_due()
+    Minitest.assert_equal(3, world["outbox"].length())
+    # One address asking too often is refused.
+    8.times() do realm.request_verification_by_email("nobody@example.com", "198.51.100.1") end
+    Minitest.assert_equal("RATE_LIMITED", failure_code() do realm.request_verification_by_email("x@example.com", "198.51.100.1") end)
+  end
+
+  suite.test("wrong tokens from one address are locked out") do
+    world = fresh_world()
+    realm = world["players"]
+    fake = "pr_" + ("0" * 64)
+    20.times() do failure_code() do realm.reset_password(fake, "new password", "10.0.0.9") end end
+    Minitest.assert_equal("RATE_LIMITED", failure_code() do realm.reset_password(fake, "new password", "10.0.0.9") end)
+  end
+
+  suite.test("the @auth directive checks roles before the field runs") do
+    world = fresh_world()
+    players = world["players"]
+    developers = world["developers"]
+    roles = Heimdall.roles([players, developers])
+    auth = Heimdall.directive(roles)
+    def resolve(object, args, context) = "ran"
+    player = add_account(world, players, "ada@example.com", "correct horse")
+    signed_in = {"principal": players.principal(players.start_session(player)["token"])}
+    Minitest.assert_equal("ran", auth({"as": "PLAYER"}, nil, {}, signed_in, resolve))
+    Minitest.assert_equal("ran", auth({"as": "ANY"}, nil, {}, signed_in, resolve))
+    Minitest.assert_equal("FORBIDDEN", failure_code() do auth({"as": "DEVELOPER"}, nil, {}, signed_in, resolve) end)
+    Minitest.assert_equal("UNAUTHENTICATED", failure_code() do auth({"as": "ANY"}, nil, {}, {}, resolve) end)
+  end
+
+  suite.test("the rate limiter counts per bucket and window and hides bucket names") do
+    world = fresh_world()
+    limiter = Heimdall::RateLimiter.new(world["store"], {"tiny": [2, 60]})
+    Minitest.assert_nil(limiter.check_request("tiny", "ip:1"))
+    Minitest.assert_nil(limiter.check_request("tiny", "ip:1"))
+    Minitest.refute_nil(limiter.check_request("tiny", "ip:1"))
+    Minitest.assert_nil(limiter.check_request("tiny", "ip:2"))
+    rows = world["db"].query("SELECT bucket FROM rate_limits", [])
+    Minitest.refute(rows.any?() do |row| row["bucket"].include?("ip:") end)
+    limiter.clear_bucket("tiny", "ip:1")
+    Minitest.assert_equal(0, limiter.count("ip:1", 60))
+  end
+
+  suite.test("the mailer retries failed sends and gives up after five tries") do
+    world = fresh_world()
+    attempts = 0
+    def flaky(row)
+      attempts += 1
+      false
+    end
+    mailer = Heimdall::Mailer.new(world["store"], flaky)
+    mailer.enqueue("ada@example.com", "Hello", "Body")
+    at = Heimdall.now()
+    5.times() do |round|
+      mailer.deliver_due(at)
+      at += 3600
+    end
+    Minitest.assert_equal(5, attempts)
+    Minitest.assert_equal(0, world["db"].query("SELECT id FROM mail_outbox", []).length())
+    off = Heimdall::Mailer.new(world["store"], nil)
+    Minitest.refute(off.enqueue("ada@example.com", "Hello", "Body"))
+    # :queue queues and leaves sending to another mailer on the same table.
+    queued = Heimdall::Mailer.new(world["store"], :queue)
+    Minitest.assert(queued.enqueue("ada@example.com", "Hello", "Body"))
+    Minitest.assert_equal(0, queued.deliver_due(at))
+    sent = []
+    def keep(row)
+      sent.push(row["to_address"])
+      true
+    end
+    Minitest.assert_equal(1, Heimdall::Mailer.new(world["store"], keep).deliver_due(at))
+    Minitest.assert_equal(["ada@example.com"], sent)
+  end
+
+  suite.test("string ids work the same way") do
+    world = fresh_world(:string)
+    realm = world["players"]
+    player = add_account(world, realm, "ada@example.com", "correct horse")
+    Minitest.assert_equal(32, player.id().length())
+    session = realm.sign_in("ada@example.com", "correct horse", nil)
+    Minitest.assert_equal(32, session["session"]["id"].length())
+    Minitest.refute_nil(realm.principal(session["token"]))
+  end
+
+  suite.test("client addresses come from the peer or a trusted proxy") do
+    request = {"peer_address": "203.0.113.7", "headers": {"x-forwarded-for": "198.51.100.1, 10.0.0.1"}}
+    Minitest.assert_equal("203.0.113.7", Heimdall.client_address(request))
+    Minitest.assert_equal("198.51.100.1", Heimdall.client_address(request, trust_proxy: true))
+    Minitest.assert_nil(Heimdall.client_address({"peer_address": "127.0.0.1", "headers": {}}))
+    Minitest.assert_nil(Heimdall.client_address({"peer_address": "not an address", "headers": {}}))
+  end
+
+  suite.run!()
+end
+
+run_tests()

@@ -337,6 +337,7 @@ surprising `require_cut` later.
 
 ```sh
 facet new <kind> <path>
+facet new graphql <path> --auth
 ```
 
 `facet new` creates a project directory at `<path>` with code, tests and a
@@ -351,6 +352,7 @@ must not.
 | `cli` | A command-line program: `main.d6` passes `ARGV` to the project's `main` and exits with the status it returns. `--version` prints the Cutfile's version, which `File.embed` reads in at compile time. |
 | `web` | A web application served by `gremlin`, with `rack` middleware, both runtime dependencies from the registry. |
 | `graphql` | A GraphQL API built schema-first with `GraphQL::App` (the `graphql` cut) and served by `gremlin`. `lib/schema.graphql` holds the schema, which `File.embed` compiles in, so it needs d6 1.1.0 or later. The example keeps notes in memory: `POST /graphql` runs a query, `GET /schema.graphql` shows the schema, and errors carry a code in `extensions.code`. |
+| `graphql --auth` | The same GraphQL API with accounts, stored in SQLite through `mjolnir`. [`heimdall`](../packages/heimdall/README.md) does the account work:<br>- sign-up, sign-in and sign-out;<br>- password change, reset and email verification, with tokens sent from a mail outbox;<br>- sign-in lockouts and rate limits;<br>- an `@auth(as: ANY \| VERIFIED)` schema directive.<br>Notes belong to an account, and only a verified account can add one. Messages print in the server log until `MAIL_COMMAND` names a sendmail-style command. |
 | `tcp` | A line-based TCP server that uses `IO.poll` to serve every client from one thread. |
 | `udp` | A UDP server that answers each datagram. |
 | `lib` | A library cut ready for `facet check`: a full manifest (version `0.1.0`, MIT `LICENSE`), with the maintainer taken from `git config user.name`/`user.email`, or placeholders when those are unset or unusable. |
@@ -380,7 +382,8 @@ The project's module is the name in CamelCase (`my_app` becomes `MyApp`), so
 `Time` or `StandardError`, collide with minitest's classes, or, for `web` and
 `graphql`, collide with a dependency cut or one of its classes. A `graphql` project also
 can't take the names of the classes its template defines (`note` would collide with
-`struct Note`). `tests/facet_new_test.sh`
+`struct Note`), nor, with or without `--auth`, `heimdall`, `mjolnir`, `arel` or the
+`--auth` template's classes. `tests/facet_new_test.sh`
 builds every kind, runs its tests and entry point, and checks that the
 reserved list still matches the compiler and library sources.
 
@@ -485,6 +488,7 @@ with `facet` like any other cut. The public ones each have a page under
 | `graphsql` | GraphQL-aware SQL selection and association preloading |
 | `gremlin` | Concurrent fiber-based HTTP server with [keep-alive and timing events](networking.md#gremlin-http-and-timing) |
 | `http` | HTTP server and client with reusable sessions and [custom transports](networking.md#http-and-websocket-client-transports) |
+| `heimdall` | Accounts for GraphQL apps on mjolnir: passwords, sessions, reset and verify tokens, rate limits, a mail outbox and `@auth` |
 | `html` | Parse HTML into a tree and query it with CSS selectors |
 | `jobs` | Durable database-backed background jobs |
 | `log_viewer` | Format structured JSON log streams |
