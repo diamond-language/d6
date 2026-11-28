@@ -218,6 +218,16 @@
       "version": "0.3.3"
     },
     {
+      "archive": "resend.tar",
+      "dependencies": {
+        "http": "^0.2.8"
+      },
+      "name": "resend",
+      "sha256": "2b59b1ee2a6df6445a447ca21729c8cdb1e774c7e6dbc717d66cc201de2c2ba1",
+      "size": 14336,
+      "version": "0.1.0"
+    },
+    {
       "archive": "terminal.tar",
       "dependencies": {},
       "name": "terminal",
@@ -240,16 +250,6 @@
       "sha256": "ab87d52582f5d29793c5bf90e3e46796e77e85f14a09459c2624754f7d927685",
       "size": 45568,
       "version": "0.2.6"
-    },
-    {
-      "archive": "resend.tar",
-      "dependencies": {
-        "http": "^0.2.8"
-      },
-      "name": "resend",
-      "sha256": "2b59b1ee2a6df6445a447ca21729c8cdb1e774c7e6dbc717d66cc201de2c2ba1",
-      "size": 14336,
-      "version": "0.1.0"
     }
   ],
   "format": 1
