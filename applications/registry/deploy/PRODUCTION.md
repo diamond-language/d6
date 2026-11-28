@@ -629,3 +629,11 @@ Do not reuse the original deployed 24-cut seed: use the current 18-cut selection
 Run `build/d6 tools/verify_registry_launch.d6 https://cuts.rolld6.codes` to resolve
 all selected cuts into a temporary clean consumer, compare the lock against the
 reviewed inventory, load every cut, and reinstall from the unchanged lockfile.
+
+heimdall 0.1.0, a new cut (#689: accounts for GraphQL apps on mjolnir, taken from Pheint and
+Goblin), was published on 2026-11-28 UTC from main `6705839a`, with one 30-minute credential for
+`diamond-language` scoped to `publish:heimdall` (id 55, revoked afterwards). No registry
+snapshot was taken first; the publication only added rows. The published sha256
+`06c67d4c15d4485a0910b0a5e7e22c00b3c51a941d5658a2e373eab8d06fd03d` matches
+`docs/registry-launch-inventory.json`, and `tools/verify_registry_launch.d6` passed for all 28
+public cuts.
