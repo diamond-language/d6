@@ -644,3 +644,11 @@ snapshot was taken first; the publication only added rows. The published sha256
 `06c67d4c15d4485a0910b0a5e7e22c00b3c51a941d5658a2e373eab8d06fd03d` matches
 `docs/registry-launch-inventory.json`, and `tools/verify_registry_launch.d6` passed for all 28
 public cuts.
+
+gremlin 0.5.12 (#694: request bodies read in linear time) was published on 2026-11-28 UTC from
+main `72962053`, with one 30-minute credential for `diamond-language` scoped to
+`publish:gremlin` (id 57, revoked afterwards). No registry snapshot was taken first; the
+publication only added rows. The published sha256
+`f807ddbad603069975c53420f173d25963aafcb746e47f4e1513fae9eb3e943e` matches
+`docs/registry-launch-inventory.json`, and `tools/verify_registry_launch.d6` passed for all 29
+public cuts (resend 0.1.0 joined the launch selection in the same PR).
