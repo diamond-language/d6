@@ -70,15 +70,21 @@ class NonblockingConnection
   # own retry loop, so WouldBlockError never escapes NonblockingConnection
   # itself.
   def fill_more()
+    chunk = self.read_chunk(4096)
+    if chunk == nil
+      @eof = true
+    else
+      @buffer = @buffer + chunk
+    end
+    nil
+  end
+
+  # Up to `size` bytes from the socket, waiting (via yield) until some arrive, or nil once the
+  # peer has closed.
+  def read_chunk(size)
     loop do
       begin
-        chunk = @socket.read(4096)
-        if chunk == nil
-          @eof = true
-        else
-          @buffer = @buffer + chunk
-        end
-        return nil
+        return @socket.read(size)
       rescue error: WouldBlockError
         yield
       end
@@ -114,8 +120,23 @@ class NonblockingConnection
   # never nil (that's #gets' own EOF signal, not #read's).
   ## `n` bytes, or fewer if the stream ends first.
   def read(n)
-    while @buffer.bytesize() < n && @eof == false
-      self.fill_more()
+    # A body arrives in many chunks. They're gathered in a list and joined once: growing the buffer
+    # chunk by chunk would copy everything read so far each time, which is quadratic in the length.
+    # Each socket read asks for what's still missing (at least 4 KiB, at most 64 KiB), so the
+    # parser's one-byte reads still pull whole packets and leave the extra in the buffer.
+    if @buffer.bytesize() < n && @eof == false
+      parts = [@buffer]
+      have = @buffer.bytesize()
+      while have < n && @eof == false
+        chunk = self.read_chunk([[n - have, 4096].max(), 65536].min())
+        if chunk == nil
+          @eof = true
+        else
+          parts.push(chunk)
+          have = have + chunk.bytesize()
+        end
+      end
+      @buffer = parts.join("")
     end
     took = @buffer.bytesize()
     if took > n

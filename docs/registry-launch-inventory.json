@@ -100,9 +100,9 @@
         "logger": "^0.5.0"
       },
       "name": "gremlin",
-      "sha256": "b6668f88c1db6b561fa1aa821b3cb80598f2a7453c18ecbb65444877d7fe9f29",
-      "size": 67584,
-      "version": "0.5.11"
+      "sha256": "f807ddbad603069975c53420f173d25963aafcb746e47f4e1513fae9eb3e943e",
+      "size": 68608,
+      "version": "0.5.12"
     },
     {
       "archive": "mjolnir.tar",
