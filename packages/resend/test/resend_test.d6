@@ -1,0 +1,96 @@
+require_cut "minitest"
+require_cut "resend"
+
+MESSAGE = "From: accounts@example.com\r\nTo: user@example.com\r\nSubject: Verify your email\r\n" +
+  "Content-Type: text/plain; charset=UTF-8\r\n\r\nhttps://app.test/verify-email?token=abc\r\n"
+
+RECORDED = Channel.new(8)
+REPLIES = Channel.new(8)
+
+# A stand-in for Resend that records each request and answers with the
+# status and body the test queued.
+def fake_resend(request)
+  RECORDED.send(request)
+  reply = REPLIES.receive()
+  [reply[0], {"Content-Type": "application/json"}, reply[1]]
+end
+
+def run_tests()
+  suite = Minitest.new()
+
+  suite.test("parses a sendmail-style message") do
+    payload = Resend.payload(MESSAGE)
+    Minitest.assert_equal("accounts@example.com", payload["from"])
+    Minitest.assert_equal(["user@example.com"], payload["to"])
+    Minitest.assert_equal("Verify your email", payload["subject"])
+    Minitest.assert_equal("https://app.test/verify-email?token=abc\n", payload["text"])
+  end
+
+  suite.test("rejects HTML, missing headers, no header break, and repeated headers") do
+    Minitest.assert_nil(Resend.payload(MESSAGE.sub("text/plain", "text/html")))
+    Minitest.assert_nil(Resend.payload("From: a@example.com\r\nTo: b@example.com\r\n\r\nno subject"))
+    Minitest.assert_nil(Resend.payload("no header break"))
+    Minitest.assert_nil(Resend.payload("To: c@example.com\r\n" + MESSAGE))
+    Minitest.assert_equal("unsupported message", Resend.deliver("no header break", "key", "http://127.0.0.1:1/"))
+  end
+
+  suite.test("reads the key from a file, else RESEND_API_KEY") do
+    File.write("resend_test_key", "re_file_key\n")
+    Minitest.assert_equal("re_file_key", Resend.api_key("resend_test_key"))
+    ENV["RESEND_API_KEY"] = "re_env_key"
+    Minitest.assert_equal("re_env_key", Resend.api_key())
+    ENV.delete("RESEND_API_KEY")
+    Minitest.assert_raises[ArgumentError]() do
+      Resend.api_key()
+    end
+  end
+
+  suite.test("deliver and sender post with the key and idempotency hash and check the response") do
+    ready = Channel.new(1)
+    stop = Channel.new(1)
+    server = Thread.new(http_serve, 0, fake_resend, "127.0.0.1", ready, stop)
+    url = "http://127.0.0.1:#{ready.receive()}/emails"
+
+    REPLIES.send([200, "{\"id\":\"m1\"}"])
+    Minitest.assert_nil(Resend.deliver(MESSAGE, "key", url))
+    request = RECORDED.receive()
+    Minitest.assert_equal("Bearer key", request["headers"]["authorization"])
+    Minitest.assert_equal(Digest.sha256(MESSAGE), request["headers"]["idempotency-key"])
+    Minitest.assert_equal("user@example.com", JSON.parse(request["body"])["to"][0])
+
+    REPLIES.send([422, "{\"message\":\"bad\"}"])
+    Minitest.assert_equal("Resend rejected delivery (HTTP 422)", Resend.deliver(MESSAGE, "key", url))
+    RECORDED.receive()
+
+    REPLIES.send([200, "{}"])
+    Minitest.assert_equal("Resend response missing message ID", Resend.deliver(MESSAGE, "key", url))
+    RECORDED.receive()
+
+    # The Heimdall::Mailer sender: an outbox row in, true out.
+    send = Resend.sender("key2", "Pheint <accounts@example.com>", url)
+    row = {"id": 7, "to_address": "ann@example.com", "subject": "Reset", "body": "https://app.test/reset?token=t"}
+    REPLIES.send([200, "{\"id\":\"m2\"}"])
+    Minitest.assert_equal(true, send.call(row))
+    request = RECORDED.receive()
+    body = JSON.parse(request["body"])
+    Minitest.assert_equal("Bearer key2", request["headers"]["authorization"])
+    Minitest.assert_equal("Pheint <accounts@example.com>", body["from"])
+    Minitest.assert_equal(["ann@example.com"], body["to"])
+    Minitest.assert_equal("Reset", body["subject"])
+    Minitest.assert_equal("https://app.test/reset?token=t", body["text"])
+    first_key = request["headers"]["idempotency-key"]
+
+    # A failure raises (the mailer logs it and retries); the retry reuses the key.
+    REPLIES.send([500, "{}"])
+    Minitest.assert_raises[RuntimeError]() do
+      send.call(row)
+    end
+    Minitest.assert_equal(first_key, RECORDED.receive()["headers"]["idempotency-key"])
+
+    stop.close()
+    server.join()
+  end
+
+  exit(suite.run() ? 0 : 1)
+end
+run_tests()

@@ -1,0 +1,107 @@
+require_cut "http"
+
+# Sends email through the Resend HTTPS API (https://resend.com/docs/api-reference/emails/send-email).
+#
+# - Resend.sender(api_key, from) is a sender for Heimdall::Mailer: the app's
+#   outbox hands it each queued row and it posts the message.
+# - Resend.deliver(raw, api_key) sends one RFC 5322 text/plain message, the
+#   input a sendmail-style command gets; bin/resend-sendmail.d6 wraps it.
+#
+# Each message's SHA-256 is its Idempotency-Key, so a retry of the same
+# message is delivered once.
+module Resend
+  ENDPOINT = "https://api.resend.com/emails"
+  USER_AGENT = "d6-resend/0.1.0"
+  CREDENTIAL = "resend-api-key"
+
+  # The API key: the file at `path` when given, else the systemd credential
+  # `resend-api-key` (LoadCredential=resend-api-key:/etc/<app>/resend-api-key),
+  # else RESEND_API_KEY. Raises ArgumentError when none is set.
+  def self.api_key(path = nil)
+    if path == nil
+      credentials = ENV["CREDENTIALS_DIRECTORY"]
+      if credentials != nil && File.exist?("#{credentials}/#{CREDENTIAL}")
+        path = "#{credentials}/#{CREDENTIAL}"
+      end
+    end
+    key = if path != nil then File.read(path).strip() else ENV["RESEND_API_KEY"] end
+    if key == nil || key == ""
+      raise ArgumentError.new("no Resend API key: set a #{CREDENTIAL} credential, a key file, or RESEND_API_KEY")
+    end
+    key
+  end
+
+  # The JSON payload for one message, or nil when the message is not a
+  # single text/plain part with From, To and Subject headers.
+  def self.payload(raw)
+    normalized = raw.gsub("\r\n", "\n")
+    split_at = normalized.index("\n\n")
+    if split_at == nil then return nil end
+
+    # Header names are case-insensitive; a repeated header is rejected
+    # rather than guessed at.
+    headers = {}
+    normalized[0, split_at].split("\n").each() do |line|
+      colon = line.index(":")
+      if colon == nil then return nil end
+      name = line[0, colon].strip().downcase()
+      if headers.has_key?(name) then return nil end
+      headers[name] = line[colon + 1, line.length()].strip()
+    end
+
+    content_type = headers["content-type"] || "text/plain"
+    media_type = content_type.split(";")[0].strip().downcase()
+    if media_type != "text/plain" then return nil end
+    missing = ["from", "to", "subject"].any?() do |name|
+      headers[name] == nil || headers[name] == ""
+    end
+    if missing then return nil end
+
+    body = normalized[split_at + 2, normalized.length()]
+    {"from": headers["from"], "to": [headers["to"]], "subject": headers["subject"], "text": body}
+  end
+
+  # Posts one payload. Returns nil on success or an error description; never
+  # includes the key.
+  def self.post(payload, api_key, idempotency_key, url = ENDPOINT)
+    headers = {
+      "Authorization": "Bearer #{api_key}",
+      "Content-Type": "application/json",
+      "Idempotency-Key": idempotency_key,
+      "User-Agent": USER_AGENT
+    }
+    timeouts = {"connect_timeout_ms": 20000, "read_timeout_ms": 20000, "write_timeout_ms": 20000}
+    response = http_post(url, JSON.stringify(payload), headers, timeouts)
+
+    # Resend answers 200 with the new message's id.
+    status = response["status"]
+    if status < 200 || status > 299 then return "Resend rejected delivery (HTTP #{status})" end
+    id = JSON.parse(response["body"])["id"]
+    if id == nil then return "Resend response missing message ID" end
+    nil
+  rescue StandardError
+    "Resend request failed"
+  end
+
+  # Sends one RFC 5322 message. Returns nil on success, "unsupported message"
+  # when it isn't single-part text/plain with From, To and Subject, or another
+  # error description.
+  def self.deliver(raw, api_key, url = ENDPOINT)
+    payload = Resend.payload(raw)
+    if payload == nil then return "unsupported message" end
+    Resend.post(payload, api_key, Digest.sha256(raw), url)
+  end
+
+  # A Heimdall::Mailer sender: posts each outbox row (to_address, subject,
+  # body) from `from`. A failure raises, so the mailer logs why and retries.
+  def self.sender(api_key, from, url = ENDPOINT)
+    def send_with_resend(row)
+      payload = {"from": from, "to": [row["to_address"]], "subject": row["subject"], "text": row["body"]}
+      key = Digest.sha256("#{row["id"]}\n#{from}\n#{row["to_address"]}\n#{row["subject"]}\n#{row["body"]}")
+      error = Resend.post(payload, api_key, key, url)
+      if error != nil then raise RuntimeError.new(error) end
+      true
+    end
+    send_with_resend
+  end
+end
