@@ -500,6 +500,10 @@ jobs:
     needs: musl-image
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Pulling the image from ghcr.io needs packages: read while it is private.
+    permissions:
+      contents: read
+      packages: read
     container:
       image: ${{ needs.musl-image.outputs.image }}
       credentials:
