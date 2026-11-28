@@ -236,6 +236,13 @@ verification. Credential 54 was scoped to the four cuts, issued for 30 minutes
 and revoked after publication. Public verification resolved, digest-checked,
 loaded and reinstalled all 27 cuts from an unchanged lockfile.
 
+resend 0.1.0, first published (Pheint's `PHEINT_MAILER=resend`, generalized from Goblin's
+Resend adapter), was published on 2026-11-28 UTC from `resend-cut` `5c4101f7` with a 30-minute
+credential for `diamond-language` scoped to `publish:resend` (id 56, revoked afterwards; its local
+file was removed). No snapshot was taken first; a first publication only adds a cut. The published
+sha256 `2b59b1ee2a6df6445a447ca21729c8cdb1e774c7e6dbc717d66cc201de2c2ba1` matches
+`docs/registry-launch-inventory.json`. No redeploy: the registry doesn't use resend.
+
 Previously `0e482f26c56854c4c41c6c82d093ad04f6569a21` (v1.0.0-rc4, deployed 2026-11-12 UTC (2026-11-11 Pacific)
 with `tools/deploy_registry.sh --revision=v1.0.0-rc4 --force` after its dry run).
 The fresh snapshot at
