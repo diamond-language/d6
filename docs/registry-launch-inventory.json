@@ -100,9 +100,9 @@
         "logger": "^0.5.0"
       },
       "name": "gremlin",
-      "sha256": "b6668f88c1db6b561fa1aa821b3cb80598f2a7453c18ecbb65444877d7fe9f29",
-      "size": 67584,
-      "version": "0.5.11"
+      "sha256": "f807ddbad603069975c53420f173d25963aafcb746e47f4e1513fae9eb3e943e",
+      "size": 68608,
+      "version": "0.5.12"
     },
     {
       "archive": "mjolnir.tar",
@@ -218,6 +218,16 @@
       "version": "0.3.3"
     },
     {
+      "archive": "resend.tar",
+      "dependencies": {
+        "http": "^0.2.8"
+      },
+      "name": "resend",
+      "sha256": "2b59b1ee2a6df6445a447ca21729c8cdb1e774c7e6dbc717d66cc201de2c2ba1",
+      "size": 14336,
+      "version": "0.1.0"
+    },
+    {
       "archive": "terminal.tar",
       "dependencies": {},
       "name": "terminal",
@@ -240,16 +250,6 @@
       "sha256": "ab87d52582f5d29793c5bf90e3e46796e77e85f14a09459c2624754f7d927685",
       "size": 45568,
       "version": "0.2.6"
-    },
-    {
-      "archive": "resend.tar",
-      "dependencies": {
-        "http": "^0.2.8"
-      },
-      "name": "resend",
-      "sha256": "2b59b1ee2a6df6445a447ca21729c8cdb1e774c7e6dbc717d66cc201de2c2ba1",
-      "size": 14336,
-      "version": "0.1.0"
     }
   ],
   "format": 1

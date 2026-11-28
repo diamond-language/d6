@@ -185,6 +185,39 @@ kill "$pid" 2>/dev/null || true
 wait "$pid" 2>/dev/null || true
 rm -f "$out"
 
+# A body much larger than one socket read arrives whole and unchanged: 6 MB of random bytes,
+# NULs and all, come back as the same length and SHA-256. Bodies used to grow the buffer one
+# 4 KiB read at a time, copying it each time, so a body this size took seconds.
+port=19433
+out="$(mktemp)"
+payload="$(mktemp)"
+head -c 6000000 /dev/urandom >"$payload"
+large_body_src="$(cat <<SRCEOF
+require "$package_root/lib/gremlin"
+def run()
+  def handler(request, context)
+    body = request["body"]
+    [200, {"Content-Type": "text/plain"}, "#{body.bytesize()} #{Digest.sha256(body)}"]
+  end
+  gremlin_serve($port, handler, limits: {"body_bytes": 8000000, "timeout_seconds": 10})
+end
+run()
+SRCEOF
+)"
+timeout --foreground 30 "$diamond" -e "$large_body_src" >"$out" 2>&1 &
+pid=$!
+wait_for_port "$port"
+{ exec 3<&- 3>&-; } 2>/dev/null || true
+exec 3<>"/dev/tcp/127.0.0.1/$port"
+{ printf 'POST /upload HTTP/1.1\r\nHost: localhost\r\nContent-Length: 6000000\r\nConnection: close\r\n\r\n'; cat "$payload"; } >&3
+response="$(cat <&3)"
+{ exec 3<&- 3>&-; } 2>/dev/null || true
+expected="6000000 $(sha256sum "$payload" | cut -d' ' -f1)"
+[[ "${response##*$'\r\n\r\n'}" == "$expected" ]]
+kill "$pid" 2>/dev/null || true
+wait "$pid" 2>/dev/null || true
+rm -f "$out" "$payload"
+
 # The actual point of this package: a connection that opens and sends
 # nothing at all must not block any other connection's own progress.
 # http_serve's single blocking accept loop would wedge on this forever --
