@@ -1,0 +1,9 @@
+# The image the test-musl CI job runs in: Alpine with what `make test`
+# needs to build and test d6 against musl. tools/ci_musl_image.sh tags it
+# with a hash of this file and setup.sh, and builds it when that tag is
+# missing.
+FROM docker.io/library/alpine:3.23
+LABEL org.opencontainers.image.source=https://github.com/diamond-language/d6
+LABEL org.opencontainers.image.description="Runs the d6 test suite on musl"
+COPY setup.sh /setup/
+RUN sh /setup/setup.sh && rm -rf /setup

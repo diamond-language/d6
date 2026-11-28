@@ -9,8 +9,24 @@
 #
 # PORTABLE_DISTROS overrides the image list (space separated).
 # PORTABLE_SMOKE_OFFLINE=1 skips the checks that need the network.
+#
+# Stock Ubuntu, Debian and Alpine images lack some of those, so each runs as a
+# seeded image with them already installed (tools/ci_images/portable_smoke/):
+# ghcr.io/diamond-language/d6-portable-smoke:<distro>-<recipe hash>-ARCH,
+# pulled, or built when missing (tools/ci_image.sh; CI_IMAGE_PUSH=true pushes
+# it). So a run installs nothing from the distributions' mirrors.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source tools/ci_image.sh
+recipe=tools/ci_images/portable_smoke
+
+# A build context whose Containerfile seeds $base.
+prepare_smoke() {
+    cp "$recipe/setup.sh" "$1/"
+    printf '%s\n' "FROM $base" \
+        "LABEL org.opencontainers.image.source=https://github.com/diamond-language/d6" \
+        "COPY setup.sh /setup/" "RUN sh /setup/setup.sh && rm -rf /setup" > "$1/Containerfile"
+}
 
 tools="$(cd "${1:-build/portable/d6-linux-$(uname -m)}" && pwd)"
 engine="$(command -v podman || command -v docker || true)"
@@ -33,16 +49,24 @@ for image in $images; do
     fi
     # Debian-family and Alpine images ship without CA certificates or curl,
     # and Alpine without bash; the others already carry all three.
+    run_image="$image"
     case "$image" in
-        *ubuntu*|*debian*) setup="apt-get update -qq && apt-get install -y -qq ca-certificates curl >/dev/null" ;;
-        *alpine*) setup="apk add --no-cache -q ca-certificates curl bash" ;;
-        *) setup="true" ;;
+        *ubuntu*|*debian*|*alpine*)
+            base="$image"
+            distro="$(basename "$image" | tr ':' '-')"
+            key="$distro-$(printf '%s\n' "$base" | cat - "$recipe/setup.sh" | sha256sum | cut -c1-16)"
+            if ! ci_image d6-portable-smoke "$key" prepare_smoke; then
+                echo "FAIL $image (no seeded image)"
+                failed=1
+                continue
+            fi
+            run_image="$CI_IMAGE" ;;
     esac
     if "$engine" run --rm -v "$tools":/opt/d6:ro,Z \
         -v "$PWD/packaging/portable_smoke.d6":/smoke.d6:ro,Z \
         -v "$PWD/packaging/portable_tools_smoke.sh":/smoke.sh:ro,Z \
         -e PORTABLE_SMOKE_OFFLINE="${PORTABLE_SMOKE_OFFLINE:-}" \
-        "$image" sh -c "$setup && PATH=/opt/d6:\$PATH sh /smoke.sh" > "$log" 2>&1; then
+        "$run_image" sh -c "PATH=/opt/d6:\$PATH sh /smoke.sh" > "$log" 2>&1; then
         echo "pass $image"
     else
         echo "FAIL $image"

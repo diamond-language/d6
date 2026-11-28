@@ -1,0 +1,10 @@
+# The builder image for tools/build_portable.sh: Alpine with the build
+# packages, and static libxcrypt and MariaDB Connector/C in /opt. CI pulls it
+# from ghcr.io, so a portable build downloads nothing from Alpine's CDN,
+# archive.mariadb.org or GitHub releases. build_portable.sh tags it with a
+# hash of this file and setup.sh, and builds it when that tag is missing.
+FROM docker.io/library/alpine:3.23
+LABEL org.opencontainers.image.source=https://github.com/diamond-language/d6
+LABEL org.opencontainers.image.description="Builds the static d6 portable tools"
+COPY setup.sh xcrypt.tar.xz mariadb.tar.gz /setup/
+RUN sh /setup/setup.sh && rm -rf /setup

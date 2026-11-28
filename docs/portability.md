@@ -47,7 +47,9 @@ that matrix.
 **Alpine (musl), GCC, x86_64**
 
 On every pull request, `test-musl` runs `make test` plus a curated set of
-focused targets. The corpus excludes `bcrypt.d6` and
+focused targets on Alpine 3.23. Its packages come from a prebuilt image
+(`tools/ci_images/musl_test/`), so the job doesn't depend on Alpine's
+mirrors. The corpus excludes `bcrypt.d6` and
 `active_record_secure_password.d6` because both need the BCrypt support
 described under [musl-specific findings](#musl-specific-findings).
 
